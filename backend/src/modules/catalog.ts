@@ -1,87 +1,39 @@
 import { Router } from "express";
-import { pool } from "../db.js";
-import { syncCatalog } from "../integrations/nexob2b.js";
+import { getProductos, getTaxonomia, type B2BTaxonomia } from "../integrations/nexob2b.js";
+import { b2bContext } from "./auth.js";
 
 export const catalogRouter = Router();
 
+// La taxonomía cambia poco: cache en memoria 1 hora
+let taxonomiaCache: { data: B2BTaxonomia; at: number } | null = null;
+
+/** GET /api/catalog/taxonomia — pasillos y rubros para filtros */
+catalogRouter.get("/taxonomia", async (_req, res, next) => {
+  try {
+    if (!taxonomiaCache || Date.now() - taxonomiaCache.at > 3600_000) {
+      taxonomiaCache = { data: await getTaxonomia(), at: Date.now() };
+    }
+    res.json(taxonomiaCache.data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 /**
- * GET /api/catalog?q=&category=&page=&pageSize=
- * Búsqueda por nombre, EAN o categoría sobre la cache local del catálogo.
+ * GET /api/catalog?q=&rubro_id=&pasillo_id=&mayorista_id=
+ * Catálogo en vivo de NexoB2B: producto maestro → mayoristas → presentaciones.
+ * tiene_alta indica si el comercio puede comprarle a ese mayorista.
  */
 catalogRouter.get("/", async (req, res, next) => {
   try {
-    const q = String(req.query.q ?? "").trim();
-    const category = String(req.query.category ?? "").trim();
-    const page = Math.max(1, Number(req.query.page ?? 1));
-    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize ?? 25)));
-
-    const where: string[] = [];
-    const params: unknown[] = [];
-    if (q) {
-      params.push(`%${q}%`, q);
-      where.push(`(p.name ILIKE $${params.length - 1} OR p.ean = $${params.length})`);
-    }
-    if (category) {
-      params.push(category);
-      where.push(`p.category = $${params.length}`);
-    }
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-
-    params.push(pageSize, (page - 1) * pageSize);
-    const { rows } = await pool.query(
-      `SELECT p.id, p.ean, p.name, p.brand, p.category, p.unit, p.image_url,
-              COUNT(*) OVER() AS total_count,
-              (SELECT MIN(o.price) FROM wholesaler_offers o WHERE o.product_id = p.id) AS best_price,
-              (SELECT COUNT(*) FROM wholesaler_offers o WHERE o.product_id = p.id) AS offer_count
-       FROM products p
-       ${whereSql}
-       ORDER BY p.name
-       LIMIT $${params.length - 1} OFFSET $${params.length}`,
-      params
-    );
-    res.json({
-      total: rows[0] ? Number(rows[0].total_count) : 0,
-      page,
-      pageSize,
-      products: rows.map(({ total_count, ...p }) => p),
+    const { token, comercioId } = await b2bContext(req);
+    const productos = await getProductos(token, comercioId, {
+      q: req.query.q ? String(req.query.q) : undefined,
+      rubroId: req.query.rubro_id ? String(req.query.rubro_id) : undefined,
+      pasilloId: req.query.pasillo_id ? String(req.query.pasillo_id) : undefined,
+      mayoristaId: req.query.mayorista_id ? String(req.query.mayorista_id) : undefined,
     });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/** GET /api/catalog/categories */
-catalogRouter.get("/categories", async (_req, res, next) => {
-  try {
-    const { rows } = await pool.query(
-      "SELECT DISTINCT category FROM products WHERE category IS NOT NULL ORDER BY category"
-    );
-    res.json(rows.map((r) => r.category));
-  } catch (err) {
-    next(err);
-  }
-});
-
-/** GET /api/catalog/:id/offers — ofertas de mayoristas para un producto */
-catalogRouter.get("/:id/offers", async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT id, wholesaler_id, wholesaler_name, price, currency, min_qty,
-              available_stock, conditions, synced_at
-       FROM wholesaler_offers WHERE product_id = $1 ORDER BY price`,
-      [Number(req.params.id)]
-    );
-    res.json(rows);
-  } catch (err) {
-    next(err);
-  }
-});
-
-/** POST /api/catalog/sync — fuerza sincronización manual con NexoB2B */
-catalogRouter.post("/sync", async (_req, res, next) => {
-  try {
-    const result = await syncCatalog();
-    res.json({ synced: result });
+    res.json({ productos });
   } catch (err) {
     next(err);
   }

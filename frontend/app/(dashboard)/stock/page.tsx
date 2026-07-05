@@ -11,7 +11,9 @@ interface StockItem {
 interface Movement {
   id: number; name: string; type: string; quantity: string; reference: string | null; created_at: string;
 }
-interface CatalogProduct { id: number; ean: string; name: string; brand: string | null; category: string | null }
+import type { B2BProducto, B2BListing, B2BPresentacion } from "@/lib/b2b-types";
+
+interface PresentacionElegida { producto: B2BProducto; listing: B2BListing; pres: B2BPresentacion }
 
 const MOVE_LABEL: Record<string, string> = {
   purchase_reception: "Recepción de compra",
@@ -29,8 +31,8 @@ export default function StockPage() {
   const [error, setError] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [catQ, setCatQ] = useState("");
-  const [catResults, setCatResults] = useState<CatalogProduct[]>([]);
-  const [adding, setAdding] = useState<CatalogProduct | null>(null);
+  const [catResults, setCatResults] = useState<B2BProducto[]>([]);
+  const [adding, setAdding] = useState<PresentacionElegida | null>(null);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ q, lowOnly: String(lowOnly) });
@@ -42,15 +44,15 @@ export default function StockPage() {
     api<Movement[]>("/api/stock/movements").then(setMovements).catch(console.error);
   }, [items]);
 
-  // Autocompletar productos del catálogo NexoB2B para carga inicial de stock
+  // Autocompletar contra el catálogo vivo de NexoB2B
   useEffect(() => {
     if (!showAdd || !catQ.trim()) { setCatResults([]); return; }
     const t = setTimeout(async () => {
-      const data = await api<{ products: CatalogProduct[] }>(
-        `/api/catalog?q=${encodeURIComponent(catQ)}&pageSize=8`
+      const data = await api<{ productos: B2BProducto[] }>(
+        `/api/catalog?q=${encodeURIComponent(catQ)}`
       );
-      setCatResults(data.products);
-    }, 250);
+      setCatResults(data.productos.slice(0, 8));
+    }, 300);
     return () => clearTimeout(t);
   }, [catQ, showAdd]);
 
@@ -58,12 +60,21 @@ export default function StockPage() {
     if (!adding) return;
     setError("");
     try {
-      await api("/api/stock/adjust", {
+      await api("/api/stock/add-from-catalog", {
         method: "POST",
         body: JSON.stringify({
-          productId: adding.id,
-          quantityDelta: Number(form.get("qty") ?? 0),
-          reason: "Carga inicial de stock",
+          presentacionId: adding.pres.id,
+          meta: {
+            productoNombre: adding.producto.nombre,
+            presentacionNombre: adding.pres.nombre,
+            ean: adding.pres.ean_propio ?? adding.producto.ean,
+            marca: adding.producto.marca,
+            rubroNombre: adding.producto.rubro_nombre,
+            imagenUrl: adding.producto.imagen_url,
+            alicuotaIva: adding.producto.alicuota_iva,
+            factor: adding.pres.factor,
+          },
+          quantity: Number(form.get("qty") ?? 0),
           cost: form.get("cost") ? Number(form.get("cost")) : undefined,
           salePrice: form.get("salePrice") ? Number(form.get("salePrice")) : undefined,
           minStock: form.get("minStock") ? Number(form.get("minStock")) : undefined,
@@ -120,7 +131,7 @@ export default function StockPage() {
             <>
               <input
                 type="search"
-                placeholder="Buscá en el catálogo por nombre o EAN…"
+                placeholder="Buscá en el catálogo por nombre, marca o EAN…"
                 value={catQ}
                 onChange={(e) => setCatQ(e.target.value)}
                 style={{ width: "100%" }}
@@ -129,14 +140,22 @@ export default function StockPage() {
               {catResults.length > 0 && (
                 <table style={{ marginTop: 8 }}>
                   <tbody>
-                    {catResults.map((p) => (
-                      <tr key={p.id} onClick={() => setAdding(p)} style={{ cursor: "pointer" }}>
-                        <td className="muted">{p.ean}</td>
-                        <td>{p.name}</td>
-                        <td className="muted">{p.brand}</td>
-                        <td><button className="small">Elegir</button></td>
-                      </tr>
-                    ))}
+                    {catResults.flatMap((p) =>
+                      p.mayoristas.slice(0, 1).flatMap((listing) =>
+                        listing.presentaciones.map((pres) => (
+                          <tr
+                            key={pres.id}
+                            onClick={() => setAdding({ producto: p, listing, pres })}
+                            style={{ cursor: "pointer" }}
+                          >
+                            <td className="muted">{pres.ean_propio ?? p.ean}</td>
+                            <td>{p.nombre} — <strong>{pres.nombre}</strong></td>
+                            <td className="muted">{p.marca}</td>
+                            <td><button className="small">Elegir</button></td>
+                          </tr>
+                        ))
+                      )
+                    )}
                   </tbody>
                 </table>
               )}
@@ -146,7 +165,10 @@ export default function StockPage() {
             </>
           ) : (
             <>
-              <p><strong>{adding.name}</strong> <span className="muted">({adding.ean})</span></p>
+              <p>
+                <strong>{adding.producto.nombre} — {adding.pres.nombre}</strong>{" "}
+                <span className="muted">({adding.pres.ean_propio ?? adding.producto.ean})</span>
+              </p>
               <form action={addFromCatalog} className="toolbar">
                 <input name="qty" type="number" step="any" min="0" placeholder="Cantidad inicial *" required style={{ width: 140 }} autoFocus />
                 <input name="cost" type="number" step="0.01" min="0" placeholder="Costo unitario" style={{ width: 130 }} />

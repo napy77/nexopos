@@ -1,63 +1,69 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { api, money } from "@/lib/api";
+import { addToCart } from "@/lib/cart";
+import type { B2BProducto, B2BListing, B2BPresentacion, B2BMayorista } from "@/lib/b2b-types";
 
-interface Product {
-  id: number; ean: string; name: string; brand: string | null;
-  category: string | null; unit: string; best_price: string | null; offer_count: string;
-}
-interface Offer {
-  id: number; wholesaler_id: string; wholesaler_name: string; price: string;
-  currency: string; min_qty: number; available_stock: number | null; conditions: string | null;
-}
-export interface CartLine { productId: number; name: string; wholesalerId: string; wholesalerName: string; quantity: number; unitPrice: number; minQty: number }
+interface Taxonomia { rubros: { id: string; nombre: string }[] }
 
 export default function CatalogoPage() {
   const [q, setQ] = useState("");
-  const [category, setCategory] = useState("");
-  const [categories, setCategories] = useState<string[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState<number | null>(null);
-  const [offers, setOffers] = useState<Offer[]>([]);
+  const [rubroId, setRubroId] = useState("");
+  const [mayoristaId, setMayoristaId] = useState("");
+  const [rubros, setRubros] = useState<Taxonomia["rubros"]>([]);
+  const [mayoristas, setMayoristas] = useState<B2BMayorista[]>([]);
+  const [productos, setProductos] = useState<B2BProducto[]>([]);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    api<Taxonomia>("/api/catalog/taxonomia").then((t) => setRubros(t.rubros)).catch(console.error);
+    api<{ mayoristas: B2BMayorista[] }>("/api/mayoristas").then((d) => setMayoristas(d.mayoristas)).catch(console.error);
+  }, []);
 
   const search = useCallback(async () => {
-    const params = new URLSearchParams({ q, category, page: String(page), pageSize: "25" });
-    const data = await api<{ total: number; products: Product[] }>(`/api/catalog?${params}`);
-    setProducts(data.products);
-    setTotal(data.total);
-  }, [q, category, page]);
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (q.trim()) params.set("q", q.trim());
+      if (rubroId) params.set("rubro_id", rubroId);
+      if (mayoristaId) params.set("mayorista_id", mayoristaId);
+      const data = await api<{ productos: B2BProducto[] }>(`/api/catalog?${params}`);
+      setProductos(data.productos);
+    } finally {
+      setLoading(false);
+    }
+  }, [q, rubroId, mayoristaId]);
 
-  useEffect(() => { search().catch(console.error); }, [search]);
-  useEffect(() => { api<string[]>("/api/catalog/categories").then(setCategories).catch(console.error); }, []);
+  useEffect(() => {
+    const t = setTimeout(() => { search().catch(console.error); }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  async function toggleOffers(productId: number) {
-    if (expanded === productId) { setExpanded(null); return; }
-    setOffers(await api<Offer[]>(`/api/catalog/${productId}/offers`));
-    setExpanded(productId);
-  }
-
-  function addToCart(product: Product, offer: Offer) {
-    const raw = localStorage.getItem("nexopos_purchase_cart");
-    const cart: CartLine[] = raw ? JSON.parse(raw) : [];
-    const existing = cart.find(
-      (l) => l.productId === product.id && l.wholesalerId === offer.wholesaler_id
-    );
-    if (existing) existing.quantity += offer.min_qty;
-    else cart.push({
-      productId: product.id, name: product.name,
-      wholesalerId: offer.wholesaler_id, wholesalerName: offer.wholesaler_name,
-      quantity: offer.min_qty, unitPrice: Number(offer.price), minQty: offer.min_qty,
+  function agregarAlCarrito(producto: B2BProducto, listing: B2BListing, pres: B2BPresentacion) {
+    addToCart({
+      presentacionId: pres.id,
+      mayoristaId: listing.mayorista_id,
+      mayoristaNombre: listing.mayorista_nombre,
+      cantidad: 1,
+      precio: pres.precio,
+      meta: {
+        productoNombre: producto.nombre,
+        presentacionNombre: pres.nombre,
+        ean: pres.ean_propio ?? producto.ean,
+        marca: producto.marca,
+        rubroNombre: producto.rubro_nombre,
+        imagenUrl: producto.imagen_url,
+        alicuotaIva: producto.alicuota_iva,
+        factor: pres.factor,
+      },
     });
-    localStorage.setItem("nexopos_purchase_cart", JSON.stringify(cart));
-    setMessage(`"${product.name}" agregado al carrito de compras (ver Compras)`);
+    setMessage(`"${producto.nombre} — ${pres.nombre}" agregado al carrito (ver Compras)`);
     setTimeout(() => setMessage(""), 3000);
   }
-
-  const pages = Math.max(1, Math.ceil(total / 25));
 
   return (
     <div>
@@ -65,92 +71,115 @@ export default function CatalogoPage() {
       <div className="toolbar">
         <input
           type="search"
-          placeholder="Buscar por nombre o EAN…"
+          placeholder="Buscar por nombre, marca o EAN…"
           value={q}
-          onChange={(e) => { setQ(e.target.value); setPage(1); }}
+          onChange={(e) => setQ(e.target.value)}
         />
-        <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }}>
-          <option value="">Todas las categorías</option>
-          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        <select value={rubroId} onChange={(e) => setRubroId(e.target.value)}>
+          <option value="">Todos los rubros</option>
+          {rubros.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
         </select>
-        <span className="muted">{total} productos</span>
+        <select value={mayoristaId} onChange={(e) => setMayoristaId(e.target.value)}>
+          <option value="">Todos los mayoristas</option>
+          {mayoristas.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.nombre}{m.solicitud?.estado === "aceptado" ? "" : " (sin alta)"}
+            </option>
+          ))}
+        </select>
+        {loading && <span className="muted">Buscando…</span>}
+        <span className="muted">{productos.length} productos</span>
       </div>
       {message && <p className="badge ok">{message}</p>}
 
       <div className="card">
         <table>
           <thead>
-            <tr>
-              <th>EAN</th><th>Producto</th><th>Marca</th><th>Categoría</th>
-              <th className="num">Mejor precio</th><th className="num">Ofertas</th><th></th>
-            </tr>
+            <tr><th></th><th>Producto</th><th>Marca</th><th>Rubro</th><th className="num">Desde</th><th className="num">Mayoristas</th><th></th></tr>
           </thead>
           <tbody>
-            {products.map((p) => (
-              <PRow
-                key={p.id} p={p}
-                expanded={expanded === p.id} offers={offers}
-                onToggle={() => toggleOffers(p.id)}
-                onAdd={(offer) => addToCart(p, offer)}
+            {productos.map((p) => (
+              <ProductoRow
+                key={p.id}
+                producto={p}
+                expanded={expanded === p.id}
+                onToggle={() => setExpanded(expanded === p.id ? null : p.id)}
+                onAdd={agregarAlCarrito}
               />
             ))}
+            {productos.length === 0 && !loading && (
+              <tr><td colSpan={7} className="muted">Sin resultados. Probá con otra búsqueda o filtro.</td></tr>
+            )}
           </tbody>
         </table>
-        <div className="toolbar" style={{ marginTop: 12 }}>
-          <button className="secondary small" disabled={page <= 1} onClick={() => setPage(page - 1)}>← Anterior</button>
-          <span className="muted">Página {page} de {pages}</span>
-          <button className="secondary small" disabled={page >= pages} onClick={() => setPage(page + 1)}>Siguiente →</button>
-        </div>
       </div>
     </div>
   );
 }
 
-function PRow({ p, expanded, offers, onToggle, onAdd }: {
-  p: Product; expanded: boolean; offers: Offer[];
-  onToggle: () => void; onAdd: (o: Offer) => void;
+function ProductoRow({ producto, expanded, onToggle, onAdd }: {
+  producto: B2BProducto;
+  expanded: boolean;
+  onToggle: () => void;
+  onAdd: (p: B2BProducto, l: B2BListing, pres: B2BPresentacion) => void;
 }) {
+  const precios = producto.mayoristas.flatMap((m) => m.presentaciones.map((pr) => pr.precio / (pr.factor || 1)));
+  const desde = precios.length ? Math.min(...precios) : null;
+
   return (
     <>
-      <tr>
-        <td className="muted">{p.ean}</td>
-        <td>{p.name}</td>
-        <td>{p.brand}</td>
-        <td>{p.category}</td>
-        <td className="num">{p.best_price ? money(p.best_price) : "—"}</td>
-        <td className="num">{p.offer_count}</td>
-        <td>
-          <button className="small secondary" onClick={onToggle}>
-            {expanded ? "Ocultar" : "Ver ofertas"}
-          </button>
+      <tr onClick={onToggle} style={{ cursor: "pointer" }}>
+        <td style={{ width: 44 }}>
+          {producto.imagen_url
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={producto.imagen_url} alt="" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }} />
+            : <span style={{ fontSize: 22 }}>📦</span>}
         </td>
+        <td>
+          <strong>{producto.nombre}</strong>
+          {producto.ean && <span className="muted"> · {producto.ean}</span>}
+        </td>
+        <td>{producto.marca ?? "—"}</td>
+        <td>{producto.rubro_nombre ?? "—"}</td>
+        <td className="num">{desde !== null ? `${money(desde)}/u` : "—"}</td>
+        <td className="num">{producto.mayoristas.length}</td>
+        <td><button className="small secondary">{expanded ? "Ocultar" : "Ver ofertas"}</button></td>
       </tr>
-      {expanded && (
-        <tr>
-          <td colSpan={7} style={{ background: "#f9fafb" }}>
+      {expanded && producto.mayoristas.map((listing) => (
+        <tr key={listing.listing_id}>
+          <td></td>
+          <td colSpan={6} style={{ background: "#f9fafb" }}>
+            <div className="toolbar" style={{ marginBottom: 4 }}>
+              <strong>{listing.mayorista_nombre}</strong>
+              {listing.tiene_alta
+                ? <span className="badge ok">con alta</span>
+                : <span className="badge warn">sin alta — <Link href="/mayoristas">solicitar</Link></span>}
+            </div>
             <table>
               <thead>
-                <tr>
-                  <th>Mayorista</th><th className="num">Precio</th><th className="num">Mínimo</th>
-                  <th className="num">Stock disp.</th><th>Condiciones</th><th></th>
-                </tr>
+                <tr><th>Presentación</th><th className="num">Precio</th><th className="num">Precio lista</th><th className="num">Stock</th><th></th></tr>
               </thead>
               <tbody>
-                {offers.map((o) => (
-                  <tr key={o.id}>
-                    <td>{o.wholesaler_name}</td>
-                    <td className="num">{money(o.price)}</td>
-                    <td className="num">{o.min_qty}</td>
-                    <td className="num">{o.available_stock ?? "—"}</td>
-                    <td className="muted">{o.conditions ?? "—"}</td>
-                    <td><button className="small" onClick={() => onAdd(o)}>Agregar al carrito</button></td>
+                {listing.presentaciones.map((pres) => (
+                  <tr key={pres.id}>
+                    <td>{pres.nombre}{pres.factor > 1 && <span className="muted"> (x{pres.factor})</span>}</td>
+                    <td className="num"><strong>{money(pres.precio)}</strong></td>
+                    <td className="num muted">{pres.precio_lista ? money(pres.precio_lista) : "—"}</td>
+                    <td className="num">{pres.stock ?? "disponible"}</td>
+                    <td>
+                      {listing.tiene_alta && (
+                        <button className="small" onClick={() => onAdd(producto, listing, pres)}>
+                          Agregar al carrito
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </td>
         </tr>
-      )}
+      ))}
     </>
   );
 }

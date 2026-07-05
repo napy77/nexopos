@@ -8,7 +8,6 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET ?? "dev-secret",
   nexob2b: {
     apiUrl: process.env.NEXOB2B_API_URL || null, // null → modo mock
-    apiKey: process.env.NEXOB2B_API_KEY ?? "",
+    publishableKey: process.env.NEXOB2B_PUBLISHABLE_KEY ?? "",
   },
-  catalogSyncIntervalMin: Number(process.env.CATALOG_SYNC_INTERVAL_MIN ?? 60),
 };

@@ -4,9 +4,10 @@ import { config } from "./config.js";
 import { runMigrations } from "./db.js";
 import { requireAuth } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/error.js";
-import { syncCatalog, isMockMode } from "./integrations/nexob2b.js";
+import { isMockMode } from "./integrations/nexob2b.js";
 import { authRouter } from "./modules/auth.js";
 import { catalogRouter } from "./modules/catalog.js";
+import { mayoristasRouter } from "./modules/mayoristas.js";
 import { purchasesRouter } from "./modules/purchases.js";
 import { stockRouter } from "./modules/stock.js";
 import { salesRouter } from "./modules/sales.js";
@@ -22,6 +23,7 @@ app.get("/health", (_req, res) => res.json({ ok: true, mockMode: isMockMode() })
 
 app.use("/api/auth", authRouter);
 app.use("/api/catalog", requireAuth, catalogRouter);
+app.use("/api/mayoristas", requireAuth, mayoristasRouter);
 app.use("/api/purchases", requireAuth, purchasesRouter);
 app.use("/api/stock", requireAuth, stockRouter);
 app.use("/api/sales", requireAuth, salesRouter);
@@ -33,20 +35,6 @@ app.use(errorHandler);
 
 async function main() {
   await runMigrations();
-
-  // Sincronización inicial + periódica del catálogo de NexoB2B
-  try {
-    const result = await syncCatalog();
-    console.log(
-      `[sync] catálogo sincronizado${isMockMode() ? " (modo mock)" : ""}: ` +
-        `${result.products} productos, ${result.offers} ofertas`
-    );
-  } catch (err) {
-    console.error("[sync] fallo en la sincronización inicial:", err);
-  }
-  setInterval(() => {
-    syncCatalog().catch((err) => console.error("[sync] fallo en sincronización periódica:", err));
-  }, config.catalogSyncIntervalMin * 60_000);
 
   app.listen(config.port, () => {
     console.log(`NexoPOS backend escuchando en http://localhost:${config.port}`);

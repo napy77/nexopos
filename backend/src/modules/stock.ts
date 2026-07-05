@@ -80,6 +80,89 @@ stockRouter.post("/adjust", async (req, res, next) => {
   }
 });
 
+const addFromCatalogSchema = z.object({
+  presentacionId: z.string(),
+  meta: z.object({
+    productoNombre: z.string(),
+    presentacionNombre: z.string(),
+    ean: z.string().nullable().optional(),
+    marca: z.string().nullable().optional(),
+    rubroNombre: z.string().nullable().optional(),
+    imagenUrl: z.string().nullable().optional(),
+    alicuotaIva: z.coerce.number().nullable().optional(),
+    factor: z.coerce.number().optional(),
+  }),
+  quantity: z.coerce.number().nonnegative(),
+  cost: z.coerce.number().nonnegative().optional(),
+  salePrice: z.coerce.number().positive().optional(),
+  minStock: z.coerce.number().nonnegative().optional(),
+});
+
+/**
+ * POST /api/stock/add-from-catalog
+ * Carga inicial de mercadería que el comercio ya tiene en el local:
+ * crea el producto local (nivel presentación de NexoB2B) y su stock.
+ */
+stockRouter.post("/add-from-catalog", async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const body = addFromCatalogSchema.parse(req.body);
+    const commerceId = req.auth.commerceId;
+    await client.query("BEGIN");
+    const {
+      rows: [product],
+    } = await client.query(
+      `INSERT INTO products (nexob2b_id, ean, name, brand, category, unit, image_url, alicuota_iva, factor, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+       ON CONFLICT (nexob2b_id) DO UPDATE SET
+         ean = COALESCE(EXCLUDED.ean, products.ean), name = EXCLUDED.name,
+         brand = COALESCE(EXCLUDED.brand, products.brand),
+         category = COALESCE(EXCLUDED.category, products.category),
+         image_url = COALESCE(EXCLUDED.image_url, products.image_url),
+         alicuota_iva = COALESCE(EXCLUDED.alicuota_iva, products.alicuota_iva),
+         synced_at = now()
+       RETURNING id`,
+      [
+        body.presentacionId,
+        body.meta.ean ?? null,
+        `${body.meta.productoNombre} — ${body.meta.presentacionNombre}`,
+        body.meta.marca ?? null,
+        body.meta.rubroNombre ?? null,
+        body.meta.presentacionNombre,
+        body.meta.imagenUrl ?? null,
+        body.meta.alicuotaIva ?? null,
+        body.meta.factor ?? 1,
+      ]
+    );
+    await client.query(
+      `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price, min_stock, updated_at)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), now())
+       ON CONFLICT (commerce_id, product_id) DO UPDATE SET
+         quantity = stock_items.quantity + EXCLUDED.quantity,
+         cost = COALESCE($4, stock_items.cost),
+         sale_price = COALESCE($5, stock_items.sale_price),
+         min_stock = COALESCE($6, stock_items.min_stock),
+         updated_at = now()`,
+      [commerceId, product.id, body.quantity, body.cost ?? null, body.salePrice ?? null, body.minStock ?? null]
+    );
+    if (body.quantity > 0) {
+      await client.query(
+        `INSERT INTO stock_movements (commerce_id, product_id, type, quantity, reference)
+         VALUES ($1, $2, 'manual_adjustment', $3, 'Carga inicial de stock')`,
+        [commerceId, product.id, body.quantity]
+      );
+    }
+    await client.query("COMMIT");
+    await audit(commerceId, "stock.add_from_catalog", "products", product.id, { presentacionId: body.presentacionId });
+    res.status(201).json({ ok: true, productId: product.id });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
 /** GET /api/stock/movements?productId= — historial de movimientos */
 stockRouter.get("/movements", async (req, res, next) => {
   try {
