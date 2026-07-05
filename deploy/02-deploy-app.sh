@@ -61,9 +61,13 @@ systemctl enable --now nexopos-backend nexopos-frontend
 systemctl restart nexopos-backend nexopos-frontend
 
 echo "══ 5/5 · nginx ══════════════════════════════════════════════════"
-cp "$APP_DIR/deploy/nginx-nexopos.conf" /etc/nginx/sites-available/nexopos
-ln -sf /etc/nginx/sites-available/nexopos /etc/nginx/sites-enabled/nexopos
-rm -f /etc/nginx/sites-enabled/default
+# Solo instalar la config la primera vez: después la administra certbot
+# (pisar el archivo borraría el bloque SSL que certbot agrega)
+if [[ ! -f /etc/nginx/sites-available/nexopos ]]; then
+  cp "$APP_DIR/deploy/nginx-nexopos.conf" /etc/nginx/sites-available/nexopos
+  ln -sf /etc/nginx/sites-available/nexopos /etc/nginx/sites-enabled/nexopos
+  rm -f /etc/nginx/sites-enabled/default
+fi
 nginx -t && systemctl reload nginx
 
 echo
