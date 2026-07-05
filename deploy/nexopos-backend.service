@@ -1,0 +1,19 @@
+[Unit]
+Description=NexoPOS backend (API)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=nexopos
+WorkingDirectory=/opt/nexopos/backend
+EnvironmentFile=/opt/nexopos/backend/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

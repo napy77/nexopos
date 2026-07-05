@@ -1,0 +1,19 @@
+[Unit]
+Description=NexoPOS frontend (Next.js)
+After=network.target nexopos-backend.service
+
+[Service]
+Type=simple
+User=nexopos
+WorkingDirectory=/opt/nexopos/frontend
+Environment=NODE_ENV=production
+Environment=BACKEND_URL=http://localhost:4000
+ExecStart=/usr/bin/npx next start -p 3000
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
