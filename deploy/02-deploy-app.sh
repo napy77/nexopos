@@ -22,11 +22,12 @@ fi
 
 echo "══ 1/5 · Código fuente ══════════════════════════════════════════"
 if [[ -d "$APP_DIR/.git" ]]; then
-  git -C "$APP_DIR" pull --ff-only
+  # git como el dueño del repo (root lo rechaza por "dubious ownership")
+  sudo -u nexopos git -C "$APP_DIR" pull --ff-only
 else
   git clone "$REPO_URL" "$APP_DIR"
+  chown -R nexopos:nexopos "$APP_DIR"
 fi
-chown -R nexopos:nexopos "$APP_DIR"
 
 echo "══ 2/5 · Backend: dependencias, .env y build ════════════════════"
 ENV_FILE="$APP_DIR/backend/.env"
