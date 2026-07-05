@@ -29,7 +29,7 @@ catalogRouter.get("/", async (req, res, next) => {
 
     params.push(pageSize, (page - 1) * pageSize);
     const { rows } = await pool.query(
-      `SELECT p.id, p.ean, p.name, p.brand, p.category, p.unit,
+      `SELECT p.id, p.ean, p.name, p.brand, p.category, p.unit, p.image_url,
               COUNT(*) OVER() AS total_count,
               (SELECT MIN(o.price) FROM wholesaler_offers o WHERE o.product_id = p.id) AS best_price,
               (SELECT COUNT(*) FROM wholesaler_offers o WHERE o.product_id = p.id) AS offer_count

@@ -6,19 +6,21 @@ import { HttpError } from "../middleware/error.js";
 
 export const salesRouter = Router();
 
+// coerce: acepta números que lleguen como string (ids que el cliente
+// obtuvo de respuestas JSON, inputs de formularios)
 const createSaleSchema = z.object({
   items: z
     .array(
       z.object({
-        productId: z.number().int(),
-        quantity: z.number().positive(),
-        unitPrice: z.number().positive().optional(), // si no viene, usa sale_price del stock
+        productId: z.coerce.number().int(),
+        quantity: z.coerce.number().positive(),
+        unitPrice: z.coerce.number().positive().optional(), // si no viene, usa sale_price del stock
       })
     )
     .min(1),
   paymentMethod: z.enum(["cash", "card", "account"]),
-  customerId: z.number().int().optional(),
-  discount: z.number().nonnegative().default(0),
+  customerId: z.coerce.number().int().optional(),
+  discount: z.coerce.number().nonnegative().default(0),
 });
 
 /**

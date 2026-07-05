@@ -63,7 +63,7 @@ customersRouter.get("/:id/transactions", async (req, res, next) => {
   }
 });
 
-const paymentSchema = z.object({ amount: z.number().positive(), note: z.string().optional() });
+const paymentSchema = z.object({ amount: z.coerce.number().positive(), note: z.string().optional() });
 
 /** POST /api/customers/:id/payments — registra un pago que baja la deuda */
 customersRouter.post("/:id/payments", async (req, res, next) => {

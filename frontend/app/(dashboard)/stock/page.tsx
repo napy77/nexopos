@@ -11,6 +11,7 @@ interface StockItem {
 interface Movement {
   id: number; name: string; type: string; quantity: string; reference: string | null; created_at: string;
 }
+interface CatalogProduct { id: number; ean: string; name: string; brand: string | null; category: string | null }
 
 const MOVE_LABEL: Record<string, string> = {
   purchase_reception: "Recepción de compra",
@@ -26,6 +27,10 @@ export default function StockPage() {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [editing, setEditing] = useState<StockItem | null>(null);
   const [error, setError] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [catQ, setCatQ] = useState("");
+  const [catResults, setCatResults] = useState<CatalogProduct[]>([]);
+  const [adding, setAdding] = useState<CatalogProduct | null>(null);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ q, lowOnly: String(lowOnly) });
@@ -36,6 +41,42 @@ export default function StockPage() {
   useEffect(() => {
     api<Movement[]>("/api/stock/movements").then(setMovements).catch(console.error);
   }, [items]);
+
+  // Autocompletar productos del catálogo NexoB2B para carga inicial de stock
+  useEffect(() => {
+    if (!showAdd || !catQ.trim()) { setCatResults([]); return; }
+    const t = setTimeout(async () => {
+      const data = await api<{ products: CatalogProduct[] }>(
+        `/api/catalog?q=${encodeURIComponent(catQ)}&pageSize=8`
+      );
+      setCatResults(data.products);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [catQ, showAdd]);
+
+  async function addFromCatalog(form: FormData) {
+    if (!adding) return;
+    setError("");
+    try {
+      await api("/api/stock/adjust", {
+        method: "POST",
+        body: JSON.stringify({
+          productId: adding.id,
+          quantityDelta: Number(form.get("qty") ?? 0),
+          reason: "Carga inicial de stock",
+          cost: form.get("cost") ? Number(form.get("cost")) : undefined,
+          salePrice: form.get("salePrice") ? Number(form.get("salePrice")) : undefined,
+          minStock: form.get("minStock") ? Number(form.get("minStock")) : undefined,
+        }),
+      });
+      setAdding(null);
+      setCatQ("");
+      setShowAdd(false);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al agregar producto");
+    }
+  }
 
   async function saveAdjust(form: FormData) {
     if (!editing) return;
@@ -66,8 +107,58 @@ export default function StockPage() {
         <label>
           <input type="checkbox" checked={lowOnly} onChange={(e) => setLowOnly(e.target.checked)} /> Solo stock bajo
         </label>
+        <button onClick={() => { setShowAdd(!showAdd); setAdding(null); }}>
+          + Agregar producto del catálogo
+        </button>
       </div>
       {error && <p className="error">{error}</p>}
+
+      {showAdd && (
+        <div className="card" style={{ border: "2px solid var(--primary)" }}>
+          <h2>Agregar producto al stock</h2>
+          {!adding ? (
+            <>
+              <input
+                type="search"
+                placeholder="Buscá en el catálogo por nombre o EAN…"
+                value={catQ}
+                onChange={(e) => setCatQ(e.target.value)}
+                style={{ width: "100%" }}
+                autoFocus
+              />
+              {catResults.length > 0 && (
+                <table style={{ marginTop: 8 }}>
+                  <tbody>
+                    {catResults.map((p) => (
+                      <tr key={p.id} onClick={() => setAdding(p)} style={{ cursor: "pointer" }}>
+                        <td className="muted">{p.ean}</td>
+                        <td>{p.name}</td>
+                        <td className="muted">{p.brand}</td>
+                        <td><button className="small">Elegir</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {catQ.trim() && catResults.length === 0 && (
+                <p className="muted" style={{ marginTop: 8 }}>Sin resultados en el catálogo.</p>
+              )}
+            </>
+          ) : (
+            <>
+              <p><strong>{adding.name}</strong> <span className="muted">({adding.ean})</span></p>
+              <form action={addFromCatalog} className="toolbar">
+                <input name="qty" type="number" step="any" min="0" placeholder="Cantidad inicial *" required style={{ width: 140 }} autoFocus />
+                <input name="cost" type="number" step="0.01" min="0" placeholder="Costo unitario" style={{ width: 130 }} />
+                <input name="salePrice" type="number" step="0.01" min="0.01" placeholder="Precio de venta" style={{ width: 140 }} />
+                <input name="minStock" type="number" step="any" min="0" placeholder="Stock mínimo" style={{ width: 120 }} />
+                <button type="submit">Agregar</button>
+                <button type="button" className="secondary" onClick={() => setAdding(null)}>Volver</button>
+              </form>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="card">
         <table>

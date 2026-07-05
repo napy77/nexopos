@@ -18,7 +18,7 @@ stockRouter.get("/", async (req, res, next) => {
     }
     if (lowOnly) where += " AND s.quantity <= s.min_stock";
     const { rows } = await pool.query(
-      `SELECT s.id, s.product_id, p.name, p.ean, p.category, p.unit,
+      `SELECT s.id, s.product_id, p.name, p.ean, p.category, p.unit, p.image_url,
               s.quantity, s.cost, s.sale_price, s.min_stock, s.updated_at,
               (s.quantity <= s.min_stock) AS low_stock
        FROM stock_items s JOIN products p ON p.id = s.product_id
@@ -33,11 +33,12 @@ stockRouter.get("/", async (req, res, next) => {
 });
 
 const adjustSchema = z.object({
-  productId: z.number().int(),
-  quantityDelta: z.number(),        // positivo entra, negativo sale
+  productId: z.coerce.number().int(),
+  quantityDelta: z.coerce.number(),  // positivo entra, negativo sale
   reason: z.string().min(1),
-  salePrice: z.number().positive().optional(),
-  minStock: z.number().nonnegative().optional(),
+  cost: z.coerce.number().nonnegative().optional(),
+  salePrice: z.coerce.number().positive().optional(),
+  minStock: z.coerce.number().nonnegative().optional(),
 });
 
 /** POST /api/stock/adjust — ajuste manual con motivo (auditable) */
@@ -50,15 +51,16 @@ stockRouter.post("/adjust", async (req, res, next) => {
     const {
       rows: [item],
     } = await client.query(
-      `INSERT INTO stock_items (commerce_id, product_id, quantity, sale_price, min_stock, updated_at)
-       VALUES ($1, $2, GREATEST($3, 0), $4, COALESCE($5, 0), now())
+      `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price, min_stock, updated_at)
+       VALUES ($1, $2, GREATEST($3, 0), $4, $5, COALESCE($6, 0), now())
        ON CONFLICT (commerce_id, product_id) DO UPDATE SET
          quantity = GREATEST(stock_items.quantity + $3, 0),
-         sale_price = COALESCE($4, stock_items.sale_price),
-         min_stock = COALESCE($5, stock_items.min_stock),
+         cost = COALESCE($4, stock_items.cost),
+         sale_price = COALESCE($5, stock_items.sale_price),
+         min_stock = COALESCE($6, stock_items.min_stock),
          updated_at = now()
        RETURNING id, quantity`,
-      [commerceId, body.productId, body.quantityDelta, body.salePrice ?? null, body.minStock ?? null]
+      [commerceId, body.productId, body.quantityDelta, body.cost ?? null, body.salePrice ?? null, body.minStock ?? null]
     );
     if (body.quantityDelta !== 0) {
       await client.query(

@@ -22,6 +22,7 @@ export interface NexoProduct {
   brand: string | null;
   category: string | null;
   unit: string;
+  imageUrl?: string | null;
 }
 
 export interface NexoOffer {
@@ -136,12 +137,13 @@ export async function syncCatalog(): Promise<{ products: number; offers: number 
     await client.query("BEGIN");
     for (const p of products) {
       await client.query(
-        `INSERT INTO products (nexob2b_id, ean, name, brand, category, unit, synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())
+        `INSERT INTO products (nexob2b_id, ean, name, brand, category, unit, image_url, synced_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
          ON CONFLICT (nexob2b_id) DO UPDATE SET
            ean = EXCLUDED.ean, name = EXCLUDED.name, brand = EXCLUDED.brand,
-           category = EXCLUDED.category, unit = EXCLUDED.unit, synced_at = now()`,
-        [p.id, p.ean, p.name, p.brand, p.category, p.unit]
+           category = EXCLUDED.category, unit = EXCLUDED.unit,
+           image_url = EXCLUDED.image_url, synced_at = now()`,
+        [p.id, p.ean, p.name, p.brand, p.category, p.unit, p.imageUrl ?? null]
       );
     }
     for (const o of offers) {

@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { config } from "./config.js";
 
+// BIGINT (ids, contadores) llega como string por default; nuestros ids
+// entran cómodos en Number y el frontend los necesita numéricos.
+pg.types.setTypeParser(20, (v) => Number(v));
+
 export const pool = new pg.Pool({ connectionString: config.databaseUrl });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
