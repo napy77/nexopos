@@ -128,11 +128,18 @@ async function api<T>(path: string, opts: { token?: string; method?: string; bod
   };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
 
-  const res = await fetch(`${config.nexob2b.apiUrl}${path}`, {
-    method: opts.method ?? "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${config.nexob2b.apiUrl}${path}`, {
+      method: opts.method ?? "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch (err) {
+    // Falla de red (DNS, NAT hairpin, servicio caído): no es un 500 nuestro
+    const detail = err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : "error de red";
+    throw new HttpError(502, `No se pudo conectar con NexoB2B: ${detail}`);
+  }
 
   if (!res.ok) {
     let message = `NexoB2B respondió ${res.status}`;
