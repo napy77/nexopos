@@ -8,7 +8,9 @@ interface Daily {
   tickets: number;
   total: string;
   cash: string;
+  wallet: string;
   card: string;
+  transfer: string;
   account: string;
   topProducts: { name: string; quantity: string; revenue: string }[];
 }
@@ -36,15 +38,23 @@ export default function DashboardPage() {
           <div className="muted">{daily?.tickets ?? 0} tickets</div>
         </div>
         <div className="card">
-          <div className="metric-label">Efectivo</div>
+          <div className="metric-label">💵 Efectivo</div>
           <div className="metric">{daily ? money(daily.cash) : "…"}</div>
         </div>
         <div className="card">
-          <div className="metric-label">Tarjeta</div>
+          <div className="metric-label">📱 Billetera</div>
+          <div className="metric">{daily ? money(daily.wallet) : "…"}</div>
+        </div>
+        <div className="card">
+          <div className="metric-label">💳 Tarjeta</div>
           <div className="metric">{daily ? money(daily.card) : "…"}</div>
         </div>
         <div className="card">
-          <div className="metric-label">Cuenta corriente</div>
+          <div className="metric-label">🏦 Transferencia</div>
+          <div className="metric">{daily ? money(daily.transfer) : "…"}</div>
+        </div>
+        <div className="card">
+          <div className="metric-label">📒 Cuenta corriente</div>
           <div className="metric">{daily ? money(daily.account) : "…"}</div>
         </div>
       </div>

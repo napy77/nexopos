@@ -14,7 +14,9 @@ reportsRouter.get("/daily", async (req, res, next) => {
       `SELECT COUNT(*)::int AS tickets,
               COALESCE(SUM(total), 0) AS total,
               COALESCE(SUM(total) FILTER (WHERE payment_method = 'cash'), 0) AS cash,
+              COALESCE(SUM(total) FILTER (WHERE payment_method = 'wallet'), 0) AS wallet,
               COALESCE(SUM(total) FILTER (WHERE payment_method = 'card'), 0) AS card,
+              COALESCE(SUM(total) FILTER (WHERE payment_method = 'transfer'), 0) AS transfer,
               COALESCE(SUM(total) FILTER (WHERE payment_method = 'account'), 0) AS account
        FROM sales WHERE commerce_id = $1 AND created_at::date = $2::date`,
       [commerceId, date]
