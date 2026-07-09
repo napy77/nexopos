@@ -6,7 +6,7 @@ import { requireAuth } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/error.js";
 import { isMockMode } from "./integrations/nexob2b.js";
 import { authRouter } from "./modules/auth.js";
-import { catalogRouter } from "./modules/catalog.js";
+import { catalogRouter, refreshProductTaxonomy } from "./modules/catalog.js";
 import { mayoristasRouter } from "./modules/mayoristas.js";
 import { purchasesRouter } from "./modules/purchases.js";
 import { stockRouter } from "./modules/stock.js";
@@ -35,6 +35,14 @@ app.use(errorHandler);
 
 async function main() {
   await runMigrations();
+
+  // Sincronizar nombres de taxonomía (pasillo/rubro/subrubro) al iniciar y cada 12 h
+  refreshProductTaxonomy()
+    .then(() => console.log("[taxonomia] nombres sincronizados con NexoB2B"))
+    .catch((err) => console.error("[taxonomia] fallo la sincronización:", err));
+  setInterval(() => {
+    refreshProductTaxonomy().catch((err) => console.error("[taxonomia] fallo la sincronización:", err));
+  }, 12 * 3600_000);
 
   app.listen(config.port, () => {
     console.log(`NexoPOS backend escuchando en http://localhost:${config.port}`);

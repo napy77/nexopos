@@ -27,9 +27,19 @@ export interface B2BProducto {
   unidad_base: string | null;
   alicuota_iva: number | null;
   imagen_url: string | null;
+  pasillo_id: string | null;
+  pasillo_nombre: string | null;
   rubro_id: string | null;
   rubro_nombre: string | null;
+  subrubro_id: string | null;
+  subrubro_nombre: string | null;
   mayoristas: B2BListing[];
+}
+
+export interface B2BTaxonomia {
+  pasillos: { id: string; nombre: string }[];
+  rubros: { id: string; nombre: string; pasillo_id: string | null }[];
+  subrubros: { id: string; nombre: string; rubro_id: string }[];
 }
 
 export interface B2BMayorista {

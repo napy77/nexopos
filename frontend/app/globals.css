@@ -227,14 +227,17 @@ button.small { padding: 4px 10px; font-size: 12px; }
   width: min(640px, 92vw); max-height: 80vh; overflow-y: auto;
 }
 
-/* Chips de rubros */
+/* Chips de taxonomía (pasillo → rubro → subrubro) */
 .cat-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.cat-chips-sub { margin: 0 0 10px 12px; }
 .chip {
   background: #fff; color: var(--text); border: 1px solid var(--border);
   border-radius: 20px; padding: 8px 14px; font-weight: 500;
 }
 .chip:hover { background: #f3f4f6; }
-.chip-active, .chip-active:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+.chip-sm { padding: 5px 12px; font-size: 13px; }
+.chip-outline { background: #f9fafb; border-style: dashed; }
+.chip-active, .chip-active:hover { background: var(--primary); color: #fff; border-color: var(--primary); border-style: solid; }
 
 /* Grilla táctil de productos del POS */
 .pos-cards {

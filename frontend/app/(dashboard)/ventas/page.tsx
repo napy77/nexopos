@@ -6,6 +6,7 @@ import { api, getToken, money } from "@/lib/api";
 
 interface StockItem {
   product_id: number; name: string; ean: string; category: string | null;
+  pasillo_nombre: string | null; rubro_nombre: string | null; subrubro_nombre: string | null;
   image_url: string | null; quantity: string; sale_price: string | null;
 }
 interface Customer { id: number; name: string; balance: string }
@@ -41,7 +42,9 @@ export default function VentasPage() {
   const [items, setItems] = useState<StockItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [q, setQ] = useState("");
-  const [activeCategory, setActiveCategory] = useState("");
+  const [pasillo, setPasillo] = useState("");
+  const [rubro, setRubro] = useState("");
+  const [subrubro, setSubrubro] = useState("");
   const [lines, setLines] = useState<SaleLine[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [numpadMode, setNumpadMode] = useState<NumpadMode>("qty");
@@ -71,19 +74,49 @@ export default function VentasPage() {
     searchRef.current?.focus();
   }, [loadStock, loadCustomers]);
 
-  const categories = useMemo(
-    () => [...new Set(items.map((i) => i.category).filter((c): c is string => !!c))].sort(),
-    [items]
-  );
   const sellable = useMemo(() => items.filter((i) => Number(i.quantity) > 0), [items]);
+
+  // Taxonomía NexoB2B en cascada, derivada del stock del comercio.
+  // Los productos sin taxonomía (cargas viejas) quedan bajo "Otros".
+  const pasillos = useMemo(
+    () => [...new Set(sellable.map((i) => i.pasillo_nombre ?? "Otros"))].sort(),
+    [sellable]
+  );
+  const enPasillo = useMemo(
+    () => (pasillo ? sellable.filter((i) => (i.pasillo_nombre ?? "Otros") === pasillo) : sellable),
+    [sellable, pasillo]
+  );
+  const rubros = useMemo(
+    () => (pasillo ? [...new Set(enPasillo.map((i) => i.rubro_nombre).filter((r): r is string => !!r))].sort() : []),
+    [enPasillo, pasillo]
+  );
+  const enRubro = useMemo(
+    () => (rubro ? enPasillo.filter((i) => i.rubro_nombre === rubro) : enPasillo),
+    [enPasillo, rubro]
+  );
+  const subrubros = useMemo(
+    () => (rubro ? [...new Set(enRubro.map((i) => i.subrubro_nombre).filter((s): s is string => !!s))].sort() : []),
+    [enRubro, rubro]
+  );
+
   const visible = useMemo(() => {
     const term = q.trim().toLowerCase();
-    return sellable.filter((i) => {
-      if (activeCategory && i.category !== activeCategory) return false;
+    return enRubro.filter((i) => {
+      if (subrubro && i.subrubro_nombre !== subrubro) return false;
       if (!term) return true;
       return i.name.toLowerCase().includes(term) || i.ean.includes(term);
     });
-  }, [sellable, q, activeCategory]);
+  }, [enRubro, subrubro, q]);
+
+  function selectPasillo(p: string) {
+    setPasillo(pasillo === p ? "" : p);
+    setRubro("");
+    setSubrubro("");
+  }
+  function selectRubro(r: string) {
+    setRubro(rubro === r ? "" : r);
+    setSubrubro("");
+  }
 
   const customer = customers.find((c) => c.id === customerId);
   const total = lines.reduce((acc, l) => acc + l.quantity * l.unitPrice, 0);
@@ -393,20 +426,39 @@ export default function VentasPage() {
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") onSearchEnter(); }}
           />
+          {/* Taxonomía NexoB2B: pasillo → rubro → subrubro */}
           <div className="cat-chips">
-            <button className={`chip ${activeCategory === "" ? "chip-active" : ""}`} onClick={() => setActiveCategory("")}>
+            <button className={`chip ${pasillo === "" ? "chip-active" : ""}`} onClick={() => selectPasillo("")}>
               Todos
             </button>
-            {categories.map((c) => (
-              <button
-                key={c}
-                className={`chip ${activeCategory === c ? "chip-active" : ""}`}
-                onClick={() => setActiveCategory(activeCategory === c ? "" : c)}
-              >
-                {CATEGORY_EMOJI[c] ?? "📦"} {c}
+            {pasillos.map((p) => (
+              <button key={p} className={`chip ${pasillo === p ? "chip-active" : ""}`} onClick={() => selectPasillo(p)}>
+                {CATEGORY_EMOJI[p] ?? "🏷"} {p}
               </button>
             ))}
           </div>
+          {rubros.length > 0 && (
+            <div className="cat-chips cat-chips-sub">
+              {rubros.map((r) => (
+                <button key={r} className={`chip chip-sm ${rubro === r ? "chip-active" : ""}`} onClick={() => selectRubro(r)}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          )}
+          {subrubros.length > 0 && (
+            <div className="cat-chips cat-chips-sub">
+              {subrubros.map((s) => (
+                <button
+                  key={s}
+                  className={`chip chip-sm chip-outline ${subrubro === s ? "chip-active" : ""}`}
+                  onClick={() => setSubrubro(subrubro === s ? "" : s)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
 
           {sellable.length === 0 ? (
             <div className="empty-state" style={{ margin: 12 }}>

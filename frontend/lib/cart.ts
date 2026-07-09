@@ -6,7 +6,12 @@ export interface CartMeta {
   presentacionNombre: string;
   ean: string | null;
   marca: string | null;
+  pasilloId: string | null;
+  pasilloNombre: string | null;
+  rubroId: string | null;
   rubroNombre: string | null;
+  subrubroId: string | null;
+  subrubroNombre: string | null;
   imagenUrl: string | null;
   alicuotaIva: number | null;
   factor: number;

@@ -4,15 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, money } from "@/lib/api";
 import { addToCart } from "@/lib/cart";
-import type { B2BProducto, B2BListing, B2BPresentacion, B2BMayorista } from "@/lib/b2b-types";
-
-interface Taxonomia { rubros: { id: string; nombre: string }[] }
+import type { B2BProducto, B2BListing, B2BPresentacion, B2BMayorista, B2BTaxonomia } from "@/lib/b2b-types";
 
 export default function CatalogoPage() {
   const [q, setQ] = useState("");
+  const [pasilloId, setPasilloId] = useState("");
   const [rubroId, setRubroId] = useState("");
+  const [subrubroId, setSubrubroId] = useState("");
   const [mayoristaId, setMayoristaId] = useState("");
-  const [rubros, setRubros] = useState<Taxonomia["rubros"]>([]);
+  const [taxonomia, setTaxonomia] = useState<B2BTaxonomia | null>(null);
   const [mayoristas, setMayoristas] = useState<B2BMayorista[]>([]);
   const [productos, setProductos] = useState<B2BProducto[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -20,23 +20,28 @@ export default function CatalogoPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    api<Taxonomia>("/api/catalog/taxonomia").then((t) => setRubros(t.rubros)).catch(console.error);
+    api<B2BTaxonomia>("/api/catalog/taxonomia").then(setTaxonomia).catch(console.error);
     api<{ mayoristas: B2BMayorista[] }>("/api/mayoristas").then((d) => setMayoristas(d.mayoristas)).catch(console.error);
   }, []);
+
+  const rubrosVisibles = (taxonomia?.rubros ?? []).filter((r) => !pasilloId || r.pasillo_id === pasilloId);
+  const subrubrosVisibles = (taxonomia?.subrubros ?? []).filter((s) => !rubroId || s.rubro_id === rubroId);
 
   const search = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (q.trim()) params.set("q", q.trim());
+      if (pasilloId) params.set("pasillo_id", pasilloId);
       if (rubroId) params.set("rubro_id", rubroId);
+      if (subrubroId) params.set("subrubro_id", subrubroId);
       if (mayoristaId) params.set("mayorista_id", mayoristaId);
       const data = await api<{ productos: B2BProducto[] }>(`/api/catalog?${params}`);
       setProductos(data.productos);
     } finally {
       setLoading(false);
     }
-  }, [q, rubroId, mayoristaId]);
+  }, [q, pasilloId, rubroId, subrubroId, mayoristaId]);
 
   useEffect(() => {
     const t = setTimeout(() => { search().catch(console.error); }, 300);
@@ -55,7 +60,12 @@ export default function CatalogoPage() {
         presentacionNombre: pres.nombre,
         ean: pres.ean_propio ?? producto.ean,
         marca: producto.marca,
+        pasilloId: producto.pasillo_id,
+        pasilloNombre: producto.pasillo_nombre,
+        rubroId: producto.rubro_id,
         rubroNombre: producto.rubro_nombre,
+        subrubroId: producto.subrubro_id,
+        subrubroNombre: producto.subrubro_nombre,
         imagenUrl: producto.imagen_url,
         alicuotaIva: producto.alicuota_iva,
         factor: pres.factor,
@@ -75,9 +85,17 @@ export default function CatalogoPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <select value={rubroId} onChange={(e) => setRubroId(e.target.value)}>
+        <select value={pasilloId} onChange={(e) => { setPasilloId(e.target.value); setRubroId(""); setSubrubroId(""); }}>
+          <option value="">Todos los pasillos</option>
+          {(taxonomia?.pasillos ?? []).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+        <select value={rubroId} onChange={(e) => { setRubroId(e.target.value); setSubrubroId(""); }}>
           <option value="">Todos los rubros</option>
-          {rubros.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+          {rubrosVisibles.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+        </select>
+        <select value={subrubroId} onChange={(e) => setSubrubroId(e.target.value)}>
+          <option value="">Todos los subrubros</option>
+          {subrubrosVisibles.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
         </select>
         <select value={mayoristaId} onChange={(e) => setMayoristaId(e.target.value)}>
           <option value="">Todos los mayoristas</option>

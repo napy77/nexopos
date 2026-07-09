@@ -14,7 +14,12 @@ const itemMetaSchema = z.object({
   presentacionNombre: z.string(),
   ean: z.string().nullable().optional(),
   marca: z.string().nullable().optional(),
+  pasilloId: z.string().nullable().optional(),
+  pasilloNombre: z.string().nullable().optional(),
+  rubroId: z.string().nullable().optional(),
   rubroNombre: z.string().nullable().optional(),
+  subrubroId: z.string().nullable().optional(),
+  subrubroNombre: z.string().nullable().optional(),
   imagenUrl: z.string().nullable().optional(),
   alicuotaIva: z.coerce.number().nullable().optional(),
   factor: z.coerce.number().optional(),
@@ -209,14 +214,21 @@ purchasesRouter.post("/:id/receive", async (req, res, next) => {
       const {
         rows: [product],
       } = await client.query(
-        `INSERT INTO products (nexob2b_id, ean, name, brand, category, unit, image_url, alicuota_iva, factor, synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+        `INSERT INTO products (nexob2b_id, ean, name, brand, category, unit, image_url, alicuota_iva, factor,
+                               pasillo_id, pasillo_nombre, rubro_id, rubro_nombre, subrubro_id, subrubro_nombre, synced_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
          ON CONFLICT (nexob2b_id) DO UPDATE SET
            ean = COALESCE(EXCLUDED.ean, products.ean),
            name = EXCLUDED.name, brand = COALESCE(EXCLUDED.brand, products.brand),
            category = COALESCE(EXCLUDED.category, products.category),
            image_url = COALESCE(EXCLUDED.image_url, products.image_url),
            alicuota_iva = COALESCE(EXCLUDED.alicuota_iva, products.alicuota_iva),
+           pasillo_id = COALESCE(EXCLUDED.pasillo_id, products.pasillo_id),
+           pasillo_nombre = COALESCE(EXCLUDED.pasillo_nombre, products.pasillo_nombre),
+           rubro_id = COALESCE(EXCLUDED.rubro_id, products.rubro_id),
+           rubro_nombre = COALESCE(EXCLUDED.rubro_nombre, products.rubro_nombre),
+           subrubro_id = COALESCE(EXCLUDED.subrubro_id, products.subrubro_id),
+           subrubro_nombre = COALESCE(EXCLUDED.subrubro_nombre, products.subrubro_nombre),
            synced_at = now()
          RETURNING id`,
         [
@@ -229,6 +241,12 @@ purchasesRouter.post("/:id/receive", async (req, res, next) => {
           meta.imagenUrl ?? null,
           meta.alicuotaIva ?? null,
           meta.factor ?? 1,
+          meta.pasilloId ?? null,
+          meta.pasilloNombre ?? null,
+          meta.rubroId ?? null,
+          meta.rubroNombre ?? null,
+          meta.subrubroId ?? null,
+          meta.subrubroNombre ?? null,
         ]
       );
       await client.query("UPDATE purchase_order_items SET product_id = $1 WHERE id = $2", [product.id, item.id]);

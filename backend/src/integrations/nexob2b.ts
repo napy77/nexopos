@@ -51,10 +51,12 @@ export interface B2BProducto {
   unidad_base: string | null;
   alicuota_iva: number | null;
   imagen_url: string | null;
-  rubro_id: string | null;
-  rubro_nombre: string | null;
   pasillo_id: string | null;
   pasillo_nombre: string | null;
+  rubro_id: string | null;
+  rubro_nombre: string | null;
+  subrubro_id: string | null;
+  subrubro_nombre: string | null;
   mayoristas: B2BListing[];
 }
 
@@ -176,11 +178,26 @@ const MOCK_MAYORISTAS: B2BMayorista[] = [
   },
 ];
 
+const MOCK_PASILLOS = [
+  { id: "pas_1", nombre: "Almacén" },
+  { id: "pas_2", nombre: "Bebidas" },
+  { id: "pas_3", nombre: "Limpieza y Perfumería" },
+];
 const MOCK_RUBROS = [
   { id: "rub_1", nombre: "Almacén", pasillo_id: "pas_1" },
   { id: "rub_2", nombre: "Bebidas", pasillo_id: "pas_2" },
   { id: "rub_3", nombre: "Limpieza", pasillo_id: "pas_3" },
   { id: "rub_4", nombre: "Perfumería", pasillo_id: "pas_3" },
+];
+const MOCK_SUBRUBROS = [
+  { id: "sub_1a", nombre: "Aceites", rubro_id: "rub_1" },
+  { id: "sub_1b", nombre: "Conservas", rubro_id: "rub_1" },
+  { id: "sub_2a", nombre: "Gaseosas", rubro_id: "rub_2" },
+  { id: "sub_2b", nombre: "Vinos", rubro_id: "rub_2" },
+  { id: "sub_3a", nombre: "Hogar", rubro_id: "rub_3" },
+  { id: "sub_3b", nombre: "Ropa", rubro_id: "rub_3" },
+  { id: "sub_4a", nombre: "Cabello", rubro_id: "rub_4" },
+  { id: "sub_4b", nombre: "Piel", rubro_id: "rub_4" },
 ];
 const MOCK_MARCAS = ["Cocinero", "Arcor", "Coca-Cola", "Ala", "Quilmes", "Molinos"];
 
@@ -188,6 +205,9 @@ function mockProductos(): B2BProducto[] {
   const productos: B2BProducto[] = [];
   for (let i = 1; i <= 60; i++) {
     const rubro = MOCK_RUBROS[i % MOCK_RUBROS.length];
+    const subrubros = MOCK_SUBRUBROS.filter((s) => s.rubro_id === rubro.id);
+    const subrubro = subrubros[i % subrubros.length];
+    const pasillo = MOCK_PASILLOS.find((p) => p.id === rubro.pasillo_id)!;
     const marca = MOCK_MARCAS[i % MOCK_MARCAS.length];
     // mayorista 1 y 2 (con alta); el 3 (sin alta) lista algunos productos
     const listados = i % 5 === 0 ? ["may_mock_1", "may_mock_3"] : i % 2 === 0 ? ["may_mock_1"] : ["may_mock_1", "may_mock_2"];
@@ -199,10 +219,12 @@ function mockProductos(): B2BProducto[] {
       unidad_base: "Unidades",
       alicuota_iva: i % 3 === 0 ? 10.5 : 21,
       imagen_url: null,
+      pasillo_id: pasillo.id,
+      pasillo_nombre: pasillo.nombre,
       rubro_id: rubro.id,
       rubro_nombre: rubro.nombre,
-      pasillo_id: rubro.pasillo_id,
-      pasillo_nombre: rubro.nombre,
+      subrubro_id: subrubro.id,
+      subrubro_nombre: subrubro.nombre,
       mayoristas: listados.map((mayId, w) => {
         const may = MOCK_MAYORISTAS.find((m) => m.id === mayId)!;
         const base = 500 + (i % 40) * 100 + w * 50;
@@ -271,9 +293,9 @@ export async function login(email: string, password: string): Promise<{ token: s
 export async function getTaxonomia(): Promise<B2BTaxonomia> {
   if (isMockMode()) {
     return {
-      pasillos: [{ id: "pas_1", nombre: "Almacén" }, { id: "pas_2", nombre: "Bebidas" }, { id: "pas_3", nombre: "Limpieza y Perfumería" }],
+      pasillos: MOCK_PASILLOS,
       rubros: MOCK_RUBROS,
-      subrubros: [],
+      subrubros: MOCK_SUBRUBROS,
       alicuotas: [{ id: "ali_1", porcentaje: 21 }, { id: "ali_2", porcentaje: 10.5 }],
     };
   }
@@ -306,13 +328,15 @@ export async function solicitarAlta(token: string, mayoristaId: string, mensaje:
 export async function getProductos(
   token: string,
   comercioId: string,
-  filtros: { q?: string; rubroId?: string; pasilloId?: string; mayoristaId?: string }
+  filtros: { q?: string; rubroId?: string; pasilloId?: string; subrubroId?: string; mayoristaId?: string }
 ): Promise<B2BProducto[]> {
   if (isMockMode()) {
     const term = filtros.q?.toLowerCase().trim();
     return MOCK_PRODUCTOS.filter((p) => {
       if (term && !(p.nombre.toLowerCase().includes(term) || p.ean === filtros.q || p.marca?.toLowerCase().includes(term))) return false;
       if (filtros.rubroId && p.rubro_id !== filtros.rubroId) return false;
+      if (filtros.pasilloId && p.pasillo_id !== filtros.pasilloId) return false;
+      if (filtros.subrubroId && p.subrubro_id !== filtros.subrubroId) return false;
       if (filtros.mayoristaId && !p.mayoristas.some((m) => m.mayorista_id === filtros.mayoristaId)) return false;
       return true;
     }).slice(0, 100);
@@ -322,6 +346,7 @@ export async function getProductos(
   if (filtros.q) params.set("q", filtros.q);
   if (filtros.rubroId) params.set("rubro_id", filtros.rubroId);
   if (filtros.pasilloId) params.set("pasillo_id", filtros.pasilloId);
+  if (filtros.subrubroId) params.set("subrubro_id", filtros.subrubroId);
   if (filtros.mayoristaId) params.set("mayorista_id", filtros.mayoristaId);
   const data = await api<{ productos: B2BProducto[] }>(`/store/productos?${params}`, { token });
   return data.productos;
