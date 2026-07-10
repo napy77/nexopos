@@ -74,8 +74,10 @@ export default function StockPage() {
   useEffect(() => {
     if (!showAdd || !catQ.trim()) { setCatResults([]); return; }
     const t = setTimeout(async () => {
+      // incluir_sin_mayorista: acá solo importa la ficha del producto,
+      // aunque nadie lo venda en NexoB2B (se compró por fuera)
       const data = await api<{ productos: B2BProducto[] }>(
-        `/api/catalog?q=${encodeURIComponent(catQ.trim())}`
+        `/api/catalog?q=${encodeURIComponent(catQ.trim())}&incluir_sin_mayorista=true`
       );
       const productos = data.productos.slice(0, 8);
       setCatResults(productos);

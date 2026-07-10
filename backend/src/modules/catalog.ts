@@ -61,6 +61,7 @@ catalogRouter.get("/", async (req, res, next) => {
       pasilloId: req.query.pasillo_id ? String(req.query.pasillo_id) : undefined,
       subrubroId: req.query.subrubro_id ? String(req.query.subrubro_id) : undefined,
       mayoristaId: req.query.mayorista_id ? String(req.query.mayorista_id) : undefined,
+      incluirSinMayorista: req.query.incluir_sin_mayorista === "true",
     });
     res.json({ productos });
   } catch (err) {

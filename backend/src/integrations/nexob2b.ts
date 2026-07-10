@@ -210,8 +210,10 @@ function mockProductos(): B2BProducto[] {
     const subrubro = subrubros[i % subrubros.length];
     const pasillo = MOCK_PASILLOS.find((p) => p.id === rubro.pasillo_id)!;
     const marca = MOCK_MARCAS[i % MOCK_MARCAS.length];
-    // mayorista 1 y 2 (con alta); el 3 (sin alta) lista algunos productos
-    const listados = i % 5 === 0 ? ["may_mock_1", "may_mock_3"] : i % 2 === 0 ? ["may_mock_1"] : ["may_mock_1", "may_mock_2"];
+    // mayorista 1 y 2 (con alta); el 3 (sin alta) lista algunos productos.
+    // Los productos 55-60 no los vende nadie: solo aparecen con
+    // incluir_sin_mayorista=true (caso "compré por fuera de NexoB2B").
+    const listados = i > 54 ? [] : i % 5 === 0 ? ["may_mock_1", "may_mock_3"] : i % 2 === 0 ? ["may_mock_1"] : ["may_mock_1", "may_mock_2"];
     productos.push({
       id: `pm_mock_${i}`,
       ean: String(7790000000000 + i),
@@ -330,11 +332,17 @@ export async function solicitarAlta(token: string, mayoristaId: string, mensaje:
 export async function getProductos(
   token: string,
   comercioId: string,
-  filtros: { q?: string; rubroId?: string; pasilloId?: string; subrubroId?: string; mayoristaId?: string }
+  filtros: {
+    q?: string; rubroId?: string; pasilloId?: string; subrubroId?: string; mayoristaId?: string;
+    /** Incluye productos maestros que ningún mayorista lista (para alta de
+     *  stock comprado fuera de NexoB2B). Requiere soporte del backend B2B. */
+    incluirSinMayorista?: boolean;
+  }
 ): Promise<B2BProducto[]> {
   if (isMockMode()) {
     const term = filtros.q?.toLowerCase().trim();
     return MOCK_PRODUCTOS.filter((p) => {
+      if (!filtros.incluirSinMayorista && p.mayoristas.length === 0) return false;
       if (term && !(p.nombre.toLowerCase().includes(term) || p.ean === filtros.q || p.marca?.toLowerCase().includes(term))) return false;
       if (filtros.rubroId && p.rubro_id !== filtros.rubroId) return false;
       if (filtros.pasilloId && p.pasillo_id !== filtros.pasilloId) return false;
@@ -350,6 +358,7 @@ export async function getProductos(
   if (filtros.pasilloId) params.set("pasillo_id", filtros.pasilloId);
   if (filtros.subrubroId) params.set("subrubro_id", filtros.subrubroId);
   if (filtros.mayoristaId) params.set("mayorista_id", filtros.mayoristaId);
+  if (filtros.incluirSinMayorista) params.set("incluir_sin_mayorista", "true");
   const data = await api<{ productos: B2BProducto[] }>(`/store/productos?${params}`, { token });
   return data.productos;
 }
