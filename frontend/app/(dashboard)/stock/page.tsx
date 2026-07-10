@@ -11,31 +11,23 @@ interface StockItem {
 interface Movement {
   id: number; name: string; type: string; quantity: string; reference: string | null; created_at: string;
 }
-import type { B2BProducto, B2BPresentacion } from "@/lib/b2b-types";
+import type { B2BProductoMaestro, B2BPresentacionMaestra } from "@/lib/b2b-types";
 
-interface PresOpcion { pres: B2BPresentacion; mayorista: string | null }
-interface AltaEnCurso { producto: B2BProducto; opciones: PresOpcion[]; presIdx: number }
+interface AltaEnCurso { producto: B2BProductoMaestro; opciones: B2BPresentacionMaestra[]; presIdx: number }
 
 /**
- * Presentaciones disponibles de un producto del catálogo. Si ningún
- * mayorista lo lista, se ofrece una presentación "Unidad" basada en el
- * producto maestro (alcanza para venderlo en el POS).
+ * Presentaciones del producto maestro. Si el catálogo no tiene ninguna
+ * cargada, se ofrece una "Unidad" basada en el producto (alcanza para
+ * venderlo en el POS).
  */
-function buildOpciones(producto: B2BProducto): PresOpcion[] {
-  const opciones: PresOpcion[] = producto.mayoristas.flatMap((listing) =>
-    listing.presentaciones.map((pres) => ({ pres, mayorista: listing.mayorista_nombre }))
-  );
-  if (opciones.length === 0) {
-    opciones.push({
-      mayorista: null,
-      pres: {
-        id: producto.id, // identidad = producto maestro
-        nombre: producto.unidad_base ?? "Unidad",
-        factor: 1, ean_propio: null, precio: 0, precio_lista: null, stock: null,
-      },
-    });
-  }
-  return opciones;
+function buildOpciones(producto: B2BProductoMaestro): B2BPresentacionMaestra[] {
+  if (producto.presentaciones?.length) return producto.presentaciones;
+  return [{
+    id: producto.id, // identidad = producto maestro
+    nombre: producto.unidad_base ?? "Unidad",
+    factor: 1,
+    ean_propio: null,
+  }];
 }
 
 const MOVE_LABEL: Record<string, string> = {
@@ -54,7 +46,7 @@ export default function StockPage() {
   const [error, setError] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [catQ, setCatQ] = useState("");
-  const [catResults, setCatResults] = useState<B2BProducto[]>([]);
+  const [catResults, setCatResults] = useState<B2BProductoMaestro[]>([]);
   const [adding, setAdding] = useState<AltaEnCurso | null>(null);
   const [okMsg, setOkMsg] = useState("");
 
@@ -68,27 +60,25 @@ export default function StockPage() {
     api<Movement[]>("/api/stock/movements").then(setMovements).catch(console.error);
   }, [items]);
 
-  // Autocompletar contra el catálogo vivo de NexoB2B. Si lo tipeado
-  // coincide EXACTO con un EAN (lector de código de barras), se abre
-  // directo el formulario de alta con todos los datos del producto.
+  // Búsqueda contra el CATÁLOGO MAESTRO de NexoB2B (exista o no un
+  // mayorista que venda el producto). Si lo tipeado es un EAN (lector de
+  // código de barras), se abre directo el formulario con la ficha completa.
   useEffect(() => {
     if (!showAdd || !catQ.trim()) { setCatResults([]); return; }
     const t = setTimeout(async () => {
-      // incluir_sin_mayorista: acá solo importa la ficha del producto,
-      // aunque nadie lo venda en NexoB2B (se compró por fuera)
-      const data = await api<{ productos: B2BProducto[] }>(
-        `/api/catalog?q=${encodeURIComponent(catQ.trim())}&incluir_sin_mayorista=true`
+      const data = await api<{ productos: B2BProductoMaestro[] }>(
+        `/api/catalog/maestro?termino=${encodeURIComponent(catQ.trim())}`
       );
       const productos = data.productos.slice(0, 8);
       setCatResults(productos);
       const scanned = catQ.trim();
       const matchEan = productos.find(
         (p) => p.ean === scanned ||
-          p.mayoristas.some((m) => m.presentaciones.some((pr) => pr.ean_propio === scanned))
+          p.presentaciones?.some((pr) => pr.ean_propio === scanned)
       );
       if (matchEan) {
         const opciones = buildOpciones(matchEan);
-        const idx = opciones.findIndex((o) => o.pres.ean_propio === scanned);
+        const idx = opciones.findIndex((o) => o.ean_propio === scanned);
         setAdding({ producto: matchEan, opciones, presIdx: idx >= 0 ? idx : 0 });
       }
     }, 300);
@@ -98,7 +88,7 @@ export default function StockPage() {
   async function addFromCatalog(form: FormData) {
     if (!adding) return;
     const { producto } = adding;
-    const { pres } = adding.opciones[adding.presIdx];
+    const pres = adding.opciones[adding.presIdx];
     setError("");
     try {
       await api("/api/stock/add-from-catalog", {
@@ -118,7 +108,7 @@ export default function StockPage() {
             subrubroId: producto.subrubro_id,
             subrubroNombre: producto.subrubro_nombre,
             imagenUrl: producto.imagen_url,
-            alicuotaIva: producto.alicuota_iva,
+            alicuotaIva: producto.alicuota_iva != null ? Number(producto.alicuota_iva) : null,
             factor: pres.factor,
           },
           quantity: Number(form.get("qty") ?? 0),
@@ -243,7 +233,7 @@ export default function StockPage() {
                   {(adding.producto.descripcion?.length ?? 0) > 180 && "…"}
                 </p>
                 <p className="muted">
-                  EAN: {adding.opciones[adding.presIdx].pres.ean_propio ?? adding.producto.ean ?? "—"}
+                  EAN: {adding.opciones[adding.presIdx].ean_propio ?? adding.producto.ean ?? "—"}
                   {adding.producto.alicuota_iva != null && ` · IVA ${adding.producto.alicuota_iva}%`}
                 </p>
               </div>
@@ -256,22 +246,17 @@ export default function StockPage() {
                     onChange={(e) => setAdding({ ...adding, presIdx: Number(e.target.value) })}
                   >
                     {adding.opciones.map((o, idx) => (
-                      <option key={o.pres.id} value={idx}>
-                        {o.pres.nombre}
-                        {o.pres.factor > 1 ? ` (x${o.pres.factor})` : ""}
-                        {o.mayorista ? ` — ${o.mayorista}` : ""}
-                        {o.pres.precio ? ` · cuesta ${money(o.pres.precio)}` : ""}
+                      <option key={o.id} value={idx}>
+                        {o.nombre}
+                        {o.factor > 1 ? ` (x${o.factor})` : ""}
+                        {o.ean_propio ? ` · ${o.ean_propio}` : ""}
                       </option>
                     ))}
                   </select>
                 </div>
                 <form action={addFromCatalog} className="toolbar">
                   <input name="qty" type="number" step="any" min="0" placeholder="Cantidad *" required style={{ width: 120 }} autoFocus />
-                  <input
-                    name="cost" type="number" step="0.01" min="0"
-                    placeholder={adding.opciones[adding.presIdx].pres.precio ? `Costo (sug. ${money(adding.opciones[adding.presIdx].pres.precio)})` : "Costo unitario"}
-                    style={{ width: 170 }}
-                  />
+                  <input name="cost" type="number" step="0.01" min="0" placeholder="Costo unitario" style={{ width: 150 }} />
                   <input name="salePrice" type="number" step="0.01" min="0.01" placeholder="Precio de venta *" required style={{ width: 150 }} />
                   <input name="minStock" type="number" step="any" min="0" placeholder="Stock mínimo" style={{ width: 120 }} />
                   <button type="submit">Dar de alta</button>

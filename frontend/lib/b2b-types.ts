@@ -43,6 +43,33 @@ export interface B2BTaxonomia {
   subrubros: { id: string; nombre: string; rubro_id: string }[];
 }
 
+/** Presentación del producto maestro (sin precio: eso es por mayorista) */
+export interface B2BPresentacionMaestra {
+  id: string;
+  nombre: string;
+  factor: number;
+  ean_propio: string | null;
+}
+
+/** Producto del catálogo maestro, exista o no un mayorista que lo venda */
+export interface B2BProductoMaestro {
+  id: string;
+  ean: string | null;
+  nombre: string;
+  descripcion?: string | null;
+  marca: string | null;
+  unidad_base: string | null;
+  alicuota_iva: number | string | null;
+  imagen_url: string | null;
+  pasillo_id: string | null;
+  pasillo_nombre: string | null;
+  rubro_id: string | null;
+  rubro_nombre: string | null;
+  subrubro_id: string | null;
+  subrubro_nombre: string | null;
+  presentaciones: B2BPresentacionMaestra[] | null;
+}
+
 export interface B2BMayorista {
   id: string;
   nombre: string;

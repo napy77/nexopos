@@ -61,6 +61,33 @@ export interface B2BProducto {
   mayoristas: B2BListing[];
 }
 
+/** Presentación del producto maestro (catálogo, sin precio: es por mayorista) */
+export interface B2BPresentacionMaestra {
+  id: string;               // pp_xxx
+  nombre: string;
+  factor: number;
+  ean_propio: string | null;
+}
+
+/** Producto del catálogo maestro (independiente de qué mayoristas lo listen) */
+export interface B2BProductoMaestro {
+  id: string;
+  ean: string | null;
+  nombre: string;
+  descripcion?: string | null;
+  marca: string | null;
+  unidad_base: string | null;
+  alicuota_iva: number | string | null;
+  imagen_url: string | null;
+  pasillo_id: string | null;
+  pasillo_nombre: string | null;
+  rubro_id: string | null;
+  rubro_nombre: string | null;
+  subrubro_id: string | null;
+  subrubro_nombre: string | null;
+  presentaciones: B2BPresentacionMaestra[] | null;
+}
+
 export interface B2BMayorista {
   id: string;
   nombre: string;
@@ -360,6 +387,44 @@ export async function getProductos(
   if (filtros.mayoristaId) params.set("mayorista_id", filtros.mayoristaId);
   if (filtros.incluirSinMayorista) params.set("incluir_sin_mayorista", "true");
   const data = await api<{ productos: B2BProducto[] }>(`/store/productos?${params}`, { token });
+  return data.productos;
+}
+
+/**
+ * Búsqueda en el CATÁLOGO MAESTRO (mismo endpoint que usa el portal del
+ * mayorista para vincular productos). Devuelve la ficha completa aunque
+ * ningún mayorista liste el producto — es lo que necesita el alta de
+ * stock del POS cuando el comercio compró fuera de NexoB2B.
+ */
+export async function buscarCatalogoMaestro(
+  token: string,
+  filtros: { ean?: string; q?: string }
+): Promise<B2BProductoMaestro[]> {
+  if (isMockMode()) {
+    return MOCK_PRODUCTOS.filter((p) => {
+      if (filtros.ean) return p.ean === filtros.ean;
+      const term = filtros.q?.toLowerCase().trim() ?? "";
+      return !term || p.nombre.toLowerCase().includes(term) || p.marca?.toLowerCase().includes(term) || p.ean?.includes(term);
+    }).slice(0, 20).map((p) => ({
+      id: p.id, ean: p.ean, nombre: p.nombre, descripcion: p.descripcion,
+      marca: p.marca, unidad_base: p.unidad_base, alicuota_iva: p.alicuota_iva,
+      imagen_url: p.imagen_url,
+      pasillo_id: p.pasillo_id, pasillo_nombre: p.pasillo_nombre,
+      rubro_id: p.rubro_id, rubro_nombre: p.rubro_nombre,
+      subrubro_id: p.subrubro_id, subrubro_nombre: p.subrubro_nombre,
+      presentaciones: [
+        { id: `pp_${p.id}_u`, nombre: "Unidad", factor: 1, ean_propio: null },
+        { id: `pp_${p.id}_b`, nombre: "Bulto x12", factor: 12, ean_propio: null },
+      ],
+    }));
+  }
+  const params = new URLSearchParams();
+  if (filtros.ean) params.set("ean", filtros.ean);
+  else if (filtros.q) params.set("q", filtros.q);
+  const data = await api<{ productos: B2BProductoMaestro[] }>(
+    `/store/mayoristas/me/catalogo/buscar?${params}`,
+    { token }
+  );
   return data.productos;
 }
 

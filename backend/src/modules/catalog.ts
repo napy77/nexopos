@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { pool } from "../db.js";
-import { getProductos, getTaxonomia, type B2BTaxonomia } from "../integrations/nexob2b.js";
+import { buscarCatalogoMaestro, getProductos, getTaxonomia, type B2BTaxonomia } from "../integrations/nexob2b.js";
 import { b2bContext } from "./auth.js";
 
 export const catalogRouter = Router();
@@ -42,6 +42,28 @@ catalogRouter.get("/taxonomia", async (_req, res, next) => {
       taxonomiaCache = { data: await getTaxonomia(), at: Date.now() };
     }
     res.json(taxonomiaCache.data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/catalog/maestro?termino=
+ * Búsqueda en el catálogo maestro de NexoB2B (con o sin mayoristas que lo
+ * listen). Si el término parece un código de barras se busca por EAN exacto
+ * (lector), si no por nombre/marca. Lo usa el alta de stock.
+ */
+catalogRouter.get("/maestro", async (req, res, next) => {
+  try {
+    const { token } = await b2bContext(req);
+    const termino = String(req.query.termino ?? "").trim();
+    if (!termino) {
+      res.json({ productos: [] });
+      return;
+    }
+    const esEan = /^\d{8,14}$/.test(termino);
+    const productos = await buscarCatalogoMaestro(token, esEan ? { ean: termino } : { q: termino });
+    res.json({ productos });
   } catch (err) {
     next(err);
   }
