@@ -11,9 +11,32 @@ interface StockItem {
 interface Movement {
   id: number; name: string; type: string; quantity: string; reference: string | null; created_at: string;
 }
-import type { B2BProducto, B2BListing, B2BPresentacion } from "@/lib/b2b-types";
+import type { B2BProducto, B2BPresentacion } from "@/lib/b2b-types";
 
-interface PresentacionElegida { producto: B2BProducto; listing: B2BListing; pres: B2BPresentacion }
+interface PresOpcion { pres: B2BPresentacion; mayorista: string | null }
+interface AltaEnCurso { producto: B2BProducto; opciones: PresOpcion[]; presIdx: number }
+
+/**
+ * Presentaciones disponibles de un producto del catálogo. Si ningún
+ * mayorista lo lista, se ofrece una presentación "Unidad" basada en el
+ * producto maestro (alcanza para venderlo en el POS).
+ */
+function buildOpciones(producto: B2BProducto): PresOpcion[] {
+  const opciones: PresOpcion[] = producto.mayoristas.flatMap((listing) =>
+    listing.presentaciones.map((pres) => ({ pres, mayorista: listing.mayorista_nombre }))
+  );
+  if (opciones.length === 0) {
+    opciones.push({
+      mayorista: null,
+      pres: {
+        id: producto.id, // identidad = producto maestro
+        nombre: producto.unidad_base ?? "Unidad",
+        factor: 1, ean_propio: null, precio: 0, precio_lista: null, stock: null,
+      },
+    });
+  }
+  return opciones;
+}
 
 const MOVE_LABEL: Record<string, string> = {
   purchase_reception: "Recepción de compra",
@@ -32,7 +55,8 @@ export default function StockPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [catQ, setCatQ] = useState("");
   const [catResults, setCatResults] = useState<B2BProducto[]>([]);
-  const [adding, setAdding] = useState<PresentacionElegida | null>(null);
+  const [adding, setAdding] = useState<AltaEnCurso | null>(null);
+  const [okMsg, setOkMsg] = useState("");
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ q, lowOnly: String(lowOnly) });
@@ -44,40 +68,56 @@ export default function StockPage() {
     api<Movement[]>("/api/stock/movements").then(setMovements).catch(console.error);
   }, [items]);
 
-  // Autocompletar contra el catálogo vivo de NexoB2B
+  // Autocompletar contra el catálogo vivo de NexoB2B. Si lo tipeado
+  // coincide EXACTO con un EAN (lector de código de barras), se abre
+  // directo el formulario de alta con todos los datos del producto.
   useEffect(() => {
     if (!showAdd || !catQ.trim()) { setCatResults([]); return; }
     const t = setTimeout(async () => {
       const data = await api<{ productos: B2BProducto[] }>(
-        `/api/catalog?q=${encodeURIComponent(catQ)}`
+        `/api/catalog?q=${encodeURIComponent(catQ.trim())}`
       );
-      setCatResults(data.productos.slice(0, 8));
+      const productos = data.productos.slice(0, 8);
+      setCatResults(productos);
+      const scanned = catQ.trim();
+      const matchEan = productos.find(
+        (p) => p.ean === scanned ||
+          p.mayoristas.some((m) => m.presentaciones.some((pr) => pr.ean_propio === scanned))
+      );
+      if (matchEan) {
+        const opciones = buildOpciones(matchEan);
+        const idx = opciones.findIndex((o) => o.pres.ean_propio === scanned);
+        setAdding({ producto: matchEan, opciones, presIdx: idx >= 0 ? idx : 0 });
+      }
     }, 300);
     return () => clearTimeout(t);
   }, [catQ, showAdd]);
 
   async function addFromCatalog(form: FormData) {
     if (!adding) return;
+    const { producto } = adding;
+    const { pres } = adding.opciones[adding.presIdx];
     setError("");
     try {
       await api("/api/stock/add-from-catalog", {
         method: "POST",
         body: JSON.stringify({
-          presentacionId: adding.pres.id,
+          presentacionId: pres.id,
           meta: {
-            productoNombre: adding.producto.nombre,
-            presentacionNombre: adding.pres.nombre,
-            ean: adding.pres.ean_propio ?? adding.producto.ean,
-            marca: adding.producto.marca,
-            pasilloId: adding.producto.pasillo_id,
-            pasilloNombre: adding.producto.pasillo_nombre,
-            rubroId: adding.producto.rubro_id,
-            rubroNombre: adding.producto.rubro_nombre,
-            subrubroId: adding.producto.subrubro_id,
-            subrubroNombre: adding.producto.subrubro_nombre,
-            imagenUrl: adding.producto.imagen_url,
-            alicuotaIva: adding.producto.alicuota_iva,
-            factor: adding.pres.factor,
+            productoNombre: producto.nombre,
+            presentacionNombre: pres.nombre,
+            ean: pres.ean_propio ?? producto.ean,
+            descripcion: producto.descripcion ?? null,
+            marca: producto.marca,
+            pasilloId: producto.pasillo_id,
+            pasilloNombre: producto.pasillo_nombre,
+            rubroId: producto.rubro_id,
+            rubroNombre: producto.rubro_nombre,
+            subrubroId: producto.subrubro_id,
+            subrubroNombre: producto.subrubro_nombre,
+            imagenUrl: producto.imagen_url,
+            alicuotaIva: producto.alicuota_iva,
+            factor: pres.factor,
           },
           quantity: Number(form.get("qty") ?? 0),
           cost: form.get("cost") ? Number(form.get("cost")) : undefined,
@@ -87,7 +127,8 @@ export default function StockPage() {
       });
       setAdding(null);
       setCatQ("");
-      setShowAdd(false);
+      setOkMsg(`"${producto.nombre} — ${pres.nombre}" dado de alta en tu stock. Escaneá el siguiente…`);
+      setTimeout(() => setOkMsg(""), 4000);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al agregar producto");
@@ -132,57 +173,110 @@ export default function StockPage() {
       {showAdd && (
         <div className="card" style={{ border: "2px solid var(--primary)" }}>
           <h2>Agregar producto al stock</h2>
+          {okMsg && <p className="badge ok" style={{ fontSize: 14 }}>{okMsg}</p>}
           {!adding ? (
             <>
               <input
                 type="search"
-                placeholder="Buscá en el catálogo por nombre, marca o EAN…"
+                placeholder="📷 Escaneá el código de barras, o buscá por nombre o marca…"
                 value={catQ}
                 onChange={(e) => setCatQ(e.target.value)}
-                style={{ width: "100%" }}
+                style={{ width: "100%", fontSize: 16, padding: 12 }}
                 autoFocus
               />
+              <p className="muted" style={{ margin: "6px 0 0" }}>
+                Si el código existe en NexoB2B, el producto se completa solo: vos solo ponés precio y cantidad.
+              </p>
               {catResults.length > 0 && (
                 <table style={{ marginTop: 8 }}>
                   <tbody>
-                    {catResults.flatMap((p) =>
-                      p.mayoristas.slice(0, 1).flatMap((listing) =>
-                        listing.presentaciones.map((pres) => (
-                          <tr
-                            key={pres.id}
-                            onClick={() => setAdding({ producto: p, listing, pres })}
-                            style={{ cursor: "pointer" }}
-                          >
-                            <td className="muted">{pres.ean_propio ?? p.ean}</td>
-                            <td>{p.nombre} — <strong>{pres.nombre}</strong></td>
-                            <td className="muted">{p.marca}</td>
-                            <td><button className="small">Elegir</button></td>
-                          </tr>
-                        ))
-                      )
-                    )}
+                    {catResults.map((p) => (
+                      <tr
+                        key={p.id}
+                        onClick={() => setAdding({ producto: p, opciones: buildOpciones(p), presIdx: 0 })}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td style={{ width: 44 }}>
+                          {p.imagen_url
+                            // eslint-disable-next-line @next/next/no-img-element
+                            ? <img src={p.imagen_url} alt="" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }} />
+                            : <span style={{ fontSize: 22 }}>📦</span>}
+                        </td>
+                        <td className="muted">{p.ean}</td>
+                        <td><strong>{p.nombre}</strong></td>
+                        <td className="muted">{p.marca}</td>
+                        <td className="muted">{p.rubro_nombre}</td>
+                        <td><button className="small">Elegir</button></td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               )}
               {catQ.trim() && catResults.length === 0 && (
-                <p className="muted" style={{ marginTop: 8 }}>Sin resultados en el catálogo.</p>
+                <p className="muted" style={{ marginTop: 8 }}>
+                  Sin resultados en el catálogo de NexoB2B para «{catQ}».
+                </p>
               )}
             </>
           ) : (
-            <>
-              <p>
-                <strong>{adding.producto.nombre} — {adding.pres.nombre}</strong>{" "}
-                <span className="muted">({adding.pres.ean_propio ?? adding.producto.ean})</span>
-              </p>
-              <form action={addFromCatalog} className="toolbar">
-                <input name="qty" type="number" step="any" min="0" placeholder="Cantidad inicial *" required style={{ width: 140 }} autoFocus />
-                <input name="cost" type="number" step="0.01" min="0" placeholder="Costo unitario" style={{ width: 130 }} />
-                <input name="salePrice" type="number" step="0.01" min="0.01" placeholder="Precio de venta" style={{ width: 140 }} />
-                <input name="minStock" type="number" step="any" min="0" placeholder="Stock mínimo" style={{ width: 120 }} />
-                <button type="submit">Agregar</button>
-                <button type="button" className="secondary" onClick={() => setAdding(null)}>Volver</button>
-              </form>
-            </>
+            <div className="row">
+              {/* Ficha del producto, completada desde NexoB2B */}
+              <div className="card" style={{ maxWidth: 380 }}>
+                <div className="toolbar">
+                  {adding.producto.imagen_url
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={adding.producto.imagen_url} alt="" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 10 }} />
+                    : <span style={{ fontSize: 44 }}>📦</span>}
+                  <div>
+                    <strong>{adding.producto.nombre}</strong>
+                    <div className="muted">{adding.producto.marca}</div>
+                    <div className="muted">
+                      {[adding.producto.pasillo_nombre, adding.producto.rubro_nombre, adding.producto.subrubro_nombre]
+                        .filter(Boolean).join(" › ")}
+                    </div>
+                  </div>
+                </div>
+                <p className="muted" style={{ fontSize: 12 }}>
+                  {(adding.producto.descripcion ?? "").slice(0, 180)}
+                  {(adding.producto.descripcion?.length ?? 0) > 180 && "…"}
+                </p>
+                <p className="muted">
+                  EAN: {adding.opciones[adding.presIdx].pres.ean_propio ?? adding.producto.ean ?? "—"}
+                  {adding.producto.alicuota_iva != null && ` · IVA ${adding.producto.alicuota_iva}%`}
+                </p>
+              </div>
+
+              <div style={{ flex: 1, minWidth: 300 }}>
+                <div className="toolbar">
+                  <label>Presentación</label>
+                  <select
+                    value={adding.presIdx}
+                    onChange={(e) => setAdding({ ...adding, presIdx: Number(e.target.value) })}
+                  >
+                    {adding.opciones.map((o, idx) => (
+                      <option key={o.pres.id} value={idx}>
+                        {o.pres.nombre}
+                        {o.pres.factor > 1 ? ` (x${o.pres.factor})` : ""}
+                        {o.mayorista ? ` — ${o.mayorista}` : ""}
+                        {o.pres.precio ? ` · cuesta ${money(o.pres.precio)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <form action={addFromCatalog} className="toolbar">
+                  <input name="qty" type="number" step="any" min="0" placeholder="Cantidad *" required style={{ width: 120 }} autoFocus />
+                  <input
+                    name="cost" type="number" step="0.01" min="0"
+                    placeholder={adding.opciones[adding.presIdx].pres.precio ? `Costo (sug. ${money(adding.opciones[adding.presIdx].pres.precio)})` : "Costo unitario"}
+                    style={{ width: 170 }}
+                  />
+                  <input name="salePrice" type="number" step="0.01" min="0.01" placeholder="Precio de venta *" required style={{ width: 150 }} />
+                  <input name="minStock" type="number" step="any" min="0" placeholder="Stock mínimo" style={{ width: 120 }} />
+                  <button type="submit">Dar de alta</button>
+                  <button type="button" className="secondary" onClick={() => { setAdding(null); setCatQ(""); }}>Volver</button>
+                </form>
+              </div>
+            </div>
           )}
         </div>
       )}

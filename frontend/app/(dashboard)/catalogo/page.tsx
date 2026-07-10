@@ -59,6 +59,7 @@ export default function CatalogoPage() {
         productoNombre: producto.nombre,
         presentacionNombre: pres.nombre,
         ean: pres.ean_propio ?? producto.ean,
+        descripcion: producto.descripcion ?? null,
         marca: producto.marca,
         pasilloId: producto.pasillo_id,
         pasilloNombre: producto.pasillo_nombre,

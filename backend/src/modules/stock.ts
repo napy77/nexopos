@@ -87,6 +87,7 @@ const addFromCatalogSchema = z.object({
     productoNombre: z.string(),
     presentacionNombre: z.string(),
     ean: z.string().nullable().optional(),
+    descripcion: z.string().nullable().optional(),
     marca: z.string().nullable().optional(),
     pasilloId: z.string().nullable().optional(),
     pasilloNombre: z.string().nullable().optional(),
@@ -119,8 +120,9 @@ stockRouter.post("/add-from-catalog", async (req, res, next) => {
       rows: [product],
     } = await client.query(
       `INSERT INTO products (nexob2b_id, ean, name, brand, category, unit, image_url, alicuota_iva, factor,
-                             pasillo_id, pasillo_nombre, rubro_id, rubro_nombre, subrubro_id, subrubro_nombre, synced_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
+                             pasillo_id, pasillo_nombre, rubro_id, rubro_nombre, subrubro_id, subrubro_nombre,
+                             descripcion, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
        ON CONFLICT (nexob2b_id) DO UPDATE SET
          ean = COALESCE(EXCLUDED.ean, products.ean), name = EXCLUDED.name,
          brand = COALESCE(EXCLUDED.brand, products.brand),
@@ -133,6 +135,7 @@ stockRouter.post("/add-from-catalog", async (req, res, next) => {
          rubro_nombre = COALESCE(EXCLUDED.rubro_nombre, products.rubro_nombre),
          subrubro_id = COALESCE(EXCLUDED.subrubro_id, products.subrubro_id),
          subrubro_nombre = COALESCE(EXCLUDED.subrubro_nombre, products.subrubro_nombre),
+         descripcion = COALESCE(EXCLUDED.descripcion, products.descripcion),
          synced_at = now()
        RETURNING id`,
       [
@@ -151,6 +154,7 @@ stockRouter.post("/add-from-catalog", async (req, res, next) => {
         body.meta.rubroNombre ?? null,
         body.meta.subrubroId ?? null,
         body.meta.subrubroNombre ?? null,
+        body.meta.descripcion ?? null,
       ]
     );
     await client.query(

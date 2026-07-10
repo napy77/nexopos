@@ -5,6 +5,7 @@ export interface CartMeta {
   productoNombre: string;
   presentacionNombre: string;
   ean: string | null;
+  descripcion?: string | null;
   marca: string | null;
   pasilloId: string | null;
   pasilloNombre: string | null;

@@ -23,6 +23,7 @@ export interface B2BProducto {
   id: string;
   ean: string | null;
   nombre: string;
+  descripcion?: string | null;
   marca: string | null;
   unidad_base: string | null;
   alicuota_iva: number | null;

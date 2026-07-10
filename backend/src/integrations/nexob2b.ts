@@ -47,6 +47,7 @@ export interface B2BProducto {
   id: string;               // pm_xxx (producto maestro)
   ean: string | null;
   nombre: string;
+  descripcion?: string | null;
   marca: string | null;
   unidad_base: string | null;
   alicuota_iva: number | null;
@@ -215,6 +216,7 @@ function mockProductos(): B2BProducto[] {
       id: `pm_mock_${i}`,
       ean: String(7790000000000 + i),
       nombre: `${rubro.nombre} ${marca} producto ${i}`,
+      descripcion: `${rubro.nombre} ${marca} producto ${i}. Descripción de ejemplo del catálogo NexoB2B con detalles del artículo.`,
       marca,
       unidad_base: "Unidades",
       alicuota_iva: i % 3 === 0 ? 10.5 : 21,
