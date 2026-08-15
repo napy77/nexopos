@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { api, money } from "@/lib/api";
 
 interface StockItem {
-  id: number; product_id: number; name: string; ean: string; category: string | null;
+  id: number; product_id: number; name: string; ean: string | null; category: string | null;
   unit: string; quantity: string; cost: string | null; sale_price: string | null;
   min_stock: string; low_stock: boolean;
+  origen: string; plu: string | null; venta_por_peso: boolean;
 }
 interface Movement {
   id: number; name: string; type: string; quantity: string; reference: string | null; created_at: string;
@@ -49,6 +50,8 @@ export default function StockPage() {
   const [catResults, setCatResults] = useState<B2BProductoMaestro[]>([]);
   const [adding, setAdding] = useState<AltaEnCurso | null>(null);
   const [okMsg, setOkMsg] = useState("");
+  const [showPropio, setShowPropio] = useState(false);
+  const [porPeso, setPorPeso] = useState(false);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ q, lowOnly: String(lowOnly) });
@@ -84,6 +87,35 @@ export default function StockPage() {
     }, 300);
     return () => clearTimeout(t);
   }, [catQ, showAdd]);
+
+  async function crearProductoPropio(form: FormData) {
+    setError("");
+    const num = (k: string) => (form.get(k) ? Number(form.get(k)) : undefined);
+    try {
+      await api("/api/stock/producto-propio", {
+        method: "POST",
+        body: JSON.stringify({
+          nombre: String(form.get("nombre")),
+          marca: String(form.get("marca") || "") || undefined,
+          rubro: String(form.get("rubro") || "") || undefined,
+          ean: String(form.get("ean") || "") || undefined,
+          plu: String(form.get("plu") || "") || undefined,
+          ventaPorPeso: form.get("ventaPorPeso") === "on",
+          quantity: num("quantity") ?? 0,
+          cost: num("cost"),
+          salePrice: num("salePrice"),
+          minStock: num("minStock"),
+        }),
+      });
+      setShowPropio(false);
+      setPorPeso(false);
+      setOkMsg(`"${form.get("nombre")}" creado y cargado en tu stock.`);
+      setTimeout(() => setOkMsg(""), 4000);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al crear el producto");
+    }
+  }
 
   async function addFromCatalog(form: FormData) {
     if (!adding) return;
@@ -156,11 +188,67 @@ export default function StockPage() {
         <label>
           <input type="checkbox" checked={lowOnly} onChange={(e) => setLowOnly(e.target.checked)} /> Solo stock bajo
         </label>
-        <button onClick={() => { setShowAdd(!showAdd); setAdding(null); }}>
+        <button onClick={() => { setShowPropio(!showPropio); setShowAdd(false); }} className="secondary">
+          + Crear producto propio
+        </button>
+        <button onClick={() => { setShowAdd(!showAdd); setAdding(null); setShowPropio(false); }}>
           + Agregar producto del catálogo
         </button>
       </div>
       {error && <p className="error">{error}</p>}
+      {okMsg && !showAdd && <p className="badge ok" style={{ fontSize: 14 }}>{okMsg}</p>}
+
+      {showPropio && (
+        <div className="card" style={{ border: "2px solid var(--primary)" }}>
+          <h2>Crear producto propio</h2>
+          <p className="muted">
+            Para lo que no está en el catálogo de NexoB2B: mercadería comprada por fuera,
+            fraccionados (comprás el jamón en pieza y lo vendés en bandejas) o elaboración
+            propia (una torta, una vianda). El producto queda solo en tu comercio.
+          </p>
+          <form action={crearProductoPropio}>
+            <div className="toolbar">
+              <input name="nombre" placeholder="Nombre del producto *" required style={{ flex: 2, minWidth: 240 }} autoFocus />
+              <input name="marca" placeholder="Marca" style={{ width: 140 }} />
+              <input name="rubro" placeholder="Rubro (ej. Fiambrería)" style={{ width: 180 }} />
+            </div>
+            <div className="toolbar">
+              <label className="switch-row" style={{ padding: 0 }}>
+                <input
+                  type="checkbox" name="ventaPorPeso"
+                  checked={porPeso}
+                  onChange={(e) => setPorPeso(e.target.checked)}
+                />
+                <span>Se vende <strong>por peso</strong> (el precio es por kilo)</span>
+              </label>
+            </div>
+            <div className="toolbar">
+              <input name="ean" placeholder="Código de barras propio (opcional)" style={{ width: 240 }} />
+              <input
+                name="plu"
+                placeholder={porPeso ? "Código de balanza (PLU) *" : "Código de balanza (PLU)"}
+                style={{ width: 220 }}
+              />
+            </div>
+            <div className="toolbar">
+              <input name="quantity" type="number" step="any" min="0" placeholder={porPeso ? "Stock inicial (kg)" : "Stock inicial"} style={{ width: 160 }} />
+              <input name="cost" type="number" step="0.01" min="0" placeholder={porPeso ? "Costo por kg" : "Costo unitario"} style={{ width: 150 }} />
+              <input name="salePrice" type="number" step="0.01" min="0.01" required placeholder={porPeso ? "Precio por kg *" : "Precio de venta *"} style={{ width: 160 }} />
+              <input name="minStock" type="number" step="any" min="0" placeholder="Stock mínimo" style={{ width: 130 }} />
+            </div>
+            <div className="toolbar">
+              <button type="submit">Crear producto</button>
+              <button type="button" className="secondary" onClick={() => setShowPropio(false)}>Cancelar</button>
+              {porPeso && (
+                <span className="muted">
+                  El PLU es el número que cargás en la balanza; el POS lo lee de la etiqueta
+                  junto con el peso. Configuralo en <a href="/configuracion">Configuración</a>.
+                </span>
+              )}
+            </div>
+          </form>
+        </div>
+      )}
 
       {showAdd && (
         <div className="card" style={{ border: "2px solid var(--primary)" }}>
@@ -280,10 +368,20 @@ export default function StockPage() {
           <tbody>
             {items.map((s) => (
               <tr key={s.id}>
-                <td className="muted">{s.ean}</td>
-                <td>{s.name}</td>
+                <td className="muted">
+                  {s.ean ?? "—"}
+                  {s.plu && <div style={{ fontSize: 11 }}>PLU {s.plu}</div>}
+                </td>
+                <td>
+                  {s.name}
+                  {s.origen === "propio" && <span className="badge info" style={{ marginLeft: 6 }}>propio</span>}
+                  {s.venta_por_peso && <span className="badge warn" style={{ marginLeft: 4 }}>por peso</span>}
+                </td>
                 <td className="num">
-                  <span className={`badge ${s.low_stock ? "err" : "ok"}`}>{Number(s.quantity)}</span>
+                  <span className={`badge ${s.low_stock ? "err" : "ok"}`}>
+                    {Number(s.quantity).toLocaleString("es-AR", { maximumFractionDigits: 3 })}
+                    {s.venta_por_peso ? " kg" : ""}
+                  </span>
                 </td>
                 <td className="num">{s.cost ? money(s.cost) : "—"}</td>
                 <td className="num">{s.sale_price ? money(s.sale_price) : <span className="badge warn">sin precio</span>}</td>

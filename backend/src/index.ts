@@ -14,6 +14,7 @@ import { salesRouter } from "./modules/sales.js";
 import { customersRouter } from "./modules/customers.js";
 import { reportsRouter } from "./modules/reports.js";
 import { exportRouter } from "./modules/export.js";
+import { settingsRouter } from "./modules/settings.js";
 
 const app = express();
 app.use(cors());
@@ -30,6 +31,7 @@ app.use("/api/sales", requireAuth, salesRouter);
 app.use("/api/customers", requireAuth, customersRouter);
 app.use("/api/reports", requireAuth, reportsRouter);
 app.use("/api/export", requireAuth, exportRouter);
+app.use("/api/settings", requireAuth, settingsRouter);
 
 app.use(errorHandler);
 

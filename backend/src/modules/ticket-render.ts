@@ -28,10 +28,10 @@ export const PAYMENT_LABEL: Record<string, string> = {
   account: "Cuenta corriente",
 };
 
-/** 1.000 → "1" ; 2.500 → "2,5" (la cantidad es NUMERIC(12,3) en la base) */
+/** 1.000 → "1" ; 1.750 → "1,75" (la cantidad es NUMERIC(12,3) en la base) */
 export function fmtQty(q: string | number): string {
   const n = Number(q);
-  return Number.isInteger(n) ? String(n) : String(n).replace(".", ",");
+  return n.toLocaleString("es-AR", { maximumFractionDigits: 3 });
 }
 
 export function fmtMoney(v: string | number): string {

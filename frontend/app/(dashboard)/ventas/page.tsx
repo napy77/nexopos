@@ -4,16 +4,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, money } from "@/lib/api";
 import { loadPrintSettings, printTicket, openTicketPdf } from "@/lib/print";
+import { leerCodigoBalanza, buscarPorPlu, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
 
 interface StockItem {
   product_id: number; name: string; ean: string; category: string | null;
   pasillo_nombre: string | null; rubro_nombre: string | null; subrubro_nombre: string | null;
   image_url: string | null; quantity: string; sale_price: string | null;
+  origen: string; plu: string | null; venta_por_peso: boolean;
 }
 interface Customer { id: number; name: string; balance: string }
 interface SaleLine {
   productId: number; name: string; quantity: number;
   unitPrice: number; basePrice: number; available: number;
+  porPeso?: boolean;
 }
 interface Sale {
   id: number; ticket_number: number; payment_method: string; total: string;
@@ -59,6 +62,7 @@ export default function VentasPage() {
   const [showCustomers, setShowCustomers] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [refundList, setRefundList] = useState<Sale[] | null>(null);
+  const [balanza, setBalanza] = useState<BalanzaConfig>(BALANZA_DEFAULT);
   const [newCustomerName, setNewCustomerName] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -72,6 +76,9 @@ export default function VentasPage() {
   useEffect(() => {
     loadStock();
     loadCustomers();
+    api<{ balanza: BalanzaConfig }>("/api/settings/balanza")
+      .then((d) => setBalanza(d.balanza))
+      .catch(console.error);
     searchRef.current?.focus();
   }, [loadStock, loadCustomers]);
 
@@ -105,7 +112,8 @@ export default function VentasPage() {
     return enRubro.filter((i) => {
       if (subrubro && i.subrubro_nombre !== subrubro) return false;
       if (!term) return true;
-      return i.name.toLowerCase().includes(term) || i.ean.includes(term);
+      // ean puede ser null: los productos propios no siempre tienen código
+      return i.name.toLowerCase().includes(term) || (i.ean ?? "").includes(term) || (i.plu ?? "") === term;
     });
   }, [enRubro, subrubro, q]);
 
@@ -124,13 +132,35 @@ export default function VentasPage() {
 
   // ── Armado del ticket ──────────────────────────────────────────────────────
 
-  function addLine(item: StockItem) {
-    if (!item.sale_price) {
+  /**
+   * @param cantidad  la que trae la etiqueta de balanza (kg); si no, suma 1
+   * @param importe   total ya calculado por la balanza, si la etiqueta lo trae
+   */
+  function addLine(item: StockItem, cantidad?: number, importe?: number) {
+    if (!item.sale_price && importe === undefined) {
       setError(`"${item.name}" no tiene precio de venta. Definilo en Stock.`);
       return;
     }
     setError("");
     setBuffer("");
+
+    // Etiqueta de balanza: la línea entra con el peso (o el importe) pesado,
+    // no se acumula de a uno como un producto por unidad.
+    if (cantidad !== undefined || importe !== undefined) {
+      const precio = importe !== undefined ? importe : Number(item.sale_price);
+      const qty = importe !== undefined ? 1 : cantidad!;
+      setLines((prev) => [
+        ...prev,
+        {
+          productId: item.product_id, name: item.name, quantity: qty,
+          unitPrice: precio, basePrice: precio,
+          available: Number(item.quantity), porPeso: item.venta_por_peso,
+        },
+      ]);
+      setSelectedId(item.product_id);
+      return;
+    }
+
     setLines((prev) => {
       const existing = prev.find((l) => l.productId === item.product_id);
       if (existing) {
@@ -153,6 +183,27 @@ export default function VentasPage() {
   function onSearchEnter() {
     const term = q.trim();
     if (!term) return;
+
+    // 1. ¿Es una etiqueta de balanza? Trae el producto y el peso adentro
+    const lectura = leerCodigoBalanza(term, balanza);
+    if (lectura) {
+      const item = buscarPorPlu(sellable, lectura.plu);
+      if (!item) {
+        setError(
+          `Etiqueta de balanza con código ${lectura.plu}, pero ningún producto tuyo lo tiene asignado. ` +
+          `Cargalo en Stock → Crear producto propio.`
+        );
+        setQ("");
+        searchRef.current?.focus();
+        return;
+      }
+      addLine(item, lectura.peso, lectura.importe);
+      setQ("");
+      searchRef.current?.focus();
+      return;
+    }
+
+    // 2. EAN común, o único resultado del filtro
     const exact = sellable.find((i) => i.ean === term);
     const target = exact ?? (visible.length === 1 ? visible[0] : null);
     if (target) {
@@ -355,7 +406,8 @@ export default function VentasPage() {
                 <span className="tl-subtotal">{money(l.quantity * l.unitPrice)}</span>
               </div>
               <div className="tl-detail muted">
-                <b>{l.quantity}</b> x {money(l.unitPrice)}
+                <b>{l.quantity.toLocaleString("es-AR", { maximumFractionDigits: 3 })}{l.porPeso ? " kg" : ""}</b>
+                {" x "}{money(l.unitPrice)}{l.porPeso ? "/kg" : ""}
                 {l.unitPrice !== l.basePrice && <span className="badge warn" style={{ marginLeft: 6 }}>precio modificado</span>}
               </div>
             </div>
@@ -493,8 +545,11 @@ export default function VentasPage() {
                     <div className="pos-card-footer">
                       <span className="pos-card-price">
                         {item.sale_price ? money(item.sale_price) : "sin precio"}
+                        {item.venta_por_peso && <span style={{ fontSize: 11 }}>/kg</span>}
                       </span>
-                      <span className="pos-card-stock">{Number(item.quantity)}</span>
+                      <span className="pos-card-stock">
+                        {Number(item.quantity)}{item.venta_por_peso ? " kg" : ""}
+                      </span>
                     </div>
                   </button>
                 );

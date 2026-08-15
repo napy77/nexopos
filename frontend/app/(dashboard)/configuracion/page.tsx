@@ -6,6 +6,7 @@ import {
   loadPrintSettings, savePrintSettings, printTicket,
   DEFAULT_PRINT_SETTINGS, type PrintSettings,
 } from "@/lib/print";
+import { leerCodigoBalanza, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
 
 interface Commerce {
   id: number; nexob2b_id: string | null; name: string; email: string;
@@ -25,11 +26,16 @@ export default function ConfiguracionPage() {
   const [mockMode, setMockMode] = useState(false);
   const [settings, setSettings] = useState<PrintSettings>(DEFAULT_PRINT_SETTINGS);
   const [ultimaVenta, setUltimaVenta] = useState<Sale | null>(null);
+  const [balanza, setBalanza] = useState<BalanzaConfig>(BALANZA_DEFAULT);
+  const [pruebaCodigo, setPruebaCodigo] = useState("");
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     setSettings(loadPrintSettings());
+    api<{ balanza: BalanzaConfig }>("/api/settings/balanza")
+      .then((d) => setBalanza(d.balanza))
+      .catch(console.error);
     api<{ commerce: Commerce; mockMode: boolean }>("/api/auth/me")
       .then((d) => { setCommerce(d.commerce); setMockMode(d.mockMode); })
       .catch(console.error);
@@ -45,6 +51,22 @@ export default function ConfiguracionPage() {
     setMsg("Preferencias guardadas en esta caja.");
     setTimeout(() => setMsg(""), 2500);
   }
+
+  async function guardarBalanza(cambio: Partial<BalanzaConfig>) {
+    const next = { ...balanza, ...cambio };
+    setBalanza(next);
+    try {
+      await api("/api/settings/balanza", { method: "PUT", body: JSON.stringify(next) });
+      setMsg("Configuración de balanza guardada.");
+      setTimeout(() => setMsg(""), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    }
+  }
+
+  const lecturaPrueba = pruebaCodigo.trim()
+    ? leerCodigoBalanza(pruebaCodigo.trim(), { ...balanza, habilitado: true })
+    : null;
 
   async function probarImpresion() {
     setError("");
@@ -127,6 +149,99 @@ export default function ConfiguracionPage() {
               Mac: open -a &quot;Google Chrome&quot; --args --kiosk-printing https://nexopos.app
             </code>
           </div>
+        </div>
+
+        <div className="card" style={{ minWidth: 320 }}>
+          <h2>Balanza etiquetadora</h2>
+          <p className="muted">
+            Si fraccionás y pesás mercadería (fiambres, verdulería, carnicería), la balanza
+            imprime una etiqueta cuyo código de barras lleva adentro el producto y el peso.
+            Activalo para que el POS lo lea de una.
+          </p>
+
+          <label className="switch-row">
+            <input
+              type="checkbox"
+              checked={balanza.habilitado}
+              onChange={(e) => guardarBalanza({ habilitado: e.target.checked })}
+            />
+            <span><strong>Leer etiquetas de balanza</strong></span>
+          </label>
+
+          {balanza.habilitado && (
+            <>
+              <div className="toolbar">
+                <label style={{ width: 110 }}>Prefijo</label>
+                <input
+                  value={balanza.prefijos.join(", ")}
+                  onChange={(e) => setBalanza({ ...balanza, prefijos: e.target.value.split(",").map((p) => p.trim()) })}
+                  onBlur={() => guardarBalanza({ prefijos: balanza.prefijos.filter((p) => /^\d{1,2}$/.test(p)) })}
+                  style={{ width: 110 }}
+                />
+                <span className="muted">Con qué empieza la etiqueta (20 a 29)</span>
+              </div>
+
+              <div className="toolbar">
+                <label style={{ width: 110 }}>La etiqueta trae</label>
+                <select
+                  value={balanza.contenido}
+                  onChange={(e) => guardarBalanza({
+                    contenido: e.target.value as "peso" | "precio",
+                    divisor: e.target.value === "peso" ? 1000 : 100,
+                  })}
+                >
+                  <option value="peso">El peso (gramos)</option>
+                  <option value="precio">El importe ya calculado</option>
+                </select>
+              </div>
+
+              <div className="toolbar">
+                <label style={{ width: 110 }}>Dígitos</label>
+                <input
+                  type="number" min={3} max={7} value={balanza.digitosCodigo}
+                  onChange={(e) => guardarBalanza({ digitosCodigo: Number(e.target.value) })}
+                  style={{ width: 70 }}
+                />
+                <span className="muted">del código</span>
+                <input
+                  type="number" min={3} max={7} value={balanza.digitosValor}
+                  onChange={(e) => guardarBalanza({ digitosValor: Number(e.target.value) })}
+                  style={{ width: 70 }}
+                />
+                <span className="muted">del {balanza.contenido}</span>
+              </div>
+
+              <div className="empty-state" style={{ marginTop: 8 }}>
+                <strong>Probá una etiqueta</strong>
+                <p className="muted" style={{ margin: "4px 0" }}>
+                  Escaneá acá una etiqueta impresa por tu balanza para verificar que la lea bien:
+                </p>
+                <input
+                  value={pruebaCodigo}
+                  onChange={(e) => setPruebaCodigo(e.target.value)}
+                  placeholder="Escaneá o tipeá el código…"
+                  style={{ width: "100%" }}
+                />
+                {pruebaCodigo.trim() && (
+                  lecturaPrueba ? (
+                    <p className="badge ok" style={{ marginTop: 8 }}>
+                      Producto <strong>{lecturaPrueba.plu}</strong>
+                      {lecturaPrueba.peso !== undefined && (
+                        <> · {lecturaPrueba.peso.toLocaleString("es-AR", { maximumFractionDigits: 3 })} kg</>
+                      )}
+                      {lecturaPrueba.importe !== undefined && (
+                        <> · ${lecturaPrueba.importe.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="badge err" style={{ marginTop: 8 }}>
+                      No coincide con el formato configurado. Revisá el prefijo y los dígitos.
+                    </p>
+                  )
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="card" style={{ minWidth: 300 }}>

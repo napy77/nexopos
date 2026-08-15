@@ -20,6 +20,7 @@ stockRouter.get("/", async (req, res, next) => {
     const { rows } = await pool.query(
       `SELECT s.id, s.product_id, p.name, p.ean, p.category, p.unit, p.image_url,
               p.pasillo_nombre, p.rubro_nombre, p.subrubro_nombre,
+              p.origen, p.plu, p.venta_por_peso,
               s.quantity, s.cost, s.sale_price, s.min_stock, s.updated_at,
               (s.quantity <= s.min_stock) AS low_stock
        FROM stock_items s JOIN products p ON p.id = s.product_id
@@ -177,6 +178,89 @@ stockRouter.post("/add-from-catalog", async (req, res, next) => {
     }
     await client.query("COMMIT");
     await audit(commerceId, "stock.add_from_catalog", "products", product.id, { presentacionId: body.presentacionId });
+    res.status(201).json({ ok: true, productId: product.id });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+const productoPropioSchema = z.object({
+  nombre: z.string().min(1),
+  marca: z.string().optional(),
+  rubro: z.string().optional(),          // texto libre: no viene de la taxonomía B2B
+  ean: z.string().optional(),            // código de barras propio, si tiene
+  plu: z.string().optional(),            // código de balanza
+  ventaPorPeso: z.boolean().default(false),
+  unidad: z.string().optional(),         // "unidad", "kg", "bandeja 100g"…
+  descripcion: z.string().optional(),
+  quantity: z.coerce.number().nonnegative().default(0),
+  cost: z.coerce.number().nonnegative().optional(),
+  salePrice: z.coerce.number().positive(),
+  minStock: z.coerce.number().nonnegative().optional(),
+});
+
+/**
+ * POST /api/stock/producto-propio
+ * Crea un producto que no existe en el catálogo de NexoB2B: fraccionados
+ * (jamón por bandeja), elaboración propia (una torta) o mercadería comprada
+ * fuera del marketplace. Pertenece solo a este comercio.
+ */
+stockRouter.post("/producto-propio", async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const body = productoPropioSchema.parse(req.body);
+    const commerceId = req.auth.commerceId;
+    const plu = body.plu?.trim() || null;
+
+    await client.query("BEGIN");
+
+    if (plu) {
+      const { rows: dup } = await client.query(
+        "SELECT id, name FROM products WHERE commerce_id = $1 AND plu = $2",
+        [commerceId, plu]
+      );
+      if (dup[0]) throw new HttpError(409, `El código de balanza ${plu} ya lo usa "${dup[0].name}"`);
+    }
+
+    const {
+      rows: [product],
+    } = await client.query(
+      `INSERT INTO products
+         (commerce_id, origen, name, brand, category, rubro_nombre, ean, plu,
+          venta_por_peso, unit, descripcion, synced_at)
+       VALUES ($1, 'propio', $2, $3, $4, $4, $5, $6, $7, $8, $9, now())
+       RETURNING id`,
+      [
+        commerceId,
+        body.nombre,
+        body.marca ?? null,
+        body.rubro ?? null,
+        body.ean?.trim() || null,
+        plu,
+        body.ventaPorPeso,
+        body.unidad ?? (body.ventaPorPeso ? "kg" : "unidad"),
+        body.descripcion ?? null,
+      ]
+    );
+
+    await client.query(
+      `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price, min_stock, updated_at)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), now())`,
+      [commerceId, product.id, body.quantity, body.cost ?? null, body.salePrice, body.minStock ?? null]
+    );
+    if (body.quantity > 0) {
+      await client.query(
+        `INSERT INTO stock_movements (commerce_id, product_id, type, quantity, reference)
+         VALUES ($1, $2, 'manual_adjustment', $3, 'Alta de producto propio')`,
+        [commerceId, product.id, body.quantity]
+      );
+    }
+
+    await client.query("COMMIT");
+    await audit(commerceId, "product.create_own", "products", product.id, { nombre: body.nombre, plu });
     res.status(201).json({ ok: true, productId: product.id });
   } catch (err) {
     await client.query("ROLLBACK");
