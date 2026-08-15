@@ -43,7 +43,18 @@ a { color: var(--primary); text-decoration: none; }
   display: block; padding: 10px 20px; color: #d1d5db; font-weight: 500;
 }
 .sidebar a:hover, .sidebar a.active { background: #1f2937; color: #fff; }
-.sidebar .footer { margin-top: auto; padding: 12px 20px; font-size: 12px; color: #6b7280; }
+.sidebar .footer { margin-top: auto; padding: 8px 0 4px; font-size: 12px; color: #6b7280; border-top: 1px solid #1f2937; }
+.sidebar .footer a { padding: 6px 20px; }
+.perfil-link { display: block; padding: 8px 20px !important; }
+.perfil-nombre { display: block; color: #fff; font-weight: 600; font-size: 13px; }
+.perfil-sub { display: block; color: #9ca3af; font-size: 11px; }
+
+/* Filas de opción (checkbox / radio) en Configuración */
+.switch-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 0; cursor: pointer;
+}
+.switch-row input { margin-top: 3px; width: 16px; height: 16px; }
 
 .main { flex: 1; padding: 24px; max-width: 1200px; }
 

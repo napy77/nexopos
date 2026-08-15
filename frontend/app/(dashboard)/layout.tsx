@@ -51,8 +51,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </Link>
         ))}
         <div className="footer">
-          {commerceName && <div>{commerceName}</div>}
-          <a onClick={logout} style={{ cursor: "pointer", padding: 0 }}>
+          <Link href="/configuracion" className={`perfil-link ${pathname.startsWith("/configuracion") ? "active" : ""}`}>
+            <span className="perfil-nombre">{commerceName || "Mi comercio"}</span>
+            <span className="perfil-sub">⚙ Configuración</span>
+          </Link>
+          <a onClick={logout} style={{ cursor: "pointer", padding: "6px 20px" }}>
             Cerrar sesión
           </a>
         </div>

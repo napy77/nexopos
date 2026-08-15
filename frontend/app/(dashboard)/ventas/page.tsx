@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { api, getToken, money } from "@/lib/api";
+import { api, money } from "@/lib/api";
+import { loadPrintSettings, printTicket, openTicketPdf } from "@/lib/print";
 
 interface StockItem {
   product_id: number; name: string; ean: string; category: string | null;
@@ -265,17 +266,21 @@ export default function VentasPage() {
       loadStock();
       loadCustomers();
       searchRef.current?.focus();
+      // La impresión va después de limpiar la pantalla: la caja queda lista
+      // para la próxima venta aunque la impresora tarde o falle.
+      if (loadPrintSettings().autoPrint) imprimir(sale.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cobrar");
     }
   }
 
-  async function openTicketPdf(saleId: number) {
-    const res = await fetch(`/api/sales/${saleId}/ticket.pdf`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    });
-    const blob = await res.blob();
-    window.open(URL.createObjectURL(blob), "_blank");
+  /** Manda el ticket a la impresora; si falla, no rompe la venta ya cobrada. */
+  async function imprimir(saleId: number) {
+    try {
+      await printTicket(saleId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo imprimir el ticket");
+    }
   }
 
   async function quickCreateCustomer() {
@@ -371,7 +376,9 @@ export default function VentasPage() {
           <p style={{ margin: "4px 12px" }}>
             <span className="badge ok">
               Ticket #{lastTicket.ticketNumber} emitido —{" "}
-              <a style={{ cursor: "pointer" }} onClick={() => openTicketPdf(lastTicket.id)}>ver PDF</a>
+              <a style={{ cursor: "pointer" }} onClick={() => imprimir(lastTicket.id)}>🖨 imprimir</a>
+              {" · "}
+              <a style={{ cursor: "pointer" }} onClick={() => openTicketPdf(lastTicket.id)}>PDF</a>
             </span>
           </p>
         )}

@@ -3,6 +3,7 @@ import { z } from "zod";
 import PDFDocument from "pdfkit";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
+import { renderTicketHtml, fmtQty, fmtMoney, PAYMENT_LABEL } from "./ticket-render.js";
 
 export const salesRouter = Router();
 
@@ -253,8 +254,28 @@ salesRouter.get("/:id", async (req, res, next) => {
 });
 
 /**
+ * GET /api/sales/:id/ticket.html?width=80mm|58mm|auto&autoprint=1
+ * Ticket imprimible. El POS lo carga en un iframe oculto y lo manda a la
+ * impresora sin descargar nada.
+ */
+salesRouter.get("/:id/ticket.html", async (req, res, next) => {
+  try {
+    const sale = await getSaleWithItems(Number(req.params.id), req.auth.commerceId);
+    if (!sale) throw new HttpError(404, "Ticket no encontrado");
+    const width = ["80mm", "58mm", "auto"].includes(String(req.query.width))
+      ? (String(req.query.width) as "80mm" | "58mm" | "auto")
+      : "80mm";
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(renderTicketHtml(sale, { width, autoPrint: req.query.autoprint === "1" }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/sales/:id/ticket.pdf
- * Ticket simple en PDF (formato 80mm, sin validez fiscal en esta versión).
+ * Misma información en PDF, para guardar o reimprimir desde el historial.
+ * Formato 80mm, sin validez fiscal en esta versión.
  */
 salesRouter.get("/:id/ticket.pdf", async (req, res, next) => {
   try {
@@ -264,39 +285,57 @@ salesRouter.get("/:id/ticket.pdf", async (req, res, next) => {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename=ticket-${sale.ticket_number}.pdf`);
 
-    const doc = new PDFDocument({ size: [227, 400 + sale.items.length * 14], margin: 10 });
+    const ANCHO = 227;   // 80mm a 72dpi
+    const MARGEN = 10;
+    const UTIL = ANCHO - MARGEN * 2;
+    const doc = new PDFDocument({ size: [ANCHO, 400 + sale.items.length * 24], margin: MARGEN });
     doc.pipe(res);
 
-    doc.fontSize(12).font("Helvetica-Bold").text(sale.commerce_name, { align: "center" });
-    doc.fontSize(8).font("Helvetica").text(sale.refund_of ? "REEMBOLSO · no fiscal" : "Ticket no fiscal", { align: "center" });
-    doc.moveDown(0.5);
+    // Línea horizontal real: dibujada, no compuesta con caracteres (la fuente
+    // base de pdfkit no tiene los caracteres de dibujo y los imprime como "%")
+    const separador = (grosor = 0.5) => {
+      doc.moveDown(0.3);
+      doc.lineWidth(grosor)
+        .moveTo(MARGEN, doc.y)
+        .lineTo(ANCHO - MARGEN, doc.y)
+        .stroke();
+      doc.moveDown(0.4);
+    };
+
+    doc.fontSize(13).font("Helvetica-Bold").text(sale.commerce_name, { align: "center" });
+    doc.fontSize(8).font("Helvetica");
+    if (sale.refund_of) doc.font("Helvetica-Bold").text("** REEMBOLSO **", { align: "center" }).font("Helvetica");
+    doc.text("Ticket no fiscal", { align: "center" });
+
+    separador();
     doc.text(`Ticket #${sale.ticket_number}`);
-    doc.text(new Date(sale.created_at).toLocaleString("es-AR"));
+    doc.text(new Date(sale.created_at).toLocaleString("es-AR", {
+      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    }));
     if (sale.customer_name) doc.text(`Cliente: ${sale.customer_name}`);
-    doc.moveDown(0.5);
-    doc.text("─".repeat(38));
+    separador();
 
     for (const item of sale.items) {
-      doc.text(item.name.slice(0, 34));
-      doc.text(
-        `  ${item.quantity} x $${Number(item.unit_price).toFixed(2)}` +
-          ` = $${(item.quantity * item.unit_price).toFixed(2)}`
-      );
+      const importe = Number(item.quantity) * Number(item.unit_price);
+      doc.font("Helvetica-Bold").text(item.name, { width: UTIL });
+      doc.font("Helvetica");
+      const detalleY = doc.y;
+      doc.text(`  ${fmtQty(item.quantity)} x $${fmtMoney(item.unit_price)}`, MARGEN, detalleY);
+      doc.text(`$${fmtMoney(importe)}`, MARGEN, detalleY, { width: UTIL, align: "right" });
     }
 
-    doc.text("─".repeat(38));
-    doc.font("Helvetica-Bold");
+    separador();
     if (Number(sale.discount) > 0) {
-      doc.text(`Subtotal: $${Number(sale.subtotal).toFixed(2)}`);
-      doc.text(`Descuento: -$${Number(sale.discount).toFixed(2)}`);
+      doc.text(`Subtotal: $${fmtMoney(sale.subtotal)}`);
+      doc.text(`Descuento: -$${fmtMoney(sale.discount)}`);
     }
-    doc.fontSize(11).text(`TOTAL: $${Number(sale.total).toFixed(2)}`);
-    const methods: Record<string, string> = {
-      cash: "Efectivo", wallet: "Billetera", card: "Tarjeta",
-      transfer: "Transferencia", account: "Cuenta corriente",
-    };
-    doc.fontSize(8).font("Helvetica").text(`Pago: ${methods[sale.payment_method]}`);
-    doc.moveDown().text("¡Gracias por su compra!", { align: "center" });
+    const totalY = doc.y;
+    doc.fontSize(14).font("Helvetica-Bold").text("TOTAL", MARGEN, totalY);
+    doc.text(`$${fmtMoney(sale.total)}`, MARGEN, totalY, { width: UTIL, align: "right" });
+    doc.fontSize(8).font("Helvetica").text(`Pago: ${PAYMENT_LABEL[sale.payment_method] ?? sale.payment_method}`);
+    separador(1.5);
+
+    doc.text("¡Gracias por su compra!", { align: "center" });
     doc.end();
   } catch (err) {
     next(err);

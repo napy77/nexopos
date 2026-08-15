@@ -1,0 +1,164 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import {
+  loadPrintSettings, savePrintSettings, printTicket,
+  DEFAULT_PRINT_SETTINGS, type PrintSettings,
+} from "@/lib/print";
+
+interface Commerce {
+  id: number; nexob2b_id: string | null; name: string; email: string;
+  tax_id: string | null; estado: string | null;
+  ciudad: string | null; provincia: string | null; created_at: string;
+}
+interface Sale { id: number; ticket_number: number }
+
+const ANCHOS = [
+  { id: "80mm", label: "Ticketera 80mm", detalle: "El formato más común de comandera térmica" },
+  { id: "58mm", label: "Ticketera 58mm", detalle: "Térmica angosta, tipo mini impresora" },
+  { id: "auto", label: "Impresora común", detalle: "Hoja A4 o Carta, para impresora de oficina" },
+] as const;
+
+export default function ConfiguracionPage() {
+  const [commerce, setCommerce] = useState<Commerce | null>(null);
+  const [mockMode, setMockMode] = useState(false);
+  const [settings, setSettings] = useState<PrintSettings>(DEFAULT_PRINT_SETTINGS);
+  const [ultimaVenta, setUltimaVenta] = useState<Sale | null>(null);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setSettings(loadPrintSettings());
+    api<{ commerce: Commerce; mockMode: boolean }>("/api/auth/me")
+      .then((d) => { setCommerce(d.commerce); setMockMode(d.mockMode); })
+      .catch(console.error);
+    api<Sale[]>("/api/sales")
+      .then((ventas) => setUltimaVenta(ventas[0] ?? null))
+      .catch(console.error);
+  }, []);
+
+  function update(cambio: Partial<PrintSettings>) {
+    const next = { ...settings, ...cambio };
+    setSettings(next);
+    savePrintSettings(next);
+    setMsg("Preferencias guardadas en esta caja.");
+    setTimeout(() => setMsg(""), 2500);
+  }
+
+  async function probarImpresion() {
+    setError("");
+    if (!ultimaVenta) {
+      setError("Todavía no hay ninguna venta para usar como prueba. Emití un ticket primero.");
+      return;
+    }
+    try {
+      await printTicket(ultimaVenta.id, settings);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo imprimir");
+    }
+  }
+
+  return (
+    <div>
+      <h1>Configuración</h1>
+      {msg && <p className="badge ok">{msg}</p>}
+      {error && <p className="error">{error}</p>}
+
+      <div className="row">
+        <div className="card" style={{ minWidth: 320 }}>
+          <h2>Impresión de tickets</h2>
+          <p className="muted">
+            Esta configuración es de <strong>esta caja</strong>: si usás el POS en otra
+            computadora o tablet, cada una tiene su propia impresora.
+          </p>
+
+          <label className="switch-row">
+            <input
+              type="checkbox"
+              checked={settings.autoPrint}
+              onChange={(e) => update({ autoPrint: e.target.checked })}
+            />
+            <span>
+              <strong>Imprimir el ticket al cobrar</strong>
+              <span className="muted"> — sale solo apenas se emite la venta</span>
+            </span>
+          </label>
+
+          <h2 style={{ marginTop: 16 }}>Tipo de impresora</h2>
+          {ANCHOS.map((a) => (
+            <label key={a.id} className="switch-row">
+              <input
+                type="radio"
+                name="width"
+                checked={settings.width === a.id}
+                onChange={() => update({ width: a.id })}
+              />
+              <span>
+                <strong>{a.label}</strong>
+                <div className="muted" style={{ fontSize: 12 }}>{a.detalle}</div>
+              </span>
+            </label>
+          ))}
+
+          <div className="toolbar" style={{ marginTop: 12 }}>
+            <button onClick={probarImpresion}>🖨 Probar impresión</button>
+            <span className="muted">Reimprime el último ticket emitido</span>
+          </div>
+
+          <div className="empty-state" style={{ marginTop: 12 }}>
+            <strong>Para que imprima sin preguntar nada</strong>
+            <p className="muted" style={{ margin: "6px 0 0" }}>
+              El navegador siempre muestra el diálogo de impresión por seguridad. Para
+              saltearlo en la caja, abrí el POS con Chrome iniciado así:
+            </p>
+            <code style={{ display: "block", marginTop: 6, fontSize: 12, wordBreak: "break-all" }}>
+              chrome --kiosk-printing https://nexopos.app
+            </code>
+            <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+              Con eso, cada ticket sale directo en la impresora predeterminada del equipo.
+            </p>
+          </div>
+        </div>
+
+        <div className="card" style={{ minWidth: 300 }}>
+          <h2>Datos del comercio</h2>
+          <p className="muted">
+            Vienen de tu cuenta de NexoB2B. Para modificarlos, entrá a{" "}
+            <a href="https://nexob2b.app" target="_blank" rel="noreferrer">nexob2b.app</a> →
+            Perfil; los cambios se reflejan acá la próxima vez que inicies sesión.
+          </p>
+          {commerce ? (
+            <table>
+              <tbody>
+                <tr><td className="muted">Nombre</td><td><strong>{commerce.name}</strong></td></tr>
+                <tr><td className="muted">Email</td><td>{commerce.email}</td></tr>
+                {commerce.tax_id && <tr><td className="muted">CUIT</td><td>{commerce.tax_id}</td></tr>}
+                <tr>
+                  <td className="muted">Ubicación</td>
+                  <td>{[commerce.ciudad, commerce.provincia].filter(Boolean).join(", ") || "—"}</td>
+                </tr>
+                <tr>
+                  <td className="muted">Estado</td>
+                  <td>
+                    {commerce.estado
+                      ? <span className={`badge ${commerce.estado === "aprobado" ? "ok" : "warn"}`}>{commerce.estado}</span>
+                      : "—"}
+                  </td>
+                </tr>
+                <tr><td className="muted">ID NexoB2B</td><td className="muted">{commerce.nexob2b_id ?? "—"}</td></tr>
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted">Cargando…</p>
+          )}
+          {mockMode && (
+            <p className="badge warn" style={{ marginTop: 8 }}>
+              Modo demo: no conectado al NexoB2B real
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

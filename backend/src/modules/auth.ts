@@ -42,8 +42,23 @@ authRouter.post("/login", async (req, res, next) => {
   }
 });
 
-authRouter.get("/me", requireAuth, (req, res) => {
-  res.json({ commerce: req.auth, mockMode: isMockMode() });
+/**
+ * GET /api/auth/me
+ * Perfil del comercio: los datos vienen de NexoB2B (se refrescan en cada
+ * login) y se editan allá, acá son de solo lectura.
+ */
+authRouter.get("/me", requireAuth, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nexob2b_id, name, email, tax_id, estado, ciudad, provincia, created_at
+       FROM commerces WHERE id = $1`,
+      [req.auth.commerceId]
+    );
+    if (!rows[0]) throw new HttpError(404, "Comercio no encontrado");
+    res.json({ commerce: rows[0], mockMode: isMockMode() });
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
