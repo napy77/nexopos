@@ -107,17 +107,25 @@ export default function ConfiguracionPage() {
           </div>
 
           <div className="empty-state" style={{ marginTop: 12 }}>
-            <strong>Para que imprima sin preguntar nada</strong>
+            <strong>Sobre el diálogo de impresión</strong>
             <p className="muted" style={{ margin: "6px 0 0" }}>
-              El navegador siempre muestra el diálogo de impresión por seguridad. Para
-              saltearlo en la caja, abrí el POS con Chrome iniciado así:
+              El navegador siempre pide confirmación antes de imprimir: es una medida de
+              seguridad y ninguna página web puede saltearla. En la práctica alcanza con
+              apretar Enter, porque queda seleccionada la impresora predeterminada.
+            </p>
+            <p className="muted" style={{ margin: "8px 0 0" }}>
+              <strong>Opcional:</strong> Chrome puede imprimir sin preguntar si se lo abre
+              con un parámetro especial. Para que funcione hay que <strong>cerrar Chrome
+              por completo primero</strong> (si queda una ventana abierta, el parámetro se
+              ignora) y después iniciarlo así:
             </p>
             <code style={{ display: "block", marginTop: 6, fontSize: 12, wordBreak: "break-all" }}>
-              chrome --kiosk-printing https://nexopos.app
+              {/* Windows */}
+              Windows: chrome.exe --kiosk-printing https://nexopos.app
             </code>
-            <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
-              Con eso, cada ticket sale directo en la impresora predeterminada del equipo.
-            </p>
+            <code style={{ display: "block", marginTop: 4, fontSize: 12, wordBreak: "break-all" }}>
+              Mac: open -a &quot;Google Chrome&quot; --args --kiosk-printing https://nexopos.app
+            </code>
           </div>
         </div>
 
