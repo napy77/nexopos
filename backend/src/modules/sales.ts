@@ -4,6 +4,7 @@ import PDFDocument from "pdfkit";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { renderTicketHtml, fmtQty, fmtMoney, PAYMENT_LABEL } from "./ticket-render.js";
+import { sesionAbierta } from "./caja.js";
 
 export const salesRouter = Router();
 
@@ -74,12 +75,17 @@ salesRouter.post("/", async (req, res, next) => {
       [commerceId]
     );
 
+    // Si hay caja abierta la venta queda asociada; si no, se vende igual
+    const sesion = await sesionAbierta(commerceId, client);
+
     const {
       rows: [sale],
     } = await client.query(
-      `INSERT INTO sales (commerce_id, ticket_number, customer_id, payment_method, subtotal, discount, total)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, ticket_number, created_at`,
-      [commerceId, next_number, body.customerId ?? null, body.paymentMethod, subtotal, body.discount, total]
+      `INSERT INTO sales (commerce_id, ticket_number, customer_id, payment_method,
+                          subtotal, discount, total, cash_session_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, ticket_number, created_at`,
+      [commerceId, next_number, body.customerId ?? null, body.paymentMethod,
+       subtotal, body.discount, total, sesion?.id ?? null]
     );
     for (const l of lines) {
       await client.query(

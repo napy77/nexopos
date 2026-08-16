@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
+import { sesionAbierta } from "./caja.js";
 
 export const customersRouter = Router();
 
@@ -63,7 +64,12 @@ customersRouter.get("/:id/transactions", async (req, res, next) => {
   }
 });
 
-const paymentSchema = z.object({ amount: z.coerce.number().positive(), note: z.string().optional() });
+const paymentSchema = z.object({
+  amount: z.coerce.number().positive(),
+  note: z.string().optional(),
+  // Con qué pagó: importa para el arqueo (si fue efectivo, está en el cajón)
+  paymentMethod: z.enum(["cash", "wallet", "card", "transfer"]).default("cash"),
+});
 
 /** POST /api/customers/:id/payments — registra un pago que baja la deuda */
 customersRouter.post("/:id/payments", async (req, res, next) => {
@@ -77,10 +83,13 @@ customersRouter.post("/:id/payments", async (req, res, next) => {
       [Number(req.params.id), commerceId]
     );
     if (!customers[0]) throw new HttpError(404, "Cliente no encontrado");
+    const sesion = await sesionAbierta(commerceId, client);
     await client.query(
-      `INSERT INTO customer_transactions (commerce_id, customer_id, type, amount, note)
-       VALUES ($1, $2, 'payment', $3, $4)`,
-      [commerceId, customers[0].id, -body.amount, body.note ?? "Pago recibido"]
+      `INSERT INTO customer_transactions
+         (commerce_id, customer_id, type, amount, note, payment_method, cash_session_id)
+       VALUES ($1, $2, 'payment', $3, $4, $5, $6)`,
+      [commerceId, customers[0].id, -body.amount, body.note ?? "Pago recibido",
+       body.paymentMethod, sesion?.id ?? null]
     );
     const {
       rows: [updated],

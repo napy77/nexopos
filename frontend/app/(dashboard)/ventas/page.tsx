@@ -63,6 +63,7 @@ export default function VentasPage() {
   const [showActions, setShowActions] = useState(false);
   const [refundList, setRefundList] = useState<Sale[] | null>(null);
   const [balanza, setBalanza] = useState<BalanzaConfig>(BALANZA_DEFAULT);
+  const [cajaAbierta, setCajaAbierta] = useState<boolean | null>(null);
   const [newCustomerName, setNewCustomerName] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -78,6 +79,9 @@ export default function VentasPage() {
     loadCustomers();
     api<{ balanza: BalanzaConfig }>("/api/settings/balanza")
       .then((d) => setBalanza(d.balanza))
+      .catch(console.error);
+    api<{ abierta: boolean }>("/api/caja")
+      .then((d) => setCajaAbierta(d.abierta))
       .catch(console.error);
     searchRef.current?.focus();
   }, [loadStock, loadCustomers]);
@@ -422,6 +426,13 @@ export default function VentasPage() {
           <strong>{money(total)}</strong>
         </div>
 
+        {cajaAbierta === false && (
+          <p style={{ margin: "4px 12px" }}>
+            <span className="badge warn">
+              Caja cerrada — <Link href="/caja">abrila</Link> para que las ventas entren en el arqueo
+            </span>
+          </p>
+        )}
         {error && <p className="error" style={{ margin: "4px 12px" }}>{error}</p>}
         {notice && <p className="badge ok" style={{ margin: "4px 12px" }}>{notice}</p>}
         {lastTicket && !notice && (

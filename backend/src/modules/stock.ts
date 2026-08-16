@@ -205,7 +205,14 @@ const productoPropioSchema = z.object({
   nombre: z.string().min(1),
   imagenUrl: imagenSchema.optional(),
   marca: z.string().optional(),
-  rubro: z.string().optional(),          // texto libre: no viene de la taxonomía B2B
+  // Taxonomía de NexoB2B: es la misma con la que el POS arma los chips de
+  // pasillo → rubro → subrubro, por eso se elige de la lista y no a mano.
+  pasilloId: z.string().optional(),
+  pasilloNombre: z.string().optional(),
+  rubroId: z.string().optional(),
+  rubroNombre: z.string().optional(),
+  subrubroId: z.string().optional(),
+  subrubroNombre: z.string().optional(),
   ean: z.string().optional(),            // código de barras propio, si tiene
   plu: z.string().optional(),            // código de balanza
   ventaPorPeso: z.boolean().default(false),
@@ -244,21 +251,28 @@ stockRouter.post("/producto-propio", async (req, res, next) => {
       rows: [product],
     } = await client.query(
       `INSERT INTO products
-         (commerce_id, origen, name, brand, category, rubro_nombre, ean, plu,
-          venta_por_peso, unit, descripcion, image_url, synced_at)
-       VALUES ($1, 'propio', $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, now())
+         (commerce_id, origen, name, brand, category, ean, plu,
+          venta_por_peso, unit, descripcion, image_url,
+          pasillo_id, pasillo_nombre, rubro_id, rubro_nombre, subrubro_id, subrubro_nombre, synced_at)
+       VALUES ($1, 'propio', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
        RETURNING id`,
       [
         commerceId,
         body.nombre,
         body.marca ?? null,
-        body.rubro ?? null,
+        body.rubroNombre ?? null,   // category: espejo del rubro, para el export a Odoo
         body.ean?.trim() || null,
         plu,
         body.ventaPorPeso,
         body.unidad ?? (body.ventaPorPeso ? "kg" : "unidad"),
         body.descripcion ?? null,
         body.imagenUrl ?? null,
+        body.pasilloId ?? null,
+        body.pasilloNombre ?? null,
+        body.rubroId ?? null,
+        body.rubroNombre ?? null,
+        body.subrubroId ?? null,
+        body.subrubroNombre ?? null,
       ]
     );
 

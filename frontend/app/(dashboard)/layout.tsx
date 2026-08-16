@@ -8,6 +8,7 @@ import { getToken } from "@/lib/api";
 const NAV = [
   { href: "/dashboard", label: "Resumen" },
   { href: "/ventas", label: "Punto de venta" },
+  { href: "/caja", label: "Caja" },
   { href: "/catalogo", label: "Catálogo B2B" },
   { href: "/mayoristas", label: "Mayoristas" },
   { href: "/compras", label: "Compras" },

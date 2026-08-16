@@ -64,6 +64,7 @@ export default function ClientesPage() {
         body: JSON.stringify({
           amount: Number(form.get("amount")),
           note: String(form.get("note") || "") || undefined,
+          paymentMethod: String(form.get("paymentMethod") || "cash"),
         }),
       });
       load();
@@ -124,6 +125,12 @@ export default function ClientesPage() {
             <h2>{selected.name} — saldo {money(selected.balance)}</h2>
             <form action={registerPayment} className="toolbar">
               <input name="amount" type="number" step="0.01" min="0.01" placeholder="Monto del pago" required style={{ width: 140 }} />
+              <select name="paymentMethod" defaultValue="cash" title="Con qué pagó (importa para el arqueo de caja)">
+                <option value="cash">💵 Efectivo</option>
+                <option value="wallet">📱 Billetera</option>
+                <option value="card">💳 Tarjeta</option>
+                <option value="transfer">🏦 Transferencia</option>
+              </select>
               <input name="note" placeholder="Nota (opcional)" />
               <button type="submit">Registrar pago</button>
             </form>

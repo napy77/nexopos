@@ -13,7 +13,7 @@ interface StockItem {
 interface Movement {
   id: number; name: string; type: string; quantity: string; reference: string | null; created_at: string;
 }
-import type { B2BProductoMaestro, B2BPresentacionMaestra } from "@/lib/b2b-types";
+import type { B2BProductoMaestro, B2BPresentacionMaestra, B2BTaxonomia } from "@/lib/b2b-types";
 import { prepararImagen } from "@/lib/imagen";
 
 interface AltaEnCurso { producto: B2BProductoMaestro; opciones: B2BPresentacionMaestra[]; presIdx: number }
@@ -54,6 +54,8 @@ export default function StockPage() {
   const [okMsg, setOkMsg] = useState("");
   const [showPropio, setShowPropio] = useState(false);
   const [porPeso, setPorPeso] = useState(false);
+  const [taxonomia, setTaxonomia] = useState<B2BTaxonomia | null>(null);
+  const [taxSel, setTaxSel] = useState({ pasilloId: "", rubroId: "", subrubroId: "" });
   const [fotoNueva, setFotoNueva] = useState<string | null>(null);
   const [fotoDe, setFotoDe] = useState<StockItem | null>(null);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
@@ -64,6 +66,9 @@ export default function StockPage() {
   }, [q, lowOnly]);
 
   useEffect(() => { load().catch(console.error); }, [load]);
+  useEffect(() => {
+    api<B2BTaxonomia>("/api/catalog/taxonomia").then(setTaxonomia).catch(console.error);
+  }, []);
   useEffect(() => {
     api<Movement[]>("/api/stock/movements").then(setMovements).catch(console.error);
   }, [items]);
@@ -140,7 +145,12 @@ export default function StockPage() {
         body: JSON.stringify({
           nombre: String(form.get("nombre")),
           marca: String(form.get("marca") || "") || undefined,
-          rubro: String(form.get("rubro") || "") || undefined,
+          pasilloId: taxSel.pasilloId || undefined,
+          pasilloNombre: taxonomia?.pasillos.find((p) => p.id === taxSel.pasilloId)?.nombre,
+          rubroId: taxSel.rubroId || undefined,
+          rubroNombre: taxonomia?.rubros.find((r) => r.id === taxSel.rubroId)?.nombre,
+          subrubroId: taxSel.subrubroId || undefined,
+          subrubroNombre: taxonomia?.subrubros.find((s) => s.id === taxSel.subrubroId)?.nombre,
           ean: String(form.get("ean") || "") || undefined,
           plu: String(form.get("plu") || "") || undefined,
           ventaPorPeso: form.get("ventaPorPeso") === "on",
@@ -154,6 +164,7 @@ export default function StockPage() {
       setShowPropio(false);
       setPorPeso(false);
       setFotoNueva(null);
+      setTaxSel({ pasilloId: "", rubroId: "", subrubroId: "" });
       setOkMsg(`"${form.get("nombre")}" creado y cargado en tu stock.`);
       setTimeout(() => setOkMsg(""), 4000);
       load();
@@ -272,7 +283,38 @@ export default function StockPage() {
             <div className="toolbar">
               <input name="nombre" placeholder="Nombre del producto *" required style={{ flex: 2, minWidth: 240 }} autoFocus />
               <input name="marca" placeholder="Marca" style={{ width: 140 }} />
-              <input name="rubro" placeholder="Rubro (ej. Fiambrería)" style={{ width: 180 }} />
+            </div>
+            <div className="toolbar">
+              <select
+                value={taxSel.pasilloId}
+                onChange={(e) => setTaxSel({ pasilloId: e.target.value, rubroId: "", subrubroId: "" })}
+              >
+                <option value="">Pasillo…</option>
+                {(taxonomia?.pasillos ?? []).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+              </select>
+              <select
+                value={taxSel.rubroId}
+                onChange={(e) => setTaxSel({ ...taxSel, rubroId: e.target.value, subrubroId: "" })}
+                disabled={!taxSel.pasilloId}
+              >
+                <option value="">Rubro…</option>
+                {(taxonomia?.rubros ?? [])
+                  .filter((r) => r.pasillo_id === taxSel.pasilloId)
+                  .map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+              </select>
+              <select
+                value={taxSel.subrubroId}
+                onChange={(e) => setTaxSel({ ...taxSel, subrubroId: e.target.value })}
+                disabled={!taxSel.rubroId}
+              >
+                <option value="">Subrubro…</option>
+                {(taxonomia?.subrubros ?? [])
+                  .filter((s) => s.rubro_id === taxSel.rubroId)
+                  .map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+              </select>
+              <span className="muted">
+                Son los mismos rubros de NexoB2B: así el producto aparece en los chips del punto de venta.
+              </span>
             </div>
             <div className="toolbar">
               <label className="switch-row" style={{ padding: 0 }}>
