@@ -8,11 +8,13 @@ interface StockItem {
   unit: string; quantity: string; cost: string | null; sale_price: string | null;
   min_stock: string; low_stock: boolean;
   origen: string; plu: string | null; venta_por_peso: boolean;
+  image_url: string | null; imagen_propia: boolean;
 }
 interface Movement {
   id: number; name: string; type: string; quantity: string; reference: string | null; created_at: string;
 }
 import type { B2BProductoMaestro, B2BPresentacionMaestra } from "@/lib/b2b-types";
+import { prepararImagen } from "@/lib/imagen";
 
 interface AltaEnCurso { producto: B2BProductoMaestro; opciones: B2BPresentacionMaestra[]; presIdx: number }
 
@@ -52,6 +54,9 @@ export default function StockPage() {
   const [okMsg, setOkMsg] = useState("");
   const [showPropio, setShowPropio] = useState(false);
   const [porPeso, setPorPeso] = useState(false);
+  const [fotoNueva, setFotoNueva] = useState<string | null>(null);
+  const [fotoDe, setFotoDe] = useState<StockItem | null>(null);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ q, lowOnly: String(lowOnly) });
@@ -88,6 +93,44 @@ export default function StockPage() {
     return () => clearTimeout(t);
   }, [catQ, showAdd]);
 
+  async function elegirFoto(file: File | undefined, destino: "nuevo" | "existente") {
+    if (!file) return;
+    setError("");
+    try {
+      const dataUrl = await prepararImagen(file);
+      if (destino === "nuevo") { setFotoNueva(dataUrl); return; }
+      if (!fotoDe) return;
+      setSubiendoFoto(true);
+      await api(`/api/stock/${fotoDe.product_id}/imagen`, {
+        method: "PUT",
+        body: JSON.stringify({ imagenUrl: dataUrl }),
+      });
+      setFotoDe(null);
+      setOkMsg("Foto actualizada. Ya se ve en el punto de venta.");
+      setTimeout(() => setOkMsg(""), 3000);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cargar la imagen");
+    } finally {
+      setSubiendoFoto(false);
+    }
+  }
+
+  async function quitarFoto() {
+    if (!fotoDe) return;
+    setError("");
+    try {
+      await api(`/api/stock/${fotoDe.product_id}/imagen`, {
+        method: "PUT",
+        body: JSON.stringify({ imagenUrl: null }),
+      });
+      setFotoDe(null);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo quitar la imagen");
+    }
+  }
+
   async function crearProductoPropio(form: FormData) {
     setError("");
     const num = (k: string) => (form.get(k) ? Number(form.get(k)) : undefined);
@@ -101,6 +144,7 @@ export default function StockPage() {
           ean: String(form.get("ean") || "") || undefined,
           plu: String(form.get("plu") || "") || undefined,
           ventaPorPeso: form.get("ventaPorPeso") === "on",
+          imagenUrl: fotoNueva ?? undefined,
           quantity: num("quantity") ?? 0,
           cost: num("cost"),
           salePrice: num("salePrice"),
@@ -109,6 +153,7 @@ export default function StockPage() {
       });
       setShowPropio(false);
       setPorPeso(false);
+      setFotoNueva(null);
       setOkMsg(`"${form.get("nombre")}" creado y cargado en tu stock.`);
       setTimeout(() => setOkMsg(""), 4000);
       load();
@@ -207,6 +252,23 @@ export default function StockPage() {
             propia (una torta, una vianda). El producto queda solo en tu comercio.
           </p>
           <form action={crearProductoPropio}>
+            <div className="toolbar" style={{ alignItems: "flex-start" }}>
+              <label className="foto-slot" title="Foto para el punto de venta">
+                {fotoNueva
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={fotoNueva} alt="" />
+                  : <span>📷<br /><span style={{ fontSize: 11 }}>Foto</span></span>}
+                <input
+                  type="file" accept="image/*" capture="environment" hidden
+                  onChange={(e) => elegirFoto(e.target.files?.[0], "nuevo")}
+                />
+              </label>
+              {fotoNueva && (
+                <button type="button" className="small secondary" onClick={() => setFotoNueva(null)}>
+                  Quitar foto
+                </button>
+              )}
+            </div>
             <div className="toolbar">
               <input name="nombre" placeholder="Nombre del producto *" required style={{ flex: 2, minWidth: 240 }} autoFocus />
               <input name="marca" placeholder="Marca" style={{ width: 140 }} />
@@ -360,7 +422,7 @@ export default function StockPage() {
         <table>
           <thead>
             <tr>
-              <th>EAN</th><th>Producto</th><th className="num">Cantidad</th>
+              <th></th><th>EAN</th><th>Producto</th><th className="num">Cantidad</th>
               <th className="num">Costo</th><th className="num">Precio venta</th>
               <th className="num">Mínimo</th><th></th>
             </tr>
@@ -368,6 +430,14 @@ export default function StockPage() {
           <tbody>
             {items.map((s) => (
               <tr key={s.id}>
+                <td style={{ width: 52 }}>
+                  <button className="foto-mini" onClick={() => setFotoDe(s)} title="Cambiar la foto del punto de venta">
+                    {s.image_url
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={s.image_url} alt="" />
+                      : <span>📷</span>}
+                  </button>
+                </td>
                 <td className="muted">
                   {s.ean ?? "—"}
                   {s.plu && <div style={{ fontSize: 11 }}>PLU {s.plu}</div>}
@@ -390,7 +460,7 @@ export default function StockPage() {
               </tr>
             ))}
             {items.length === 0 && (
-              <tr><td colSpan={7} className="muted">Sin stock cargado. Recibí una compra o hacé un ajuste manual desde el catálogo.</td></tr>
+              <tr><td colSpan={8} className="muted">Sin stock cargado. Recibí una compra, agregá un producto del catálogo o creá uno propio.</td></tr>
             )}
           </tbody>
         </table>
@@ -407,6 +477,44 @@ export default function StockPage() {
             <button type="submit">Guardar</button>
             <button type="button" className="secondary" onClick={() => setEditing(null)}>Cancelar</button>
           </form>
+        </div>
+      )}
+
+      {fotoDe && (
+        <div className="modal-backdrop" onClick={() => setFotoDe(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <h2>Foto de {fotoDe.name}</h2>
+            <p className="muted">
+              Es la que se ve en los botones del punto de venta. Desde una tablet o celular
+              podés sacarla con la cámara en el momento.
+            </p>
+            <div style={{ textAlign: "center", margin: "12px 0" }}>
+              {fotoDe.image_url
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={fotoDe.image_url} alt="" style={{ width: 160, height: 160, objectFit: "cover", borderRadius: 12 }} />
+                : <div className="foto-slot" style={{ width: 160, height: 160, margin: "0 auto" }}><span>Sin foto</span></div>}
+            </div>
+            <div className="toolbar" style={{ justifyContent: "center" }}>
+              <label className="btn-file">
+                {subiendoFoto ? "Subiendo…" : "📷 Elegir o sacar foto"}
+                <input
+                  type="file" accept="image/*" capture="environment" hidden
+                  disabled={subiendoFoto}
+                  onChange={(e) => elegirFoto(e.target.files?.[0], "existente")}
+                />
+              </label>
+              {fotoDe.image_url && (
+                <button className="secondary" onClick={quitarFoto}>Quitar</button>
+              )}
+              <button className="secondary" onClick={() => setFotoDe(null)}>Cerrar</button>
+            </div>
+            {fotoDe.imagen_propia === false && fotoDe.image_url && (
+              <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                Esta foto viene del catálogo de NexoB2B. Si subís una propia, solo la vas a
+                ver vos.
+              </p>
+            )}
+          </div>
         </div>
       )}
 

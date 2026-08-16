@@ -548,7 +548,8 @@ export default function VentasPage() {
                         {item.venta_por_peso && <span style={{ fontSize: 11 }}>/kg</span>}
                       </span>
                       <span className="pos-card-stock">
-                        {Number(item.quantity)}{item.venta_por_peso ? " kg" : ""}
+                        {Number(item.quantity).toLocaleString("es-AR", { maximumFractionDigits: 3 })}
+                        {item.venta_por_peso ? " kg" : ""}
                       </span>
                     </div>
                   </button>

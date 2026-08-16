@@ -18,7 +18,9 @@ stockRouter.get("/", async (req, res, next) => {
     }
     if (lowOnly) where += " AND s.quantity <= s.min_stock";
     const { rows } = await pool.query(
-      `SELECT s.id, s.product_id, p.name, p.ean, p.category, p.unit, p.image_url,
+      `SELECT s.id, s.product_id, p.name, p.ean, p.category, p.unit,
+              COALESCE(s.image_url, p.image_url) AS image_url,
+              (s.image_url IS NOT NULL) AS imagen_propia,
               p.pasillo_nombre, p.rubro_nombre, p.subrubro_nombre,
               p.origen, p.plu, p.venta_por_peso,
               s.quantity, s.cost, s.sale_price, s.min_stock, s.updated_at,
@@ -187,8 +189,21 @@ stockRouter.post("/add-from-catalog", async (req, res, next) => {
   }
 });
 
+/**
+ * Imagen del producto: se guarda como data URI junto al producto, no como
+ * archivo. El navegador ya la achica a ~400px (ver lib/imagen.ts), así que
+ * entra holgada en la base, viaja en el backup y evita montar almacenamiento
+ * de archivos y su configuración en nginx.
+ */
+const MAX_IMAGEN_BYTES = 400 * 1024;
+const imagenSchema = z
+  .string()
+  .regex(/^data:image\/(jpeg|png|webp);base64,/, "Formato de imagen no soportado")
+  .refine((v) => v.length * 0.75 <= MAX_IMAGEN_BYTES, "La imagen es demasiado pesada");
+
 const productoPropioSchema = z.object({
   nombre: z.string().min(1),
+  imagenUrl: imagenSchema.optional(),
   marca: z.string().optional(),
   rubro: z.string().optional(),          // texto libre: no viene de la taxonomía B2B
   ean: z.string().optional(),            // código de barras propio, si tiene
@@ -230,8 +245,8 @@ stockRouter.post("/producto-propio", async (req, res, next) => {
     } = await client.query(
       `INSERT INTO products
          (commerce_id, origen, name, brand, category, rubro_nombre, ean, plu,
-          venta_por_peso, unit, descripcion, synced_at)
-       VALUES ($1, 'propio', $2, $3, $4, $4, $5, $6, $7, $8, $9, now())
+          venta_por_peso, unit, descripcion, image_url, synced_at)
+       VALUES ($1, 'propio', $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, now())
        RETURNING id`,
       [
         commerceId,
@@ -243,6 +258,7 @@ stockRouter.post("/producto-propio", async (req, res, next) => {
         body.ventaPorPeso,
         body.unidad ?? (body.ventaPorPeso ? "kg" : "unidad"),
         body.descripcion ?? null,
+        body.imagenUrl ?? null,
       ]
     );
 
@@ -267,6 +283,34 @@ stockRouter.post("/producto-propio", async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+const imagenBodySchema = z.object({ imagenUrl: imagenSchema.nullable() });
+
+/**
+ * PUT /api/stock/:productId/imagen
+ * Cambia (o borra, con null) la foto que se ve en el punto de venta.
+ * Solo sobre productos que el comercio tenga en su stock: los del catálogo
+ * de NexoB2B son globales, así que la foto propia pisa la del marketplace
+ * únicamente si el comercio la sube.
+ */
+stockRouter.put("/:productId/imagen", async (req, res, next) => {
+  try {
+    const { imagenUrl } = imagenBodySchema.parse(req.body);
+    const productId = Number(req.params.productId);
+    const commerceId = req.auth.commerceId;
+
+    const { rowCount } = await pool.query(
+      `UPDATE stock_items SET image_url = $1, updated_at = now()
+       WHERE commerce_id = $2 AND product_id = $3`,
+      [imagenUrl, commerceId, productId]
+    );
+    if (!rowCount) throw new HttpError(404, "Ese producto no está en tu stock");
+    await audit(commerceId, "product.image", "products", productId, { borrada: imagenUrl === null });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
   }
 });
 

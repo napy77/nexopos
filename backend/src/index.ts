@@ -18,7 +18,9 @@ import { settingsRouter } from "./modules/settings.js";
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// 2mb: las fotos de producto viajan como data URI en el JSON (el navegador
+// ya las achica a ~400px antes de subirlas)
+app.use(express.json({ limit: "2mb" }));
 
 app.get("/health", (_req, res) => res.json({ ok: true, mockMode: isMockMode() }));
 
