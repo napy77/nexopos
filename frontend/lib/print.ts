@@ -41,10 +41,23 @@ export function savePrintSettings(settings: PrintSettings): void {
  */
 export async function printTicket(saleId: number, settings?: PrintSettings): Promise<void> {
   const { width } = settings ?? loadPrintSettings();
-  const res = await fetch(`/api/sales/${saleId}/ticket.html?width=${width}`, {
-    headers: { Authorization: `Bearer ${getToken()}` },
-  });
-  if (!res.ok) throw new Error("No se pudo generar el ticket para imprimir");
+  return printDesdeApi(`/api/sales/${saleId}/ticket.html?width=${width}`);
+}
+
+/**
+ * Imprime el resumen de un turno de caja: el cierre completo si ya cerró, o
+ * un corte parcial si sigue abierto. Sale con el mismo ancho de papel que
+ * los tickets.
+ */
+export async function printCierreCaja(sessionId: number, settings?: PrintSettings): Promise<void> {
+  const { width } = settings ?? loadPrintSettings();
+  return printDesdeApi(`/api/caja/${sessionId}/resumen.html?width=${width}`);
+}
+
+/** Pide el HTML a la API (con el token) y lo manda a la impresora. */
+async function printDesdeApi(path: string): Promise<void> {
+  const res = await fetch(path, { headers: { Authorization: `Bearer ${getToken()}` } });
+  if (!res.ok) throw new Error("No se pudo generar el documento para imprimir");
   const html = await res.text();
 
   const iframe = document.createElement("iframe");

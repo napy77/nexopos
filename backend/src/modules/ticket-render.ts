@@ -38,8 +38,44 @@ export function fmtMoney(v: string | number): string {
   return Number(v).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const escape = (s: string): string =>
+export const escape = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+
+export type AnchoImpresion = "80mm" | "58mm" | "auto";
+
+/**
+ * Estilos comunes de los documentos que salen por la impresora del POS
+ * (ticket de venta, cierre de caja). El ancho define si se imprime en
+ * ticketera térmica o en una hoja común.
+ */
+export function estilosImpresion(width: AnchoImpresion): string {
+  const esTermica = width !== "auto";
+  const contentWidth = width === "80mm" ? "72mm" : width === "58mm" ? "50mm" : "100%";
+  return `
+  @page { size: ${esTermica ? `${width} auto` : "auto"}; margin: ${esTermica ? "0" : "10mm"}; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: ${esTermica ? "4mm 2mm" : "0"};
+    width: ${contentWidth};
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: ${esTermica ? "12px" : "13px"};
+    line-height: 1.35;
+    color: #000;
+    background: #fff;
+  }
+  .centro { text-align: center; }
+  .comercio { font-size: ${esTermica ? "15px" : "18px"}; font-weight: 700; }
+  .tipo { font-size: 11px; margin-bottom: 6px; }
+  .sep { border-top: 1px solid #000; margin: 6px 0; }
+  .sep-doble { border-top: 3px double #000; margin: 6px 0; }
+  .linea { display: flex; justify-content: space-between; gap: 8px; }
+  .linea .val { white-space: nowrap; }
+  .titulo-bloque { font-weight: 700; margin-top: 4px; }
+  .total { display: flex; justify-content: space-between; font-size: ${esTermica ? "17px" : "20px"}; font-weight: 700; margin: 4px 0; }
+  .destacado { font-weight: 700; }
+  .pie { margin-top: 10px; font-size: 11px; }`;
+}
 
 /**
  * @param width  "80mm" | "58mm" para ticketera térmica, "auto" para
@@ -48,12 +84,10 @@ const escape = (s: string): string =>
  */
 export function renderTicketHtml(
   sale: TicketData,
-  opts: { width?: "80mm" | "58mm" | "auto"; autoPrint?: boolean } = {}
+  opts: { width?: AnchoImpresion; autoPrint?: boolean } = {}
 ): string {
   const width = opts.width ?? "80mm";
   const esTermica = width !== "auto";
-  // El área imprimible real de una térmica es menor que el papel
-  const contentWidth = width === "80mm" ? "72mm" : width === "58mm" ? "50mm" : "100%";
 
   const fecha = new Date(sale.created_at).toLocaleString("es-AR", {
     day: "2-digit", month: "2-digit", year: "numeric",
@@ -86,30 +120,11 @@ export function renderTicketHtml(
 <meta charset="utf-8">
 <title>Ticket ${sale.ticket_number}</title>
 <style>
-  @page { size: ${esTermica ? `${width} auto` : "auto"}; margin: ${esTermica ? "0" : "10mm"}; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    padding: ${esTermica ? "4mm 2mm" : "0"};
-    width: ${contentWidth};
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: ${esTermica ? "12px" : "13px"};
-    line-height: 1.35;
-    color: #000;
-    background: #fff;
-  }
-  .centro { text-align: center; }
-  .comercio { font-size: ${esTermica ? "15px" : "18px"}; font-weight: 700; }
-  .tipo { font-size: 11px; margin-bottom: 6px; }
-  .sep { border-top: 1px solid #000; margin: 6px 0; }
-  .sep-doble { border-top: 3px double #000; margin: 6px 0; }
-  .linea { display: flex; justify-content: space-between; gap: 8px; }
+  ${estilosImpresion(width)}
   .item { margin-bottom: 4px; }
   .item-nombre { font-weight: 600; word-break: break-word; }
   .item-detalle { display: flex; justify-content: space-between; gap: 8px; padding-left: 8px; }
   .importe { white-space: nowrap; }
-  .total { display: flex; justify-content: space-between; font-size: ${esTermica ? "17px" : "20px"}; font-weight: 700; margin: 4px 0; }
-  .pie { margin-top: 10px; font-size: 11px; }
   .reembolso { font-weight: 700; letter-spacing: 1px; }
 </style>
 </head>

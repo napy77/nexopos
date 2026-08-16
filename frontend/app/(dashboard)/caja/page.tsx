@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, money } from "@/lib/api";
+import { printCierreCaja } from "@/lib/print";
 
 interface Resumen {
   apertura: number;
@@ -21,7 +22,7 @@ interface Estado {
   resumen?: Resumen;
   movimientos?: Movimiento[];
 }
-interface Cierre extends Resumen { contado: number; diferencia: number }
+interface Cierre extends Resumen { contado: number; diferencia: number; sessionId?: number }
 interface SesionCerrada {
   id: number; opened_at: string; closed_at: string;
   opening_amount: string; counted_amount: string; closing_note: string | null;
@@ -93,18 +94,28 @@ export default function CajaPage() {
     }
   }
 
+  async function imprimirResumen(sessionId: number) {
+    try {
+      await printCierreCaja(sessionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo imprimir el resumen");
+    }
+  }
+
   async function cerrar() {
     setError("");
     setBusy(true);
     try {
-      const r = await api<{ cierre: Cierre }>("/api/caja/cerrar", {
+      const r = await api<{ cierre: Cierre; sessionId: number }>("/api/caja/cerrar", {
         method: "POST",
         body: JSON.stringify({ countedAmount: Number(contado || 0) }),
       });
-      setUltimoCierre(r.cierre);
+      setUltimoCierre({ ...r.cierre, sessionId: r.sessionId });
       setMostrarCierre(false);
       setContado("");
       cargar();
+      // El cierre sale por la impresora apenas se confirma
+      imprimirResumen(r.sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cerrar la caja");
     } finally {
@@ -136,9 +147,14 @@ export default function CajaPage() {
               {ultimoCierre.diferencia === 0 && " ✓"}
             </strong>
           </div>
-          <button className="secondary" style={{ marginTop: 12 }} onClick={() => setUltimoCierre(null)}>
-            Entendido
-          </button>
+          <div className="toolbar" style={{ marginTop: 12 }}>
+            {ultimoCierre.sessionId && (
+              <button onClick={() => imprimirResumen(ultimoCierre.sessionId!)}>
+                🖨 Imprimir cierre
+              </button>
+            )}
+            <button className="secondary" onClick={() => setUltimoCierre(null)}>Entendido</button>
+          </div>
         </div>
       )}
 
@@ -227,7 +243,13 @@ export default function CajaPage() {
 
           <div className="card">
             {!mostrarCierre ? (
-              <button onClick={() => setMostrarCierre(true)}>Cerrar caja</button>
+              <div className="toolbar">
+                <button onClick={() => setMostrarCierre(true)}>Cerrar caja</button>
+                <button className="secondary" onClick={() => imprimirResumen(estado.sesion!.id)}>
+                  🖨 Imprimir resumen parcial
+                </button>
+                <span className="muted">Cómo viene el turno, sin cerrarlo</span>
+              </div>
             ) : (
               <>
                 <h2>Cerrar caja</h2>
@@ -267,6 +289,7 @@ export default function CajaPage() {
             <tr>
               <th>Apertura</th><th>Cierre</th><th className="num">Fondo</th>
               <th className="num">Vendido</th><th className="num">Contado</th><th className="num">Diferencia</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -284,11 +307,14 @@ export default function CajaPage() {
                       {dif > 0 ? "+" : ""}{money(dif)}
                     </span>
                   </td>
+                  <td>
+                    <button className="small secondary" onClick={() => imprimirResumen(s.id)}>🖨</button>
+                  </td>
                 </tr>
               );
             })}
             {historial.length === 0 && (
-              <tr><td colSpan={6} className="muted">Todavía no cerraste ninguna caja.</td></tr>
+              <tr><td colSpan={7} className="muted">Todavía no cerraste ninguna caja.</td></tr>
             )}
           </tbody>
         </table>

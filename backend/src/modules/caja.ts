@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
+import { renderCierreHtml } from "./caja-render.js";
 
 export const cajaRouter = Router();
 
@@ -191,6 +192,53 @@ cajaRouter.post("/cerrar", async (req, res, next) => {
     );
     await audit(commerceId, "caja.cerrar", "cash_sessions", sesion.id, { diferencia });
     res.json({ ok: true, sessionId: sesion.id, cierre });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/caja/:id/resumen.html?width=80mm&autoprint=1
+ * Resumen imprimible. Con la sesión cerrada sale el cierre completo (con el
+ * efectivo contado y la diferencia); con la sesión abierta, un corte parcial
+ * para ver cómo viene el turno sin cerrarlo.
+ */
+cajaRouter.get("/:id/resumen.html", async (req, res, next) => {
+  try {
+    const commerceId = req.auth.commerceId;
+    const sessionId = Number(req.params.id);
+    const { rows } = await pool.query(
+      `SELECT s.id, s.opened_at, s.closed_at, s.closing_note, s.closing_summary, c.name AS commerce_name
+       FROM cash_sessions s JOIN commerces c ON c.id = s.commerce_id
+       WHERE s.id = $1 AND s.commerce_id = $2`,
+      [sessionId, commerceId]
+    );
+    if (!rows[0]) throw new HttpError(404, "Turno no encontrado");
+    const s = rows[0];
+
+    // Si está cerrada se usa el arqueo congelado; si sigue abierta, se calcula
+    const resumen = s.closed_at && s.closing_summary
+      ? s.closing_summary
+      : await calcularResumen(commerceId, sessionId);
+
+    const width = ["80mm", "58mm", "auto"].includes(String(req.query.width))
+      ? (String(req.query.width) as "80mm" | "58mm" | "auto")
+      : "80mm";
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(
+      renderCierreHtml(
+        {
+          commerceName: s.commerce_name,
+          sessionId: s.id,
+          openedAt: s.opened_at,
+          closedAt: s.closed_at,
+          resumen,
+          note: s.closing_note,
+        },
+        { width, autoPrint: req.query.autoprint === "1" }
+      )
+    );
   } catch (err) {
     next(err);
   }
