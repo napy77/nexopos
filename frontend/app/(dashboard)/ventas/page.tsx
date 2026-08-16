@@ -326,6 +326,10 @@ export default function VentasPage() {
       if (loadPrintSettings().autoPrint) imprimir(sale.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cobrar");
+      // Puede haberse cerrado la caja desde otra pantalla: revalidar
+      api<{ abierta: boolean }>("/api/caja")
+        .then((d) => setCajaAbierta(d.abierta))
+        .catch(() => {});
     }
   }
 
@@ -351,6 +355,28 @@ export default function VentasPage() {
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  // Sin caja abierta no se vende: el POS queda bloqueado hasta abrirla
+  if (cajaAbierta === false) {
+    return (
+      <div className="caja-cerrada-wrap">
+        <div className="card caja-cerrada">
+          <div style={{ fontSize: 56 }}>🔒</div>
+          <h1 style={{ margin: "8px 0" }}>La caja está cerrada</h1>
+          <p className="muted">
+            Para vender hay que abrir la caja del turno y anotar con cuánto efectivo
+            arrancás. Así, al cerrar, el sistema puede decirte cuánto tendría que haber
+            en el cajón.
+          </p>
+          <Link href="/caja">
+            <button style={{ padding: "14px 28px", fontSize: 16, marginTop: 12 }}>
+              Abrir la caja
+            </button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pos-shell">
@@ -426,13 +452,6 @@ export default function VentasPage() {
           <strong>{money(total)}</strong>
         </div>
 
-        {cajaAbierta === false && (
-          <p style={{ margin: "4px 12px" }}>
-            <span className="badge warn">
-              Caja cerrada — <Link href="/caja">abrila</Link> para que las ventas entren en el arqueo
-            </span>
-          </p>
-        )}
         {error && <p className="error" style={{ margin: "4px 12px" }}>{error}</p>}
         {notice && <p className="badge ok" style={{ margin: "4px 12px" }}>{notice}</p>}
         {lastTicket && !notice && (

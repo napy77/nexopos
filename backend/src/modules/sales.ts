@@ -75,8 +75,10 @@ salesRouter.post("/", async (req, res, next) => {
       [commerceId]
     );
 
-    // Si hay caja abierta la venta queda asociada; si no, se vende igual
+    // Sin caja abierta no se vende: el dinero de la venta tiene que entrar
+    // en el arqueo de algún turno.
     const sesion = await sesionAbierta(commerceId, client);
+    if (!sesion) throw new HttpError(409, "La caja está cerrada. Abrila para poder vender.");
 
     const {
       rows: [sale],
@@ -145,6 +147,9 @@ salesRouter.post("/:id/refund", async (req, res, next) => {
     );
     const original = originals[0];
     if (!original) throw new HttpError(404, "Ticket no encontrado");
+    // El reembolso saca dinero del cajón: también necesita caja abierta
+    const sesionReembolso = await sesionAbierta(commerceId, client);
+    if (!sesionReembolso) throw new HttpError(409, "La caja está cerrada. Abrila para poder reembolsar.");
     if (original.refund_of) throw new HttpError(400, "Ese ticket ya es un reembolso");
     const { rows: existing } = await client.query(
       "SELECT id FROM sales WHERE refund_of = $1",
@@ -167,12 +172,13 @@ salesRouter.post("/:id/refund", async (req, res, next) => {
       rows: [refund],
     } = await client.query(
       `INSERT INTO sales (commerce_id, ticket_number, customer_id, payment_method,
-                          subtotal, discount, total, refund_of)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                          subtotal, discount, total, refund_of, cash_session_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, ticket_number`,
       [
         commerceId, next_number, original.customer_id, original.payment_method,
         -original.subtotal, -original.discount, -original.total, original.id,
+        sesionReembolso.id,   // el reembolso descuenta de la caja de HOY
       ]
     );
     for (const item of items) {
