@@ -177,6 +177,7 @@ function CheckoutGroup({ mayoristaId, lines, busy, setBusy, setError, onQuantity
         method: "POST",
         body: JSON.stringify({
           mayoristaId,
+          mayoristaNombre: lines[0]?.mayoristaNombre,
           medioPagoId,
           notas: notas || undefined,
           items: lines.map((l) => ({ presentacionId: l.presentacionId, cantidad: l.cantidad, meta: l.meta })),

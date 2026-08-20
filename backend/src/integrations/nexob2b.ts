@@ -172,11 +172,13 @@ async function api<T>(path: string, opts: { token?: string; method?: string; bod
   }
 
   if (!res.ok) {
+    const crudo = await res.text();
     let message = `NexoB2B respondió ${res.status}`;
     try {
-      const data = (await res.json()) as { error?: string; message?: string };
+      const data = JSON.parse(crudo) as { error?: string; message?: string };
       message = data.error ?? data.message ?? message;
-    } catch { /* cuerpo no JSON */ }
+    } catch { /* cuerpo no JSON: queda el texto crudo en el log */ }
+    console.error(`[nexob2b] ${opts.method ?? "GET"} ${path} → ${res.status}: ${crudo.slice(0, 500)}`);
     if (res.status === 401)
       throw new HttpError(401, "Sesión de NexoB2B expirada. Volvé a iniciar sesión.");
     throw new HttpError(res.status >= 500 ? 502 : res.status, message);
@@ -487,6 +489,17 @@ export async function crearOrden(
     return orden;
   }
   const data = await api<{ orden: B2BOrden }>("/store/ordenes", { token, method: "POST", body: payload });
+  // La orden se creó del lado de NexoB2B: si la respuesta no trae lo que
+  // esperamos, hay que decirlo con el detalle a la vista y no reventar más
+  // adelante con un error opaco.
+  if (!data?.orden?.id) {
+    console.error("[nexob2b] respuesta inesperada al crear la orden:", JSON.stringify(data).slice(0, 800));
+    throw new HttpError(502, "NexoB2B no devolvió la orden creada. Revisá en el marketplace si el pedido entró antes de reintentar.");
+  }
+  if (!Array.isArray(data.orden.items)) {
+    console.error("[nexob2b] la orden vino sin items:", JSON.stringify(data.orden).slice(0, 800));
+    data.orden.items = [];
+  }
   return data.orden;
 }
 

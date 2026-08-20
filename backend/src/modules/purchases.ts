@@ -28,6 +28,9 @@ const itemMetaSchema = z.object({
 
 const createOrderSchema = z.object({
   mayoristaId: z.string(),
+  // El POST de NexoB2B devuelve la orden sin el nombre del mayorista (solo
+  // el GET de detalle lo trae), así que viaja desde el carrito
+  mayoristaNombre: z.string().optional(),
   medioPagoId: z.string(),
   notas: z.string().optional(),
   items: z
@@ -71,7 +74,7 @@ purchasesRouter.post("/", async (req, res, next) => {
          VALUES ($1, $2, $3, 'confirmed', $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
          RETURNING id`,
         [
-          commerceId, orden.mayorista_id, orden.mayorista_nombre ?? "", orden.total,
+          commerceId, orden.mayorista_id, orden.mayorista_nombre ?? body.mayoristaNombre ?? "", orden.total,
           orden.id, orden.numero, orden.estado, orden.total_neto, orden.total_iva,
           orden.costo_medio_pago, orden.medio_pago_nombre ?? null, orden.notas,
         ]
