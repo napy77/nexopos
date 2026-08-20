@@ -124,7 +124,8 @@ export interface B2BOrdenItem {
 
 export interface B2BOrden {
   id: string;
-  numero: number;
+  /** Identificador con prefijo que asigna NexoB2B, del estilo "ORD-00033" */
+  numero: string;
   estado: string;           // cargada|confirmada|en_preparacion|despachada|entregada|devuelto|cancelada
   total_neto: number;
   total_iva: number;
@@ -471,7 +472,8 @@ export async function crearOrden(
     const costo_medio_pago = Math.round((total_neto + total_iva) * (medio.porcentaje_costo / 100) * 100) / 100;
     const orden: B2BOrden = {
       id: `ord_mock_${Date.now()}`,
-      numero: ++mockOrdenSeq,
+      // Mismo formato que la API real: "ORD-00033"
+      numero: `ORD-${String(++mockOrdenSeq).padStart(5, "0")}`,
       estado: "cargada",
       total_neto, total_iva,
       total: Math.round((total_neto + total_iva + costo_medio_pago) * 100) / 100,

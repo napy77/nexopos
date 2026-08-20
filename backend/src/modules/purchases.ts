@@ -119,17 +119,54 @@ purchasesRouter.post("/", async (req, res, next) => {
 purchasesRouter.get("/", async (req, res, next) => {
   try {
     const commerceId = req.auth.commerceId;
-    // Refrescar estados desde el marketplace (best effort)
+    // Refrescar estados desde el marketplace (best effort). De paso se
+    // importan las órdenes que existen en NexoB2B pero no acá: si el POS
+    // falló después de crearlas, quedarían invisibles para el comercio.
     try {
       const { token } = await b2bContext(req);
       const ordenes = await getOrdenes(token);
       for (const o of ordenes) {
-        await pool.query(
+        const { rowCount } = await pool.query(
           `UPDATE purchase_orders
-           SET estado_b2b = $1, is_pagada = $2, is_facturada = $3
+           SET estado_b2b = $1, is_pagada = $2, is_facturada = $3, numero = COALESCE(numero, $6)
            WHERE commerce_id = $4 AND nexob2b_order_id = $5`,
-          [o.estado, o.is_pagada ?? false, o.is_facturada ?? false, commerceId, o.id]
+          [o.estado, o.is_pagada ?? false, o.is_facturada ?? false, commerceId, o.id, o.numero]
         );
+        if (rowCount) continue;
+
+        const {
+          rows: [local],
+        } = await pool.query(
+          `INSERT INTO purchase_orders
+             (commerce_id, wholesaler_id, wholesaler_name, status, total, nexob2b_order_id,
+              numero, estado_b2b, total_neto, total_iva, costo_medio_pago, medio_pago, notas,
+              is_pagada, is_facturada, confirmed_at, created_at)
+           VALUES ($1, $2, $3, 'confirmed', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)
+           RETURNING id`,
+          [
+            commerceId, o.mayorista_id, o.mayorista_nombre ?? "", o.total, o.id,
+            o.numero, o.estado, o.total_neto, o.total_iva, o.costo_medio_pago,
+            o.medio_pago_nombre ?? null, o.notas, o.is_pagada ?? false,
+            o.is_facturada ?? false, o.created_at,
+          ]
+        );
+        for (const item of o.items ?? []) {
+          await pool.query(
+            `INSERT INTO purchase_order_items
+               (order_id, presentacion_id, descripcion, quantity, unit_price, meta)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              local.id, null, item.nombre, item.cantidad, item.precio_unitario,
+              JSON.stringify({
+                productoNombre: item.nombre,
+                presentacionNombre: item.unidad ?? "unidad",
+                ean: item.ean ?? null,
+                alicuotaIva: item.alicuota_iva ?? null,
+              }),
+            ]
+          );
+        }
+        console.log(`[purchases] importada orden ${o.numero} de NexoB2B que faltaba localmente`);
       }
     } catch (err) {
       console.error("[purchases] no se pudo refrescar estados desde NexoB2B:", err);

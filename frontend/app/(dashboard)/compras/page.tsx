@@ -8,7 +8,7 @@ import { ESTADO_ORDEN, type B2BMedioPago } from "@/lib/b2b-types";
 
 interface Order {
   id: number; wholesaler_name: string; status: string; estado_b2b: string | null;
-  numero: number | null; total: string; medio_pago: string | null;
+  numero: string | null; total: string; medio_pago: string | null;
   is_facturada: boolean; nexob2b_order_id: string | null; created_at: string; received_at: string | null;
 }
 
@@ -39,9 +39,9 @@ export default function ComprasPage() {
     return groups;
   }, [cart]);
 
-  async function onConfirmed(mayoristaId: string, numero: number) {
+  async function onConfirmed(mayoristaId: string, numero: string) {
     updateCart(cart.filter((l) => l.mayoristaId !== mayoristaId));
-    setOk(`Orden #${numero} enviada al mayorista.`);
+    setOk(`Orden ${numero} enviada al mayorista.`);
     setTimeout(() => setOk(""), 5000);
     loadOrders();
   }
@@ -150,7 +150,7 @@ function CheckoutGroup({ mayoristaId, lines, busy, setBusy, setError, onQuantity
   setError: (e: string) => void;
   onQuantity: (line: CartLine, cantidad: number) => void;
   onRemove: (line: CartLine) => void;
-  onConfirmed: (mayoristaId: string, numero: number) => void;
+  onConfirmed: (mayoristaId: string, numero: string) => void;
 }) {
   const [medios, setMedios] = useState<B2BMedioPago[]>([]);
   const [medioPagoId, setMedioPagoId] = useState("");
@@ -173,7 +173,7 @@ function CheckoutGroup({ mayoristaId, lines, busy, setBusy, setError, onQuantity
     setError("");
     setBusy(true);
     try {
-      const res = await api<{ numero: number }>("/api/purchases", {
+      const res = await api<{ numero: string }>("/api/purchases", {
         method: "POST",
         body: JSON.stringify({
           mayoristaId,
