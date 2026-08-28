@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, money } from "@/lib/api";
 import { loadCart, saveCart, type CartLine } from "@/lib/cart";
-import { ESTADO_ORDEN, type B2BMedioPago } from "@/lib/b2b-types";
+import { ESTADO_ORDEN, ordenCancelada, ordenEntregada, type B2BMedioPago } from "@/lib/b2b-types";
 
 interface Order {
   id: number; wholesaler_name: string; status: string; estado_b2b: string | null;
@@ -130,7 +130,11 @@ export default function ComprasPage() {
             {orders.map((o) => {
               const estado = o.estado_b2b ? ESTADO_ORDEN[o.estado_b2b] ?? { label: o.estado_b2b, cls: "info" } : null;
               const cancelable = o.estado_b2b === "cargada" && !o.is_facturada && o.status !== "received";
-              const recibible = o.status === "confirmed" && o.estado_b2b !== "cancelada";
+              const ingresada = o.status === "received";
+              const recibible = !ingresada && o.status !== "cancelled" && !ordenCancelada(o.estado_b2b);
+              // El mayorista ya la entregó y todavía no entró al stock: es lo
+              // que el comercio tiene pendiente de hacer.
+              const faltaIngresar = recibible && ordenEntregada(o.estado_b2b);
               return (
                 <tr key={o.id}>
                   <td>{o.numero ?? o.id}</td>
@@ -140,13 +144,18 @@ export default function ComprasPage() {
                   <td className="muted">{o.medio_pago ?? "—"}</td>
                   <td>{new Date(o.created_at).toLocaleString("es-AR")}</td>
                   <td>
-                    {o.status === "received"
-                      ? <span className="badge ok">Ingresado</span>
-                      : <span className="muted">pendiente</span>}
+                    {ingresada ? <span className="badge ok">Ingresado</span>
+                      : faltaIngresar ? <span className="badge warn">Falta ingresar</span>
+                      : <span className="muted">—</span>}
                   </td>
                   <td>
                     {recibible && (
-                      <button className="small" onClick={() => receive(o.id)}>Recibir mercadería</button>
+                      <button
+                        className={`small ${faltaIngresar ? "" : "secondary"}`}
+                        onClick={() => receive(o.id)}
+                      >
+                        Ingresar al stock
+                      </button>
                     )}{" "}
                     {cancelable && (
                       <button className="small danger" onClick={() => cancel(o.id)}>Cancelar</button>

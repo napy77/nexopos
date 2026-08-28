@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
-import { crearOrden, getOrdenes, cancelarOrden, getMayoristas } from "../integrations/nexob2b.js";
+import { crearOrden, getOrdenes, cancelarOrden, getMayoristas, ordenCancelada } from "../integrations/nexob2b.js";
 import { b2bContext } from "./auth.js";
 
 export const purchasesRouter = Router();
@@ -264,7 +264,8 @@ purchasesRouter.post("/:id/receive", async (req, res, next) => {
     );
     if (!orders[0]) throw new HttpError(404, "Orden no encontrada");
     if (orders[0].status === "received") throw new HttpError(400, "La orden ya fue recibida");
-    if (orders[0].status === "cancelled" || orders[0].estado_b2b === "cancelada")
+    // NexoB2B usa "cancelado" (la doc decía "cancelada"): se aceptan ambos
+    if (orders[0].status === "cancelled" || ordenCancelada(orders[0].estado_b2b))
       throw new HttpError(400, "No se puede recibir una orden cancelada");
 
     const { rows: items } = await client.query(

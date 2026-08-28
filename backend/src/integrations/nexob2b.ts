@@ -122,11 +122,25 @@ export interface B2BOrdenItem {
   subtotal: number;
 }
 
+/**
+ * Estados que usa NexoB2B: cargada → confirmado → armando → listo →
+ * en_transporte → entregado, más cancelado y devuelto.
+ *
+ * (La documentación inicial los listaba en femenino y con otros nombres
+ * —"en_preparacion", "despachada"—, así que las comparaciones aceptan las
+ * dos formas para no romper con datos ya guardados.)
+ */
+export const ordenCancelada = (estado: string | null): boolean =>
+  estado === "cancelado" || estado === "cancelada";
+
+export const ordenEntregada = (estado: string | null): boolean =>
+  estado === "entregado" || estado === "entregada";
+
 export interface B2BOrden {
   id: string;
   /** Identificador con prefijo que asigna NexoB2B, del estilo "ORD-00033" */
   numero: string;
-  estado: string;           // cargada|confirmada|en_preparacion|despachada|entregada|devuelto|cancelada
+  estado: string;
   total_neto: number;
   total_iva: number;
   total: number;
@@ -511,8 +525,9 @@ export async function getOrdenes(token: string): Promise<B2BOrden[]> {
     const list = mockOrdenes.get(token) ?? [];
     for (const o of list) {
       const ageMin = (Date.now() - new Date(o.created_at).getTime()) / 60000;
-      if (o.estado === "cargada" && ageMin > 2) o.estado = "confirmada";
-      if (o.estado === "confirmada" && ageMin > 5) o.estado = "despachada";
+      if (o.estado === "cargada" && ageMin > 2) o.estado = "confirmado";
+      if (o.estado === "confirmado" && ageMin > 5) o.estado = "en_transporte";
+      if (o.estado === "en_transporte" && ageMin > 8) o.estado = "entregado";
     }
     return list;
   }
@@ -536,7 +551,7 @@ export async function cancelarOrden(token: string, ordenId: string): Promise<B2B
     if (!orden) throw new HttpError(404, "Orden no encontrada");
     if (orden.estado !== "cargada" || orden.is_facturada)
       throw new HttpError(400, "Solo se puede cancelar un pedido cargado o devuelto");
-    orden.estado = "cancelada";
+    orden.estado = "cancelado";
     return orden;
   }
   const data = await api<{ orden: B2BOrden }>(`/store/ordenes/${ordenId}/cancelar`, { token, method: "PUT" });

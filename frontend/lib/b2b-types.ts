@@ -91,12 +91,34 @@ export interface B2BMedioPago {
   porcentaje_costo: number;
 }
 
+/**
+ * Estados de una orden en NexoB2B. Los nombres son los que usa el
+ * marketplace (`cargada`, `confirmado`, `armando`, `listo`, `en_transporte`,
+ * `entregado`, `cancelado`, `devuelto`).
+ *
+ * Se aceptan además las variantes en femenino de la documentación vieja
+ * (`confirmada`, `entregada`, …) para no romper con lo que ya quedó
+ * guardado antes de detectar la diferencia.
+ */
 export const ESTADO_ORDEN: Record<string, { label: string; cls: string }> = {
   cargada: { label: "Cargada", cls: "info" },
+  confirmado: { label: "Confirmada", cls: "info" },
+  armando: { label: "En preparación", cls: "warn" },
+  listo: { label: "Lista para despachar", cls: "warn" },
+  en_transporte: { label: "En camino", cls: "warn" },
+  entregado: { label: "Entregada", cls: "ok" },
+  cancelado: { label: "Cancelada", cls: "err" },
+  devuelto: { label: "Devuelta", cls: "err" },
+  // Variantes de la documentación previa
   confirmada: { label: "Confirmada", cls: "info" },
   en_preparacion: { label: "En preparación", cls: "warn" },
-  despachada: { label: "Despachada", cls: "warn" },
+  despachada: { label: "En camino", cls: "warn" },
   entregada: { label: "Entregada", cls: "ok" },
-  devuelto: { label: "Devuelto", cls: "err" },
   cancelada: { label: "Cancelada", cls: "err" },
 };
+
+export const ordenCancelada = (estado: string | null): boolean =>
+  estado === "cancelado" || estado === "cancelada";
+
+export const ordenEntregada = (estado: string | null): boolean =>
+  estado === "entregado" || estado === "entregada";
