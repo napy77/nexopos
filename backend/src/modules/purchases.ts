@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
-import { crearOrden, getOrdenes, cancelarOrden } from "../integrations/nexob2b.js";
+import { crearOrden, getOrdenes, cancelarOrden, getMayoristas } from "../integrations/nexob2b.js";
 import { b2bContext } from "./auth.js";
 
 export const purchasesRouter = Router();
@@ -119,18 +119,32 @@ purchasesRouter.post("/", async (req, res, next) => {
 purchasesRouter.get("/", async (req, res, next) => {
   try {
     const commerceId = req.auth.commerceId;
-    // Refrescar estados desde el marketplace (best effort). De paso se
-    // importan las órdenes que existen en NexoB2B pero no acá: si el POS
-    // falló después de crearlas, quedarían invisibles para el comercio.
+    // Refrescar estados desde el marketplace. De paso se importan las órdenes
+    // que existen en NexoB2B pero no acá: las hechas desde la web o la app del
+    // marketplace, y las que se perdieron si el POS falló al registrarlas.
+    let sync: { ok: boolean; importadas: number; mensaje?: string } = { ok: true, importadas: 0 };
     try {
       const { token } = await b2bContext(req);
       const ordenes = await getOrdenes(token);
+
+      // El listado de órdenes no trae el nombre del mayorista (no hace join),
+      // así que se resuelve contra la lista de mayoristas del comercio.
+      const nombreMayorista = new Map<string, string>();
+      if (ordenes.length) {
+        try {
+          for (const m of await getMayoristas(token)) nombreMayorista.set(m.id, m.nombre);
+        } catch { /* si falla, la orden queda sin nombre pero se importa igual */ }
+      }
+
       for (const o of ordenes) {
+        const nombre = o.mayorista_nombre ?? nombreMayorista.get(o.mayorista_id) ?? "";
         const { rowCount } = await pool.query(
           `UPDATE purchase_orders
-           SET estado_b2b = $1, is_pagada = $2, is_facturada = $3, numero = COALESCE(numero, $6)
+           SET estado_b2b = $1, is_pagada = $2, is_facturada = $3,
+               numero = COALESCE(numero, $6),
+               wholesaler_name = CASE WHEN wholesaler_name = '' THEN $7 ELSE wholesaler_name END
            WHERE commerce_id = $4 AND nexob2b_order_id = $5`,
-          [o.estado, o.is_pagada ?? false, o.is_facturada ?? false, commerceId, o.id, o.numero]
+          [o.estado, o.is_pagada ?? false, o.is_facturada ?? false, commerceId, o.id, o.numero, nombre]
         );
         if (rowCount) continue;
 
@@ -144,7 +158,7 @@ purchasesRouter.get("/", async (req, res, next) => {
            VALUES ($1, $2, $3, 'confirmed', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)
            RETURNING id`,
           [
-            commerceId, o.mayorista_id, o.mayorista_nombre ?? "", o.total, o.id,
+            commerceId, o.mayorista_id, nombre, o.total, o.id,
             o.numero, o.estado, o.total_neto, o.total_iva, o.costo_medio_pago,
             o.medio_pago_nombre ?? null, o.notas, o.is_pagada ?? false,
             o.is_facturada ?? false, o.created_at,
@@ -166,10 +180,18 @@ purchasesRouter.get("/", async (req, res, next) => {
             ]
           );
         }
+        sync.importadas++;
         console.log(`[purchases] importada orden ${o.numero} de NexoB2B que faltaba localmente`);
       }
     } catch (err) {
-      console.error("[purchases] no se pudo refrescar estados desde NexoB2B:", err);
+      // No se corta el historial: se muestra lo local y se avisa que la
+      // sincronización falló, en vez de dejar el problema mudo en el log.
+      sync = {
+        ok: false,
+        importadas: sync.importadas,
+        mensaje: err instanceof HttpError ? err.message : "No se pudo sincronizar con NexoB2B",
+      };
+      console.error("[purchases] fallo la sincronización con NexoB2B:", err);
     }
 
     const { rows } = await pool.query(
@@ -179,7 +201,7 @@ purchasesRouter.get("/", async (req, res, next) => {
        FROM purchase_orders WHERE commerce_id = $1 ORDER BY created_at DESC LIMIT 200`,
       [req.auth.commerceId]
     );
-    res.json(rows);
+    res.json({ ordenes: rows, sync });
   } catch (err) {
     next(err);
   }

@@ -12,15 +12,20 @@ interface Order {
   is_facturada: boolean; nexob2b_order_id: string | null; created_at: string; received_at: string | null;
 }
 
+interface SyncEstado { ok: boolean; importadas: number; mensaje?: string }
+
 export default function ComprasPage() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [sync, setSync] = useState<SyncEstado | null>(null);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
 
   const loadOrders = useCallback(() => {
-    api<Order[]>("/api/purchases").then(setOrders).catch(console.error);
+    api<{ ordenes: Order[]; sync: SyncEstado }>("/api/purchases")
+      .then((d) => { setOrders(d.ordenes); setSync(d.sync); })
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -98,6 +103,22 @@ export default function ComprasPage() {
 
       <div className="card">
         <h2>Historial de compras</h2>
+        <p className="muted">
+          Incluye lo comprado desde el POS y también desde la web o la app de NexoB2B:
+          el historial se sincroniza con el marketplace cada vez que entrás.
+        </p>
+        {sync && !sync.ok && (
+          <p className="badge err" style={{ fontSize: 14 }}>
+            No se pudo sincronizar con NexoB2B ({sync.mensaje}). Puede faltar alguna
+            compra hecha desde la web o la app.
+          </p>
+        )}
+        {sync && sync.ok && sync.importadas > 0 && (
+          <p className="badge ok" style={{ fontSize: 14 }}>
+            Se {sync.importadas === 1 ? "trajo 1 compra" : `trajeron ${sync.importadas} compras`} de
+            NexoB2B que todavía no {sync.importadas === 1 ? "estaba" : "estaban"} acá.
+          </p>
+        )}
         <table>
           <thead>
             <tr>
