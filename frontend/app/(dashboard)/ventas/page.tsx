@@ -67,6 +67,7 @@ export default function VentasPage() {
   const [cajaAbierta, setCajaAbierta] = useState<boolean | null>(null);
   const [newCustomerName, setNewCustomerName] = useState("");
   const [pagaCon, setPagaCon] = useState("");
+  const [vueltoPendiente, setVueltoPendiente] = useState<number | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const pagaConRef = useRef<HTMLInputElement>(null);
 
@@ -171,6 +172,8 @@ export default function VentasPage() {
     }
     setError("");
     setBuffer("");
+    // Arrancó la venta siguiente: el vuelto anterior ya no corresponde
+    setVueltoPendiente(null);
 
     // Etiqueta de balanza: la línea entra con el peso (o el importe) pesado,
     // no se acumula de a uno como un producto por unidad.
@@ -292,6 +295,7 @@ export default function VentasPage() {
 
   function anularVenta() {
     setLines([]);
+    setVueltoPendiente(null);
     setSelectedId(null);
     setBuffer("");
     setCustomerId("");
@@ -340,6 +344,7 @@ export default function VentasPage() {
         }),
       });
       setLastTicket({ ...sale, total });
+      setVueltoPendiente(sale.vuelto ?? null);
       setLines([]);
       setSelectedId(null);
       setBuffer("");
@@ -483,15 +488,26 @@ export default function VentasPage() {
 
         {error && <p className="error" style={{ margin: "4px 12px" }}>{error}</p>}
         {notice && <p className="badge ok" style={{ margin: "4px 12px" }}>{notice}</p>}
+        {/*
+          El vuelto queda a la vista mientras el cajero cuenta el cambio, pero
+          se borra apenas arranca la venta siguiente: un vuelto viejo en
+          pantalla se puede entregar dos veces.
+        */}
+        {vueltoPendiente != null && vueltoPendiente > 0 && (
+          <div className="vuelto-aviso" style={{ margin: "4px 12px" }}>
+            <span>Vuelto a entregar</span>
+            <strong>{money(vueltoPendiente)}</strong>
+            <button
+              className="vuelto-listo"
+              title="Ya entregué el vuelto"
+              onClick={() => setVueltoPendiente(null)}
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {lastTicket && !notice && (
           <div style={{ margin: "4px 12px" }}>
-            {/* El vuelto queda a la vista mientras el cajero da el cambio */}
-            {lastTicket.vuelto != null && lastTicket.vuelto > 0 && (
-              <div className="vuelto-aviso">
-                <span>Vuelto a entregar</span>
-                <strong>{money(lastTicket.vuelto)}</strong>
-              </div>
-            )}
             <span className="badge ok">
               Ticket #{lastTicket.ticketNumber} emitido —{" "}
               <a style={{ cursor: "pointer" }} onClick={() => imprimir(lastTicket.id)}>🖨 imprimir</a>
