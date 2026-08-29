@@ -439,10 +439,28 @@ export async function getProductos(
  */
 export async function buscarCatalogoMaestro(
   token: string,
-  filtros: { ean?: string; q?: string }
+  filtros: {
+    ean?: string; q?: string;
+    pasilloId?: string; rubroId?: string; subrubroId?: string; marca?: string;
+  }
 ): Promise<B2BProductoMaestro[]> {
+  // El acotado por taxonomía y marca se aplica igual sobre lo que llegue:
+  // si el marketplace todavía no soporta esos parámetros, los ignora.
+  const acota = (p: {
+    pasillo_id: string | null; rubro_id: string | null;
+    subrubro_id: string | null; marca: string | null;
+  }): boolean => {
+    const marca = filtros.marca?.toLowerCase().trim();
+    if (filtros.pasilloId && p.pasillo_id !== filtros.pasilloId) return false;
+    if (filtros.rubroId && p.rubro_id !== filtros.rubroId) return false;
+    if (filtros.subrubroId && p.subrubro_id !== filtros.subrubroId) return false;
+    if (marca && !(p.marca ?? "").toLowerCase().includes(marca)) return false;
+    return true;
+  };
+
   if (isMockMode()) {
     return MOCK_PRODUCTOS.filter((p) => {
+      if (!acota(p)) return false;
       if (filtros.ean) return p.ean === filtros.ean;
       const term = filtros.q?.toLowerCase().trim() ?? "";
       return !term || p.nombre.toLowerCase().includes(term) || p.marca?.toLowerCase().includes(term) || p.ean?.includes(term);
@@ -462,11 +480,21 @@ export async function buscarCatalogoMaestro(
   const params = new URLSearchParams();
   if (filtros.ean) params.set("ean", filtros.ean);
   else if (filtros.q) params.set("q", filtros.q);
+  // Filtros de taxonomía y marca: si el marketplace todavía no los soporta
+  // los ignora, y el POS acota igual sobre lo que recibe (ver abajo).
+  if (filtros.pasilloId) params.set("pasillo_id", filtros.pasilloId);
+  if (filtros.rubroId) params.set("rubro_id", filtros.rubroId);
+  if (filtros.subrubroId) params.set("subrubro_id", filtros.subrubroId);
+  if (filtros.marca) params.set("marca", filtros.marca);
+  params.set("pageSize", "50");
+
   const data = await api<{ productos: B2BProductoMaestro[] }>(
     `/store/mayoristas/me/catalogo/buscar?${params}`,
     { token }
   );
-  return data.productos.map((p) => ({ ...p, imagen_url: urlPublica(p.imagen_url) }));
+  return data.productos
+    .filter(acota)
+    .map((p) => ({ ...p, imagen_url: urlPublica(p.imagen_url) }));
 }
 
 export async function getMediosPago(token: string, mayoristaId: string): Promise<B2BMedioPago[]> {

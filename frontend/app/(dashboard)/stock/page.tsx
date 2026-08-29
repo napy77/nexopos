@@ -15,6 +15,7 @@ interface Movement {
 }
 import type { B2BProductoMaestro, B2BPresentacionMaestra, B2BTaxonomia } from "@/lib/b2b-types";
 import { prepararImagen } from "@/lib/imagen";
+import { Foto } from "@/lib/foto";
 
 interface AltaEnCurso { producto: B2BProductoMaestro; opciones: B2BPresentacionMaestra[]; presIdx: number }
 
@@ -50,6 +51,8 @@ export default function StockPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [catQ, setCatQ] = useState("");
   const [catResults, setCatResults] = useState<B2BProductoMaestro[]>([]);
+  const [catFiltros, setCatFiltros] = useState({ pasilloId: "", rubroId: "", subrubroId: "", marca: "" });
+  const [buscando, setBuscando] = useState(false);
   const [adding, setAdding] = useState<AltaEnCurso | null>(null);
   const [okMsg, setOkMsg] = useState("");
   const [showPropio, setShowPropio] = useState(false);
@@ -77,26 +80,48 @@ export default function StockPage() {
   // mayorista que venda el producto). Si lo tipeado es un EAN (lector de
   // código de barras), se abre directo el formulario con la ficha completa.
   useEffect(() => {
-    if (!showAdd || !catQ.trim()) { setCatResults([]); return; }
+    if (!showAdd) { setCatResults([]); return; }
+    const termino = catQ.trim();
+    if (!termino) { setCatResults([]); setBuscando(false); return; }
+
+    setBuscando(true);
+    // Cada búsqueda cancela la anterior: tipeando rápido salen varias en
+    // paralelo y la más vieja puede contestar última, pisando los resultados
+    // buenos con los de un término que ya no es el que está en pantalla.
+    const ctrl = new AbortController();
     const t = setTimeout(async () => {
-      const data = await api<{ productos: B2BProductoMaestro[] }>(
-        `/api/catalog/maestro?termino=${encodeURIComponent(catQ.trim())}`
-      );
-      const productos = data.productos.slice(0, 8);
-      setCatResults(productos);
-      const scanned = catQ.trim();
-      const matchEan = productos.find(
-        (p) => p.ean === scanned ||
-          p.presentaciones?.some((pr) => pr.ean_propio === scanned)
-      );
-      if (matchEan) {
-        const opciones = buildOpciones(matchEan);
-        const idx = opciones.findIndex((o) => o.ean_propio === scanned);
-        setAdding({ producto: matchEan, opciones, presIdx: idx >= 0 ? idx : 0 });
+      try {
+        const params = new URLSearchParams({ termino });
+        if (catFiltros.pasilloId) params.set("pasillo_id", catFiltros.pasilloId);
+        if (catFiltros.rubroId) params.set("rubro_id", catFiltros.rubroId);
+        if (catFiltros.subrubroId) params.set("subrubro_id", catFiltros.subrubroId);
+        if (catFiltros.marca.trim()) params.set("marca", catFiltros.marca.trim());
+
+        const data = await api<{ productos: B2BProductoMaestro[]; termino: string }>(
+          `/api/catalog/maestro?${params}`,
+          { signal: ctrl.signal }
+        );
+        // Doble red: si igual llegó una respuesta de otro término, se descarta
+        if (data.termino !== termino) return;
+
+        const productos = data.productos.slice(0, 12);
+        setCatResults(productos);
+        const matchEan = productos.find(
+          (p) => p.ean === termino || p.presentaciones?.some((pr) => pr.ean_propio === termino)
+        );
+        if (matchEan) {
+          const opciones = buildOpciones(matchEan);
+          const idx = opciones.findIndex((o) => o.ean_propio === termino);
+          setAdding({ producto: matchEan, opciones, presIdx: idx >= 0 ? idx : 0 });
+        }
+      } catch (err) {
+        if ((err as Error)?.name !== "AbortError") console.error(err);
+      } finally {
+        setBuscando(false);
       }
     }, 300);
-    return () => clearTimeout(t);
-  }, [catQ, showAdd]);
+    return () => { clearTimeout(t); ctrl.abort(); };
+  }, [catQ, showAdd, catFiltros]);
 
   async function elegirFoto(file: File | undefined, destino: "nuevo" | "existente") {
     if (!file) return;
@@ -371,8 +396,58 @@ export default function StockPage() {
               <p className="muted" style={{ margin: "6px 0 0" }}>
                 Si el código existe en NexoB2B, el producto se completa solo: vos solo ponés precio y cantidad.
               </p>
+
+              {/* Filtros para acotar cuando el nombre trae muchos resultados */}
+              <div className="toolbar" style={{ marginTop: 8 }}>
+                <select
+                  value={catFiltros.pasilloId}
+                  onChange={(e) => setCatFiltros({ ...catFiltros, pasilloId: e.target.value, rubroId: "", subrubroId: "" })}
+                >
+                  <option value="">Todos los pasillos</option>
+                  {(taxonomia?.pasillos ?? []).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                </select>
+                <select
+                  value={catFiltros.rubroId}
+                  onChange={(e) => setCatFiltros({ ...catFiltros, rubroId: e.target.value, subrubroId: "" })}
+                >
+                  <option value="">Todos los rubros</option>
+                  {(taxonomia?.rubros ?? [])
+                    .filter((r) => !catFiltros.pasilloId || r.pasillo_id === catFiltros.pasilloId)
+                    .map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+                </select>
+                <select
+                  value={catFiltros.subrubroId}
+                  onChange={(e) => setCatFiltros({ ...catFiltros, subrubroId: e.target.value })}
+                >
+                  <option value="">Todos los subrubros</option>
+                  {(taxonomia?.subrubros ?? [])
+                    .filter((s) => !catFiltros.rubroId || s.rubro_id === catFiltros.rubroId)
+                    .map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                </select>
+                <input
+                  placeholder="Marca"
+                  value={catFiltros.marca}
+                  onChange={(e) => setCatFiltros({ ...catFiltros, marca: e.target.value })}
+                  style={{ width: 150 }}
+                />
+                {(catFiltros.pasilloId || catFiltros.rubroId || catFiltros.subrubroId || catFiltros.marca) && (
+                  <button
+                    className="small secondary"
+                    onClick={() => setCatFiltros({ pasilloId: "", rubroId: "", subrubroId: "", marca: "" })}
+                  >
+                    Limpiar filtros
+                  </button>
+                )}
+                {buscando && <span className="muted">Buscando…</span>}
+              </div>
+
               {catResults.length > 0 && (
                 <table style={{ marginTop: 8 }}>
+                  <thead>
+                    <tr>
+                      <th></th><th>EAN</th><th>Producto</th><th>Marca</th><th>Rubro</th><th></th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {catResults.map((p) => (
                       <tr
@@ -381,24 +456,30 @@ export default function StockPage() {
                         style={{ cursor: "pointer" }}
                       >
                         <td style={{ width: 44 }}>
-                          {p.imagen_url
-                            // eslint-disable-next-line @next/next/no-img-element
-                            ? <img src={p.imagen_url} alt="" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }} />
-                            : <span style={{ fontSize: 22 }}>📦</span>}
+                          <Foto
+                            src={p.imagen_url}
+                            style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }}
+                            fallbackStyle={{ fontSize: 22 }}
+                          />
                         </td>
-                        <td className="muted">{p.ean}</td>
+                        <td className="muted">{p.ean ?? "—"}</td>
                         <td><strong>{p.nombre}</strong></td>
-                        <td className="muted">{p.marca}</td>
-                        <td className="muted">{p.rubro_nombre}</td>
+                        <td className="muted">{p.marca ?? "—"}</td>
+                        <td className="muted">
+                          {p.rubro_nombre ?? "—"}
+                          {p.subrubro_nombre && <div style={{ fontSize: 11 }}>{p.subrubro_nombre}</div>}
+                        </td>
                         <td><button className="small">Elegir</button></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               )}
-              {catQ.trim() && catResults.length === 0 && (
+              {catQ.trim() && !buscando && catResults.length === 0 && (
                 <p className="muted" style={{ marginTop: 8 }}>
-                  Sin resultados en el catálogo de NexoB2B para «{catQ}».
+                  Sin resultados en el catálogo de NexoB2B para «{catQ}»
+                  {(catFiltros.pasilloId || catFiltros.rubroId || catFiltros.subrubroId || catFiltros.marca)
+                    && " con los filtros puestos"}.
                 </p>
               )}
             </>

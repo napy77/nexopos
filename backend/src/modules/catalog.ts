@@ -58,12 +58,23 @@ catalogRouter.get("/maestro", async (req, res, next) => {
     const { token } = await b2bContext(req);
     const termino = String(req.query.termino ?? "").trim();
     if (!termino) {
-      res.json({ productos: [] });
+      res.json({ productos: [], termino });
       return;
     }
+    const filtros = {
+      pasilloId: req.query.pasillo_id ? String(req.query.pasillo_id) : undefined,
+      rubroId: req.query.rubro_id ? String(req.query.rubro_id) : undefined,
+      subrubroId: req.query.subrubro_id ? String(req.query.subrubro_id) : undefined,
+      marca: req.query.marca ? String(req.query.marca) : undefined,
+    };
     const esEan = /^\d{8,14}$/.test(termino);
-    const productos = await buscarCatalogoMaestro(token, esEan ? { ean: termino } : { q: termino });
-    res.json({ productos });
+    const productos = await buscarCatalogoMaestro(token, {
+      ...filtros,
+      ...(esEan ? { ean: termino } : { q: termino }),
+    });
+    // El término viaja de vuelta para que el buscador pueda descartar las
+    // respuestas viejas que llegan fuera de orden
+    res.json({ productos, termino });
   } catch (err) {
     next(err);
   }
