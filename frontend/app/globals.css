@@ -272,6 +272,27 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .pm-active, .pm-active:hover { border-color: var(--primary); background: #eff6ff; box-shadow: 0 0 0 2px #bfdbfe; }
 .pm-icon { font-size: 28px; }
 
+/* Vuelto en la pantalla de cobro */
+.vuelto-box {
+  width: 100%; max-width: 640px; margin: 4px 0 12px;
+  padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: #fff;
+}
+.vuelto-monto {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+  font-size: 16px;
+}
+.vuelto-monto strong { font-size: 34px; color: var(--success); font-variant-numeric: tabular-nums; }
+.vuelto-monto.falta strong { color: var(--danger); }
+
+/* Vuelto ya cobrado: queda visible mientras se entrega el cambio */
+.vuelto-aviso {
+  display: flex; justify-content: space-between; align-items: baseline;
+  background: #dcfce7; border: 2px solid var(--success); border-radius: 10px;
+  padding: 8px 14px; margin-bottom: 6px;
+}
+.vuelto-aviso strong { font-size: 26px; color: #14532d; font-variant-numeric: tabular-nums; }
+
 /* Modal */
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(17, 24, 39, 0.5);

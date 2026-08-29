@@ -16,6 +16,7 @@ export interface TicketData {
   subtotal: string | number;
   discount: string | number;
   total: string | number;
+  paid_amount?: string | number | null;
   refund_of: number | null;
   items: { name: string; ean: string | null; quantity: string | number; unit_price: string | number }[];
 }
@@ -109,6 +110,12 @@ export function renderTicketHtml(
     })
     .join("");
 
+  // El vuelto se muestra solo si el cajero anotó con cuánto le pagaron
+  const vuelto =
+    sale.paid_amount != null && Number(sale.paid_amount) >= Number(sale.total)
+      ? Number(sale.paid_amount) - Number(sale.total)
+      : null;
+
   const descuento = Number(sale.discount) > 0
     ? `<div class="linea"><span>Subtotal</span><span>$${fmtMoney(sale.subtotal)}</span></div>
        <div class="linea"><span>Descuento</span><span>-$${fmtMoney(sale.discount)}</span></div>`
@@ -147,6 +154,9 @@ export function renderTicketHtml(
   ${descuento}
   <div class="total"><span>TOTAL</span><span>$${fmtMoney(sale.total)}</span></div>
   <div class="linea"><span>Pago</span><span>${PAYMENT_LABEL[sale.payment_method] ?? sale.payment_method}</span></div>
+  ${vuelto !== null ? `
+    <div class="linea"><span>Paga con</span><span>$${fmtMoney(sale.paid_amount!)}</span></div>
+    <div class="linea destacado"><span>Vuelto</span><span>$${fmtMoney(vuelto)}</span></div>` : ""}
   <div class="sep-doble"></div>
 
   <div class="centro pie">¡Gracias por su compra!</div>

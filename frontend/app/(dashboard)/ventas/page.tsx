@@ -59,14 +59,16 @@ export default function VentasPage() {
   const [paymentMethod, setPaymentMethod] = useState<string>("cash");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [lastTicket, setLastTicket] = useState<{ id: number; ticketNumber: number; total: number } | null>(null);
+  const [lastTicket, setLastTicket] = useState<{ id: number; ticketNumber: number; total: number; vuelto?: number | null } | null>(null);
   const [showCustomers, setShowCustomers] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [refundList, setRefundList] = useState<Sale[] | null>(null);
   const [balanza, setBalanza] = useState<BalanzaConfig>(BALANZA_DEFAULT);
   const [cajaAbierta, setCajaAbierta] = useState<boolean | null>(null);
   const [newCustomerName, setNewCustomerName] = useState("");
+  const [pagaCon, setPagaCon] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const pagaConRef = useRef<HTMLInputElement>(null);
 
   const loadStock = useCallback(() => {
     api<StockItem[]>("/api/stock").then(setItems).catch(console.error);
@@ -137,6 +139,24 @@ export default function VentasPage() {
 
   const customer = customers.find((c) => c.id === customerId);
   const total = lines.reduce((acc, l) => acc + l.quantity * l.unitPrice, 0);
+
+  // ── Vuelto (solo en efectivo) ──────────────────────────────────────────────
+  const montoPagado = pagaCon === "" ? null : Number(pagaCon.replace(",", "."));
+  const vuelto = montoPagado !== null && !isNaN(montoPagado) ? montoPagado - total : null;
+  const faltaPlata = vuelto !== null && vuelto < 0;
+
+  /**
+   * Importes con los que suele pagar el cliente: el monto justo y los billetes
+   * o redondeos inmediatamente superiores al total.
+   */
+  const sugerencias = useMemo(() => {
+    const billetes = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+    const mayores = billetes.filter((b) => b > total).slice(0, 3);
+    // Redondeo "de bolsillo" al siguiente mil, si no quedó ya en la lista
+    const alMil = Math.ceil(total / 1000) * 1000;
+    if (alMil > total && !mayores.includes(alMil)) mayores.unshift(alMil);
+    return [...new Set(mayores)].sort((a, b) => a - b).slice(0, 4);
+  }, [total]);
 
   // ── Armado del ticket ──────────────────────────────────────────────────────
 
@@ -307,7 +327,7 @@ export default function VentasPage() {
   async function cobrar() {
     setError("");
     try {
-      const sale = await api<{ id: number; ticketNumber: number; total: number }>("/api/sales", {
+      const sale = await api<{ id: number; ticketNumber: number; total: number; vuelto: number | null }>("/api/sales", {
         method: "POST",
         body: JSON.stringify({
           items: lines.filter((l) => l.quantity > 0).map((l) => ({
@@ -316,6 +336,7 @@ export default function VentasPage() {
           paymentMethod,
           customerId: customerId || undefined,
           discount: 0,
+          paidAmount: paymentMethod === "cash" && montoPagado ? montoPagado : undefined,
         }),
       });
       setLastTicket({ ...sale, total });
@@ -324,6 +345,7 @@ export default function VentasPage() {
       setBuffer("");
       setCustomerId("");
       setPaymentMethod("cash");
+      setPagaCon("");
       setView("order");
       loadStock();
       loadCustomers();
@@ -462,14 +484,21 @@ export default function VentasPage() {
         {error && <p className="error" style={{ margin: "4px 12px" }}>{error}</p>}
         {notice && <p className="badge ok" style={{ margin: "4px 12px" }}>{notice}</p>}
         {lastTicket && !notice && (
-          <p style={{ margin: "4px 12px" }}>
+          <div style={{ margin: "4px 12px" }}>
+            {/* El vuelto queda a la vista mientras el cajero da el cambio */}
+            {lastTicket.vuelto != null && lastTicket.vuelto > 0 && (
+              <div className="vuelto-aviso">
+                <span>Vuelto a entregar</span>
+                <strong>{money(lastTicket.vuelto)}</strong>
+              </div>
+            )}
             <span className="badge ok">
               Ticket #{lastTicket.ticketNumber} emitido —{" "}
               <a style={{ cursor: "pointer" }} onClick={() => imprimir(lastTicket.id)}>🖨 imprimir</a>
               {" · "}
               <a style={{ cursor: "pointer" }} onClick={() => openTicketPdf(lastTicket.id)}>PDF</a>
             </span>
-          </p>
+          </div>
         )}
 
         <div className="numpad">
@@ -504,7 +533,14 @@ export default function VentasPage() {
         <button
           className="pay-btn"
           disabled={lines.length === 0 || total <= 0}
-          onClick={() => { setView("payment"); setShowActions(false); setShowCustomers(false); }}
+          onClick={() => {
+            setView("payment");
+            setShowActions(false);
+            setShowCustomers(false);
+            setPagaCon("");
+            // El cajero suele arrancar tipeando con cuánto le pagan
+            setTimeout(() => pagaConRef.current?.focus(), 50);
+          }}
         >
           Pago · {money(total)}
         </button>
@@ -625,6 +661,49 @@ export default function VentasPage() {
               );
             })}
           </div>
+          {/* Vuelto: solo tiene sentido cobrando en efectivo */}
+          {paymentMethod === "cash" && (
+            <div className="vuelto-box">
+              <div className="toolbar" style={{ alignItems: "center" }}>
+                <label style={{ fontWeight: 600 }}>Paga con</label>
+                <input
+                  ref={pagaConRef}
+                  type="number" inputMode="decimal" step="0.01" min="0"
+                  value={pagaCon}
+                  onChange={(e) => setPagaCon(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !faltaPlata) cobrar(); }}
+                  placeholder="Importe que entrega"
+                  style={{ width: 180, fontSize: 20, padding: "10px 12px" }}
+                />
+                {sugerencias.map((s) => (
+                  <button key={s} className="chip" onClick={() => setPagaCon(String(s))}>
+                    {money(s)}
+                  </button>
+                ))}
+                <button className="chip" onClick={() => setPagaCon(String(total))}>Justo</button>
+                {pagaCon !== "" && (
+                  <button className="chip" onClick={() => { setPagaCon(""); pagaConRef.current?.focus(); }}>
+                    Borrar
+                  </button>
+                )}
+              </div>
+
+              {vuelto !== null && (
+                faltaPlata ? (
+                  <div className="vuelto-monto falta">
+                    <span>Falta</span>
+                    <strong>{money(Math.abs(vuelto))}</strong>
+                  </div>
+                ) : (
+                  <div className="vuelto-monto">
+                    <span>Vuelto</span>
+                    <strong>{money(vuelto)}</strong>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+
           {paymentMethod === "account" && !customerId && (
             <p className="error">La cuenta corriente requiere un cliente: volvé y seleccionalo con el botón 👤.</p>
           )}
@@ -632,7 +711,7 @@ export default function VentasPage() {
           <button
             className="pay-btn"
             style={{ maxWidth: 420 }}
-            disabled={paymentMethod === "account" && !customerId}
+            disabled={(paymentMethod === "account" && !customerId) || faltaPlata}
             onClick={cobrar}
           >
             ✓ Validar y emitir ticket

@@ -23,6 +23,8 @@ const createSaleSchema = z.object({
   paymentMethod: z.enum(["cash", "wallet", "card", "transfer", "account"]),
   customerId: z.coerce.number().int().optional(),
   discount: z.coerce.number().nonnegative().default(0),
+  /** Con cuánto pagó el cliente, para dejar el vuelto en el ticket */
+  paidAmount: z.coerce.number().nonnegative().optional(),
 });
 
 /**
@@ -85,10 +87,12 @@ salesRouter.post("/", async (req, res, next) => {
       rows: [sale],
     } = await client.query(
       `INSERT INTO sales (commerce_id, ticket_number, customer_id, payment_method,
-                          subtotal, discount, total, cash_session_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, ticket_number, created_at`,
+                          subtotal, discount, total, cash_session_id, paid_amount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, ticket_number, created_at`,
       [commerceId, next_number, body.customerId ?? null, body.paymentMethod,
-       subtotal, body.discount, total, sesion?.id ?? null]
+       subtotal, body.discount, total, sesion?.id ?? null,
+       // El vuelto solo tiene sentido en efectivo
+       body.paymentMethod === "cash" ? body.paidAmount ?? null : null]
     );
     for (const l of lines) {
       await client.query(
@@ -122,7 +126,11 @@ salesRouter.post("/", async (req, res, next) => {
 
     await client.query("COMMIT");
     await audit(commerceId, "sale.create", "sales", sale.id, { total, paymentMethod: body.paymentMethod });
-    res.status(201).json({ id: sale.id, ticketNumber: Number(sale.ticket_number), subtotal, total });
+    const vuelto =
+      body.paymentMethod === "cash" && body.paidAmount != null
+        ? Math.max(0, Math.round((body.paidAmount - total) * 100) / 100)
+        : null;
+    res.status(201).json({ id: sale.id, ticketNumber: Number(sale.ticket_number), subtotal, total, vuelto });
   } catch (err) {
     await client.query("ROLLBACK");
     next(err);
@@ -346,6 +354,10 @@ salesRouter.get("/:id/ticket.pdf", async (req, res, next) => {
     doc.fontSize(14).font("Helvetica-Bold").text("TOTAL", MARGEN, totalY);
     doc.text(`$${fmtMoney(sale.total)}`, MARGEN, totalY, { width: UTIL, align: "right" });
     doc.fontSize(8).font("Helvetica").text(`Pago: ${PAYMENT_LABEL[sale.payment_method] ?? sale.payment_method}`);
+    if (sale.paid_amount != null && Number(sale.paid_amount) >= Number(sale.total)) {
+      doc.text(`Paga con: $${fmtMoney(sale.paid_amount)}`);
+      doc.font("Helvetica-Bold").text(`Vuelto: $${fmtMoney(Number(sale.paid_amount) - Number(sale.total))}`).font("Helvetica");
+    }
     separador(1.5);
 
     doc.text("¡Gracias por su compra!", { align: "center" });
