@@ -19,7 +19,10 @@ export interface CartMeta {
 }
 
 export interface CartLine {
+  /** Presentación del mayorista: identifica el ítem al crear la orden */
   presentacionId: string;
+  /** Presentación maestra: identidad del producto en el stock local */
+  presentacionMaestraId?: string;
   mayoristaId: string;
   mayoristaNombre: string;
   cantidad: number;

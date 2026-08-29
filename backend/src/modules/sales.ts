@@ -50,8 +50,9 @@ salesRouter.post("/", async (req, res, next) => {
         [commerceId, item.productId]
       );
       if (!rows[0]) throw new HttpError(400, `El producto ${item.productId} no está en el stock local`);
-      if (Number(rows[0].quantity) < item.quantity)
-        throw new HttpError(400, `Stock insuficiente para el producto ${item.productId} (disponible: ${rows[0].quantity})`);
+      // La venta no se frena por falta de stock: el conteo del sistema puede
+      // estar atrasado y el mostrador no puede quedarse esperando. La cantidad
+      // queda en negativo, que es justamente la señal de que hay que ajustar.
       const unitPrice = item.unitPrice ?? Number(rows[0].sale_price);
       if (!unitPrice) throw new HttpError(400, `El producto ${item.productId} no tiene precio de venta definido`);
       lines.push({ productId: item.productId, quantity: item.quantity, unitPrice });

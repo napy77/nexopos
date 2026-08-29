@@ -51,6 +51,7 @@ export default function CatalogoPage() {
   function agregarAlCarrito(producto: B2BProducto, listing: B2BListing, pres: B2BPresentacion) {
     addToCart({
       presentacionId: pres.id,
+      presentacionMaestraId: pres.presentacion_id,
       mayoristaId: listing.mayorista_id,
       mayoristaNombre: listing.mayorista_nombre,
       cantidad: 1,

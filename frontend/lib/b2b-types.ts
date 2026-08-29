@@ -1,7 +1,10 @@
 /** Tipos de la API de NexoB2B tal como los devuelve el backend del POS. */
 
 export interface B2BPresentacion {
+  /** id del listing del mayorista: se manda al crear la orden */
   id: string;
+  /** id de la presentación maestra: identifica al producto en el stock local */
+  presentacion_id?: string;
   nombre: string;
   factor: number;
   ean_propio: string | null;

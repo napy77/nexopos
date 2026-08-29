@@ -37,6 +37,8 @@ const createOrderSchema = z.object({
     .array(
       z.object({
         presentacionId: z.string(),
+        // Identidad del producto en el stock local (ver B2BPresentacion)
+        presentacionMaestraId: z.string().optional(),
         cantidad: z.coerce.number().positive(),
         meta: itemMetaSchema,
       })
@@ -90,7 +92,9 @@ purchasesRouter.post("/", async (req, res, next) => {
            VALUES ($1, $2, $3, $4, $5, $6)`,
           [
             local.id,
-            body.items[i]?.presentacionId ?? null,
+            // Se guarda la presentación maestra: es con la que después se
+            // identifica el producto al ingresarlo al stock
+            body.items[i]?.presentacionMaestraId ?? body.items[i]?.presentacionId ?? null,
             b2bItem.nombre,
             b2bItem.cantidad,
             b2bItem.precio_unitario,

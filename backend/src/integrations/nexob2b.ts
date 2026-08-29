@@ -25,7 +25,15 @@ export interface B2BComercio {
 }
 
 export interface B2BPresentacion {
-  id: string;               // pmp_xxx ← presentacion_id para crear órdenes
+  /** id de producto_mayorista_presentacion: es el que se manda al crear la orden */
+  id: string;
+  /**
+   * id de producto_maestro_presentacion: identifica al producto en la góndola
+   * sin depender del mayorista. Es la identidad que usa el stock local, para
+   * que el mismo artículo comprado a dos mayoristas —o cargado a mano— no
+   * termine duplicado.
+   */
+  presentacion_id?: string;
   nombre: string;           // "Bidón 5L"
   factor: number;
   ean_propio: string | null;

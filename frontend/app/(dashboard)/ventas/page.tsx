@@ -86,6 +86,9 @@ export default function VentasPage() {
     searchRef.current?.focus();
   }, [loadStock, loadCustomers]);
 
+  // La grilla muestra lo que tiene stock, pero el lector busca en todo el
+  // stock local: si el cajero tiene el producto en la mano, existe, aunque el
+  // sistema lo tenga en cero.
   const sellable = useMemo(() => items.filter((i) => Number(i.quantity) > 0), [items]);
 
   // Taxonomía NexoB2B en cascada, derivada del stock del comercio.
@@ -169,10 +172,10 @@ export default function VentasPage() {
       const existing = prev.find((l) => l.productId === item.product_id);
       if (existing) {
         setSelectedId(existing.productId);
+        // Sumar sin tope: si el stock del sistema quedó corto, igual se vende
+        // (queda en negativo y se ajusta después)
         return prev.map((l) =>
-          l.productId === item.product_id
-            ? { ...l, quantity: Math.min(l.available, l.quantity + 1) }
-            : l
+          l.productId === item.product_id ? { ...l, quantity: l.quantity + 1 } : l
         );
       }
       setSelectedId(item.product_id);
@@ -191,7 +194,7 @@ export default function VentasPage() {
     // 1. ¿Es una etiqueta de balanza? Trae el producto y el peso adentro
     const lectura = leerCodigoBalanza(term, balanza);
     if (lectura) {
-      const item = buscarPorPlu(sellable, lectura.plu);
+      const item = buscarPorPlu(items, lectura.plu);
       if (!item) {
         setError(
           `Etiqueta de balanza con código ${lectura.plu}, pero ningún producto tuyo lo tiene asignado. ` +
@@ -207,12 +210,15 @@ export default function VentasPage() {
       return;
     }
 
-    // 2. EAN común, o único resultado del filtro
-    const exact = sellable.find((i) => i.ean === term);
+    // 2. EAN común (buscado en todo el stock, con o sin existencias), o el
+    //    único resultado que quedó a la vista
+    const exact = items.find((i) => i.ean === term);
     const target = exact ?? (visible.length === 1 ? visible[0] : null);
     if (target) {
       addLine(target);
       setQ("");
+    } else if (/^\d{8,14}$/.test(term)) {
+      setError(`El código ${term} no está en tu stock. Cargalo desde Stock → Agregar producto.`);
     }
     searchRef.current?.focus();
   }
@@ -226,7 +232,7 @@ export default function VentasPage() {
     setLines((prev) => prev.map((l) => {
       if (l.productId !== selectedId) return l;
       if (next === "" || isNaN(value)) return l;
-      if (numpadMode === "qty") return { ...l, quantity: Math.min(l.available, Math.max(0, value)) };
+      if (numpadMode === "qty") return { ...l, quantity: Math.max(0, value) };
       if (numpadMode === "pct") return { ...l, unitPrice: Math.max(0, l.basePrice * (1 - value / 100)) };
       return { ...l, unitPrice: Math.max(0, value) };
     }));

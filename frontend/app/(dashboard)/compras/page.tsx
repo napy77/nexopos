@@ -210,7 +210,12 @@ function CheckoutGroup({ mayoristaId, lines, busy, setBusy, setError, onQuantity
           mayoristaNombre: lines[0]?.mayoristaNombre,
           medioPagoId,
           notas: notas || undefined,
-          items: lines.map((l) => ({ presentacionId: l.presentacionId, cantidad: l.cantidad, meta: l.meta })),
+          items: lines.map((l) => ({
+            presentacionId: l.presentacionId,
+            presentacionMaestraId: l.presentacionMaestraId,
+            cantidad: l.cantidad,
+            meta: l.meta,
+          })),
         }),
       });
       onConfirmed(mayoristaId, res.numero);
