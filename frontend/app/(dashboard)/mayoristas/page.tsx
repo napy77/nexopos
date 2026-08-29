@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { Foto } from "@/lib/foto";
 import type { B2BMayorista } from "@/lib/b2b-types";
 
 const ESTADO_SOLICITUD: Record<string, { label: string; cls: string }> = {
@@ -87,10 +88,12 @@ export default function MayoristasPage() {
           return (
             <div key={m.id} className="card" style={{ minWidth: 300 }}>
               <div className="toolbar" style={{ marginBottom: 8 }}>
-                {m.logo_url
-                  // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={m.logo_url} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 8 }} />
-                  : <span style={{ fontSize: 28 }}>🏬</span>}
+                <Foto
+                  src={m.logo_url}
+                  fallback="🏬"
+                  style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 8 }}
+                  fallbackStyle={{ fontSize: 28 }}
+                />
                 <div>
                   <strong>{m.nombre}</strong>
                   <div className="muted">

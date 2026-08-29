@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api, money } from "@/lib/api";
 import { loadPrintSettings, printTicket, openTicketPdf } from "@/lib/print";
 import { leerCodigoBalanza, buscarPorPlu, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
+import { Foto } from "@/lib/foto";
 
 interface StockItem {
   product_id: number; name: string; ean: string; category: string | null;
@@ -572,10 +573,12 @@ export default function VentasPage() {
                   <button key={item.product_id} className="pos-card" onClick={() => addLine(item)}>
                     {inTicket && <span className="pos-card-qty">{inTicket.quantity}</span>}
                     <div className="pos-card-img">
-                      {item.image_url
-                        // eslint-disable-next-line @next/next/no-img-element
-                        ? <img src={item.image_url} alt="" />
-                        : <span>{CATEGORY_EMOJI[item.category ?? ""] ?? "📦"}</span>}
+                      <Foto
+                        src={item.image_url}
+                        fallback={CATEGORY_EMOJI[item.category ?? ""] ?? "📦"}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        fallbackStyle={{ fontSize: 40 }}
+                      />
                     </div>
                     <div className="pos-card-name">{item.name}</div>
                     <div className="pos-card-footer">

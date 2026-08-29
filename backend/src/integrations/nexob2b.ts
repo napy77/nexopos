@@ -172,6 +172,18 @@ export interface B2BTaxonomia {
 
 export const isMockMode = (): boolean => config.nexob2b.apiUrl === null;
 
+/**
+ * NexoB2B guarda los logos y algunas imágenes como rutas relativas
+ * ("/logos/x.jpg"). Servidas tal cual, el navegador del comercio las busca
+ * en nexopos.app y aparecen rotas: hay que anteponerles el dominio del
+ * marketplace. Las que ya vienen absolutas o como data URI quedan igual.
+ */
+function urlPublica(u: string | null | undefined): string | null {
+  if (!u) return null;
+  if (/^(https?:|data:|blob:)/i.test(u)) return u;
+  return `${config.nexob2b.publicUrl.replace(/\/$/, "")}/${u.replace(/^\//, "")}`;
+}
+
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
 async function api<T>(path: string, opts: { token?: string; method?: string; body?: unknown } = {}): Promise<T> {
@@ -367,7 +379,7 @@ export async function getMayoristas(token: string, busqueda?: string): Promise<B
   if (busqueda) params.set("busqueda", busqueda);
   const qs = params.size ? `?${params}` : "";
   const data = await api<{ mayoristas: B2BMayorista[] }>(`/store/mayoristas/lista${qs}`, { token });
-  return data.mayoristas;
+  return data.mayoristas.map((m) => ({ ...m, logo_url: urlPublica(m.logo_url) }));
 }
 
 export async function solicitarAlta(token: string, mayoristaId: string, mensaje: string): Promise<unknown> {
@@ -412,7 +424,11 @@ export async function getProductos(
   if (filtros.mayoristaId) params.set("mayorista_id", filtros.mayoristaId);
   if (filtros.incluirSinMayorista) params.set("incluir_sin_mayorista", "true");
   const data = await api<{ productos: B2BProducto[] }>(`/store/productos?${params}`, { token });
-  return data.productos;
+  return data.productos.map((p) => ({
+    ...p,
+    imagen_url: urlPublica(p.imagen_url),
+    mayoristas: (p.mayoristas ?? []).map((m) => ({ ...m, mayorista_logo: urlPublica(m.mayorista_logo) })),
+  }));
 }
 
 /**
@@ -450,7 +466,7 @@ export async function buscarCatalogoMaestro(
     `/store/mayoristas/me/catalogo/buscar?${params}`,
     { token }
   );
-  return data.productos;
+  return data.productos.map((p) => ({ ...p, imagen_url: urlPublica(p.imagen_url) }));
 }
 
 export async function getMediosPago(token: string, mayoristaId: string): Promise<B2BMedioPago[]> {

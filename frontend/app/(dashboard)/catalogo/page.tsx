@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, money } from "@/lib/api";
 import { addToCart } from "@/lib/cart";
+import { Foto } from "@/lib/foto";
 import type { B2BProducto, B2BListing, B2BPresentacion, B2BMayorista, B2BTaxonomia } from "@/lib/b2b-types";
 
 export default function CatalogoPage() {
@@ -150,10 +151,11 @@ function ProductoRow({ producto, expanded, onToggle, onAdd }: {
     <>
       <tr onClick={onToggle} style={{ cursor: "pointer" }}>
         <td style={{ width: 44 }}>
-          {producto.imagen_url
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={producto.imagen_url} alt="" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }} />
-            : <span style={{ fontSize: 22 }}>📦</span>}
+          <Foto
+            src={producto.imagen_url}
+            style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }}
+            fallbackStyle={{ fontSize: 22 }}
+          />
         </td>
         <td>
           <strong>{producto.nombre}</strong>
