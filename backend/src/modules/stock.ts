@@ -21,7 +21,9 @@ stockRouter.get("/", async (req, res, next) => {
       `SELECT s.id, s.product_id, p.name, p.ean, p.category, p.unit,
               COALESCE(s.image_url, p.image_url) AS image_url,
               (s.image_url IS NOT NULL) AS imagen_propia,
-              p.pasillo_nombre, p.rubro_nombre, p.subrubro_nombre,
+              p.brand, p.descripcion,
+              p.pasillo_id, p.pasillo_nombre, p.rubro_id, p.rubro_nombre,
+              p.subrubro_id, p.subrubro_nombre,
               p.origen, p.plu, p.venta_por_peso,
               s.quantity, s.cost, s.sale_price, s.min_stock, s.updated_at,
               (s.quantity <= s.min_stock) AS low_stock
@@ -335,6 +337,80 @@ stockRouter.post("/producto-propio", async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+/**
+ * PUT /api/stock/producto-propio/:productId
+ * Edita la ficha de un producto creado por el comercio. Los del catálogo de
+ * NexoB2B no se tocan desde acá: sus datos son del marketplace y se
+ * comparten con los demás comercios.
+ */
+stockRouter.put("/producto-propio/:productId", async (req, res, next) => {
+  try {
+    const body = productoPropioSchema
+      .omit({ quantity: true, cost: true, salePrice: true, minStock: true })
+      .partial({ nombre: true })
+      .parse(req.body);
+    const commerceId = req.auth.commerceId;
+    const productId = Number(req.params.productId);
+    const plu = body.plu?.trim() || null;
+
+    const { rows: actual } = await pool.query(
+      "SELECT id, origen, commerce_id FROM products WHERE id = $1",
+      [productId]
+    );
+    if (!actual[0]) throw new HttpError(404, "Producto no encontrado");
+    // Los del catálogo son globales: editarlos acá se los cambiaría a todos
+    if (actual[0].origen !== "propio")
+      throw new HttpError(400, "Los productos del catálogo de NexoB2B no se editan desde el POS");
+    if (actual[0].commerce_id !== commerceId)
+      throw new HttpError(403, "Ese producto es de otro comercio");
+
+    if (plu) {
+      const { rows: dup } = await pool.query(
+        "SELECT name FROM products WHERE commerce_id = $1 AND plu = $2 AND id <> $3",
+        [commerceId, plu, productId]
+      );
+      if (dup[0]) throw new HttpError(409, `El código de balanza ${plu} ya lo usa "${dup[0].name}"`);
+    }
+
+    await pool.query(
+      `UPDATE products SET
+         name = COALESCE($1, name),
+         descripcion = $2,
+         brand = $3,
+         ean = $4,
+         plu = $5,
+         venta_por_peso = COALESCE($6, venta_por_peso),
+         unit = COALESCE($7, unit),
+         category = $8,
+         pasillo_id = $9, pasillo_nombre = $10,
+         rubro_id = $11, rubro_nombre = $12,
+         subrubro_id = $13, subrubro_nombre = $14
+       WHERE id = $15`,
+      [
+        body.nombre ?? null,
+        body.descripcion ?? null,
+        body.marca ?? null,
+        body.ean?.trim() || null,
+        plu,
+        body.ventaPorPeso,
+        body.unidad ?? (body.ventaPorPeso ? "kg" : null),
+        body.rubroNombre ?? null,
+        body.pasilloId ?? null, body.pasilloNombre ?? null,
+        body.rubroId ?? null, body.rubroNombre ?? null,
+        body.subrubroId ?? null, body.subrubroNombre ?? null,
+        productId,
+      ]
+    );
+    if (body.imagenUrl) {
+      await pool.query("UPDATE products SET image_url = $1 WHERE id = $2", [body.imagenUrl, productId]);
+    }
+    await audit(commerceId, "product.edit_own", "products", productId, { nombre: body.nombre });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
   }
 });
 

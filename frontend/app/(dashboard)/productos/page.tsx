@@ -9,6 +9,9 @@ interface StockItem {
   min_stock: string; low_stock: boolean;
   origen: string; plu: string | null; venta_por_peso: boolean;
   image_url: string | null; imagen_propia: boolean;
+  brand: string | null; descripcion: string | null;
+  pasillo_id: string | null; rubro_id: string | null; subrubro_id: string | null;
+  pasillo_nombre: string | null; rubro_nombre: string | null; subrubro_nombre: string | null;
 }
 interface Movement {
   id: number; name: string; type: string; quantity: string; reference: string | null; created_at: string;
@@ -65,6 +68,7 @@ export default function ProductosPage() {
   const [subiendoFoto, setSubiendoFoto] = useState(false);
   const [editandoCampo, setEditandoCampo] = useState<{ id: number; campo: string } | null>(null);
   const [comprando, setComprando] = useState<{ item: StockItem; productos: B2BProducto[] | null } | null>(null);
+  const [editandoPropio, setEditandoPropio] = useState<StockItem | null>(null);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ q, lowOnly: String(lowOnly) });
@@ -172,6 +176,7 @@ export default function ProductosPage() {
         method: "POST",
         body: JSON.stringify({
           nombre: String(form.get("nombre")),
+          descripcion: String(form.get("descripcion") || "") || undefined,
           marca: String(form.get("marca") || "") || undefined,
           pasilloId: taxSel.pasilloId || undefined,
           pasilloNombre: taxonomia?.pasillos.find((p) => p.id === taxSel.pasilloId)?.nombre,
@@ -296,6 +301,54 @@ export default function ProductosPage() {
     }
   }
 
+  /** Abre la ficha de un producto propio con sus datos actuales. */
+  function abrirEdicion(item: StockItem) {
+    setShowPropio(false);
+    setShowAdd(false);
+    setPorPeso(item.venta_por_peso);
+    setFotoNueva(null);
+    setTaxSel({
+      pasilloId: item.pasillo_id ?? "",
+      rubroId: item.rubro_id ?? "",
+      subrubroId: item.subrubro_id ?? "",
+    });
+    setEditandoPropio(item);
+  }
+
+  async function guardarEdicionPropio(form: FormData) {
+    if (!editandoPropio) return;
+    setError("");
+    try {
+      await api(`/api/stock/producto-propio/${editandoPropio.product_id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          nombre: String(form.get("nombre")),
+          descripcion: String(form.get("descripcion") || "") || undefined,
+          marca: String(form.get("marca") || "") || undefined,
+          pasilloId: taxSel.pasilloId || undefined,
+          pasilloNombre: taxonomia?.pasillos.find((p) => p.id === taxSel.pasilloId)?.nombre,
+          rubroId: taxSel.rubroId || undefined,
+          rubroNombre: taxonomia?.rubros.find((r) => r.id === taxSel.rubroId)?.nombre,
+          subrubroId: taxSel.subrubroId || undefined,
+          subrubroNombre: taxonomia?.subrubros.find((sr) => sr.id === taxSel.subrubroId)?.nombre,
+          ean: String(form.get("ean") || "") || undefined,
+          plu: String(form.get("plu") || "") || undefined,
+          ventaPorPeso: form.get("ventaPorPeso") === "on",
+          imagenUrl: fotoNueva ?? undefined,
+        }),
+      });
+      setEditandoPropio(null);
+      setPorPeso(false);
+      setFotoNueva(null);
+      setTaxSel({ pasilloId: "", rubroId: "", subrubroId: "" });
+      setOkMsg("Producto actualizado.");
+      setTimeout(() => setOkMsg(""), 3000);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    }
+  }
+
   /** Ofertas de mayoristas para reponer este producto. */
   async function abrirCompra(item: StockItem) {
     setError("");
@@ -359,6 +412,13 @@ export default function ProductosPage() {
             <div className="toolbar">
               <input name="nombre" placeholder="Nombre del producto *" required style={{ flex: 2, minWidth: 240 }} autoFocus />
               <input name="marca" placeholder="Marca" style={{ width: 140 }} />
+            </div>
+            <div className="toolbar">
+              <textarea
+                name="descripcion" placeholder="Descripción detallada (opcional)" rows={2}
+                style={{ flex: 1, minWidth: 260, padding: "8px 10px", border: "1px solid var(--border)",
+                         borderRadius: 6, fontFamily: "inherit", fontSize: 14 }}
+              />
             </div>
             <div className="toolbar">
               <select
@@ -649,9 +709,15 @@ export default function ProductosPage() {
                   <button className="small secondary" onClick={() => setEditing(s)} title="Corregir la cantidad en góndola">
                     Ajustar stock
                   </button>{" "}
-                  <button className="small" onClick={() => abrirCompra(s)} title="Ver ofertas de mayoristas para reponer">
-                    Comprar
-                  </button>
+                  {s.origen === "propio" ? (
+                    <button className="small" onClick={() => abrirEdicion(s)} title="Editar la ficha del producto">
+                      Editar ficha
+                    </button>
+                  ) : (
+                    <button className="small" onClick={() => abrirCompra(s)} title="Ver ofertas de mayoristas para reponer">
+                      Comprar
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -672,6 +738,93 @@ export default function ProductosPage() {
             <input name="reason" type="text" placeholder="Motivo del ajuste" required />
             <button type="submit">Guardar</button>
             <button type="button" className="secondary" onClick={() => setEditing(null)}>Cancelar</button>
+          </form>
+        </div>
+      )}
+
+      {editandoPropio && (
+        <div className="card" style={{ border: "2px solid var(--primary)" }}>
+          <h2>Editar ficha: {editandoPropio.name}</h2>
+          <p className="muted">
+            Es un producto tuyo, así que podés cambiarle todos los datos. Los precios y el
+            stock se editan desde la tabla.
+          </p>
+          <form action={guardarEdicionPropio}>
+            <div className="toolbar" style={{ alignItems: "flex-start" }}>
+              <label className="foto-slot" title="Foto para el punto de venta">
+                {fotoNueva || editandoPropio.image_url
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={fotoNueva ?? editandoPropio.image_url!} alt="" />
+                  : <span>📷<br /><span style={{ fontSize: 11 }}>Foto</span></span>}
+                <input
+                  type="file" accept="image/*" capture="environment" hidden
+                  onChange={(e) => elegirFoto(e.target.files?.[0], "nuevo")}
+                />
+              </label>
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <input
+                  name="nombre" defaultValue={editandoPropio.name} required
+                  placeholder="Nombre del producto *" style={{ width: "100%" }} autoFocus
+                />
+                <textarea
+                  name="descripcion" defaultValue={editandoPropio.descripcion ?? ""}
+                  placeholder="Descripción detallada (opcional)"
+                  rows={3}
+                  style={{ width: "100%", marginTop: 8, padding: "8px 10px",
+                           border: "1px solid var(--border)", borderRadius: 6,
+                           fontFamily: "inherit", fontSize: 14 }}
+                />
+              </div>
+            </div>
+            <div className="toolbar">
+              <input name="marca" defaultValue={editandoPropio.brand ?? ""} placeholder="Marca" style={{ width: 160 }} />
+              <select
+                value={taxSel.pasilloId}
+                onChange={(e) => setTaxSel({ pasilloId: e.target.value, rubroId: "", subrubroId: "" })}
+              >
+                <option value="">Pasillo…</option>
+                {(taxonomia?.pasillos ?? []).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+              </select>
+              <select
+                value={taxSel.rubroId}
+                onChange={(e) => setTaxSel({ ...taxSel, rubroId: e.target.value, subrubroId: "" })}
+                disabled={!taxSel.pasilloId}
+              >
+                <option value="">Rubro…</option>
+                {(taxonomia?.rubros ?? []).filter((r) => r.pasillo_id === taxSel.pasilloId)
+                  .map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+              </select>
+              <select
+                value={taxSel.subrubroId}
+                onChange={(e) => setTaxSel({ ...taxSel, subrubroId: e.target.value })}
+                disabled={!taxSel.rubroId}
+              >
+                <option value="">Subrubro…</option>
+                {(taxonomia?.subrubros ?? []).filter((sr) => sr.rubro_id === taxSel.rubroId)
+                  .map((sr) => <option key={sr.id} value={sr.id}>{sr.nombre}</option>)}
+              </select>
+            </div>
+            <div className="toolbar">
+              <input name="ean" defaultValue={editandoPropio.ean ?? ""} placeholder="Código de barras (EAN)" style={{ width: 220 }} />
+              <input name="plu" defaultValue={editandoPropio.plu ?? ""} placeholder="Código de balanza (PLU)" style={{ width: 200 }} />
+              <label className="switch-row" style={{ padding: 0 }}>
+                <input
+                  type="checkbox" name="ventaPorPeso"
+                  checked={porPeso}
+                  onChange={(e) => setPorPeso(e.target.checked)}
+                />
+                <span>Se vende por peso</span>
+              </label>
+            </div>
+            <div className="toolbar">
+              <button type="submit">Guardar cambios</button>
+              <button
+                type="button" className="secondary"
+                onClick={() => { setEditandoPropio(null); setFotoNueva(null); setPorPeso(false); }}
+              >
+                Cancelar
+              </button>
+            </div>
           </form>
         </div>
       )}
