@@ -36,6 +36,44 @@ stockRouter.get("/", async (req, res, next) => {
   }
 });
 
+const precioSchema = z.object({
+  salePrice: z.coerce.number().positive().optional(),
+  cost: z.coerce.number().nonnegative().optional(),
+  minStock: z.coerce.number().nonnegative().optional(),
+});
+
+/**
+ * PUT /api/stock/:productId/precio
+ * Cambia precio de venta, costo o stock mínimo. Va separado del ajuste de
+ * cantidades: cambiar un precio es rutina de todos los días y no tiene por
+ * qué pedir un motivo, mientras que tocar el stock sí es un ajuste de
+ * inventario y necesita quedar justificado.
+ */
+stockRouter.put("/:productId/precio", async (req, res, next) => {
+  try {
+    const body = precioSchema.parse(req.body);
+    if (body.salePrice === undefined && body.cost === undefined && body.minStock === undefined) {
+      throw new HttpError(400, "No hay nada para cambiar");
+    }
+    const { rows } = await pool.query(
+      `UPDATE stock_items
+       SET sale_price = COALESCE($1, sale_price),
+           cost = COALESCE($2, cost),
+           min_stock = COALESCE($3, min_stock),
+           updated_at = now()
+       WHERE commerce_id = $4 AND product_id = $5
+       RETURNING sale_price, cost, min_stock`,
+      [body.salePrice ?? null, body.cost ?? null, body.minStock ?? null,
+       req.auth.commerceId, Number(req.params.productId)]
+    );
+    if (!rows[0]) throw new HttpError(404, "Ese producto no está en tu stock");
+    await audit(req.auth.commerceId, "product.price", "products", Number(req.params.productId), body);
+    res.json({ ok: true, ...rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const adjustSchema = z.object({
   productId: z.coerce.number().int(),
   quantityDelta: z.coerce.number(),  // positivo entra, negativo sale

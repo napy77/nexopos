@@ -12,7 +12,7 @@ const NAV = [
   { href: "/catalogo", label: "Catálogo B2B" },
   { href: "/mayoristas", label: "Mayoristas" },
   { href: "/compras", label: "Compras" },
-  { href: "/stock", label: "Stock" },
+  { href: "/productos", label: "Productos" },
   { href: "/clientes", label: "Clientes" },
 ];
 

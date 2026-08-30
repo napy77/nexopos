@@ -242,7 +242,7 @@ export default function VentasPage() {
       addLine(target);
       setQ("");
     } else if (/^\d{8,14}$/.test(term)) {
-      setError(`El código ${term} no está en tu stock. Cargalo desde Stock → Agregar producto.`);
+      setError(`El código ${term} no está en tu stock. Cargalo desde Productos → Agregar producto.`);
     }
     searchRef.current?.focus();
   }
@@ -613,8 +613,8 @@ export default function VentasPage() {
               <p><strong>Todavía no tenés productos en stock para vender.</strong></p>
               <ol className="muted">
                 <li><Link href="/catalogo">Catálogo B2B</Link> → comprale a un mayorista y recibí la mercadería en <Link href="/compras">Compras</Link>.</li>
-                <li><Link href="/stock">Stock</Link> → «Agregar producto del catálogo» para mercadería que ya tenés.</li>
-                <li>Asignale precio de venta en <Link href="/stock">Stock</Link>.</li>
+                <li><Link href="/productos">Stock</Link> → «Agregar producto del catálogo» para mercadería que ya tenés.</li>
+                <li>Asignale precio de venta en <Link href="/productos">Stock</Link>.</li>
               </ol>
             </div>
           ) : (
