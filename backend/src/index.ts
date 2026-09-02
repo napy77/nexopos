@@ -19,6 +19,7 @@ import { reportsRouter } from "./modules/reports.js";
 import { exportRouter } from "./modules/export.js";
 import { settingsRouter } from "./modules/settings.js";
 import { cajaRouter } from "./modules/caja.js";
+import { clubpayRouter } from "./modules/clubpay.js";
 
 const arranque = new Date().toISOString();
 const app = express();
@@ -55,6 +56,7 @@ app.use("/api/reports", requireAuth, reportsRouter);
 app.use("/api/export", requireAuth, exportRouter);
 app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/caja", requireAuth, cajaRouter);
+app.use("/api/clubpay", requireAuth, clubpayRouter);
 
 app.use(errorHandler);
 

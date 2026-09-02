@@ -279,6 +279,34 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .pm-active, .pm-active:hover { border-color: var(--primary); background: #eff6ff; box-shadow: 0 0 0 2px #bfdbfe; }
 .pm-icon { font-size: 28px; }
 
+/* Socio ClubPay en la pantalla de cobro */
+.clubpay-box {
+  width: 100%; max-width: 640px; margin: 4px 0 12px;
+  padding: 14px; border: 1px solid var(--border); border-radius: 12px;
+  background: #fff;
+}
+.oferta {
+  border: 2px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; margin-top: 8px; cursor: pointer;
+}
+.oferta:hover { border-color: var(--primary); background: #eff6ff; }
+.oferta.elegida { border-color: var(--success); background: #f0fdf4; }
+.oferta.no-aplica {
+  cursor: not-allowed; background: #f9fafb; border-style: dashed; opacity: 0.85;
+}
+.oferta.no-aplica:hover { border-color: var(--border); background: #f9fafb; }
+.oferta-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.oferta-monto { font-size: 20px; font-weight: 700; color: var(--success); white-space: nowrap; }
+.oferta-motivo {
+  margin-top: 4px; font-size: 13px; color: var(--warning); font-weight: 600;
+}
+.oferta-condiciones { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; }
+.oferta-condiciones span {
+  font-size: 11px; color: var(--muted);
+  background: #f3f4f6; border-radius: 8px; padding: 2px 8px;
+}
+.oferta-elegida { margin-top: 6px; font-size: 12px; font-weight: 700; color: var(--success); }
+
 /* Vuelto en la pantalla de cobro */
 .vuelto-box {
   width: 100%; max-width: 640px; margin: 4px 0 12px;

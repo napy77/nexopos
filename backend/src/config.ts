@@ -19,4 +19,8 @@ export const config = {
     publicUrl:
       process.env.NEXOB2B_PUBLIC_URL || process.env.NEXOB2B_API_URL || "https://nexob2b.app",
   },
+  clubpay: {
+    // Vacío → modo mock, con socios de prueba para el mostrador
+    apiUrl: process.env.CLUBPAY_API_URL || "",
+  },
 };

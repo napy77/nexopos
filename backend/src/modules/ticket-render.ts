@@ -18,6 +18,9 @@ export interface TicketData {
   total: string | number;
   paid_amount?: string | number | null;
   refund_of: number | null;
+  clubpay_member?: string | null;
+  clubpay_club?: string | null;
+  clubpay_discount?: string | number | null;
   items: { name: string; ean: string | null; quantity: string | number; unit_price: string | number }[];
 }
 
@@ -110,10 +113,13 @@ export function renderTicketHtml(
     })
     .join("");
 
+  const descuentoClub = Number(sale.clubpay_discount ?? 0);
+
   // El vuelto se muestra solo si el cajero anotó con cuánto le pagaron
+  const aCobrar = Number(sale.total) - descuentoClub;
   const vuelto =
-    sale.paid_amount != null && Number(sale.paid_amount) >= Number(sale.total)
-      ? Number(sale.paid_amount) - Number(sale.total)
+    sale.paid_amount != null && Number(sale.paid_amount) >= aCobrar
+      ? Number(sale.paid_amount) - aCobrar
       : null;
 
   const descuento = Number(sale.discount) > 0
@@ -153,6 +159,10 @@ export function renderTicketHtml(
   <div class="sep"></div>
   ${descuento}
   <div class="total"><span>TOTAL</span><span>$${fmtMoney(sale.total)}</span></div>
+  ${descuentoClub > 0 ? `
+    <div class="linea"><span>Beneficio ClubPay</span><span>-$${fmtMoney(descuentoClub)}</span></div>
+    ${sale.clubpay_member ? `<div class="linea" style="font-size:10px"><span>Socio</span><span>${escape(sale.clubpay_member)}${sale.clubpay_club ? ` · ${escape(sale.clubpay_club)}` : ""}</span></div>` : ""}
+    <div class="linea destacado"><span>A pagar</span><span>$${fmtMoney(Number(sale.total) - descuentoClub)}</span></div>` : ""}
   <div class="linea"><span>Pago</span><span>${PAYMENT_LABEL[sale.payment_method] ?? sale.payment_method}</span></div>
   ${vuelto !== null ? `
     <div class="linea"><span>Paga con</span><span>$${fmtMoney(sale.paid_amount!)}</span></div>

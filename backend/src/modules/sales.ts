@@ -5,6 +5,8 @@ import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { renderTicketHtml, fmtQty, fmtMoney, PAYMENT_LABEL } from "./ticket-render.js";
 import { sesionAbierta } from "./caja.js";
+import { registrarTransaccion, aCentavos, aPesos, RECORTE_TEXTO, type ClubPayTransaccion } from "../integrations/clubpay.js";
+import { clubpayKey } from "./clubpay.js";
 
 export const salesRouter = Router();
 
@@ -25,6 +27,16 @@ const createSaleSchema = z.object({
   discount: z.coerce.number().nonnegative().default(0),
   /** Con cuánto pagó el cliente, para dejar el vuelto en el ticket */
   paidAmount: z.coerce.number().nonnegative().optional(),
+  /**
+   * Socio y beneficio elegidos en el mostrador. El importe del descuento NO
+   * viaja desde el cliente: lo calcula ClubPay al registrar la transacción.
+   */
+  clubpay: z.object({
+    membershipId: z.coerce.number().int(),
+    offerId: z.coerce.number().int(),
+    memberName: z.string().optional(),
+    clubName: z.string().optional(),
+  }).optional(),
 });
 
 /**
@@ -40,6 +52,11 @@ salesRouter.post("/", async (req, res, next) => {
     const commerceId = req.auth.commerceId;
     if (body.paymentMethod === "account" && !body.customerId)
       throw new HttpError(400, "La venta a cuenta corriente requiere un cliente");
+
+    // Sin caja abierta no se vende: se chequea antes de tocar ClubPay para no
+    // dejar una transacción registrada allá por una venta que no va a existir.
+    const sesion = await sesionAbierta(commerceId, client);
+    if (!sesion) throw new HttpError(409, "La caja está cerrada. Abrila para poder vender.");
 
     await client.query("BEGIN");
 
@@ -78,22 +95,78 @@ salesRouter.post("/", async (req, res, next) => {
       [commerceId]
     );
 
-    // Sin caja abierta no se vende: el dinero de la venta tiene que entrar
-    // en el arqueo de algún turno.
-    const sesion = await sesionAbierta(commerceId, client);
-    if (!sesion) throw new HttpError(409, "La caja está cerrada. Abrila para poder vender.");
+    /*
+     * ClubPay: se registra la transacción ANTES de crear la venta porque su
+     * respuesta es la que manda. Aunque se haya validado el QR hace unos
+     * segundos, ClubPay recalcula con las condiciones vigentes en este
+     * momento —pudo pasar la medianoche, o el socio pudo haber usado el
+     * beneficio en otra caja—, así que el importe del comprobante sale de
+     * acá y no de la validación previa.
+     *
+     * Si ClubPay rechaza (el beneficio no aplica hoy, se agotó el tope), la
+     * venta no se hace y el cajero ve el motivo tal como lo escribió ClubPay.
+     */
+    let clubpayTx: ClubPayTransaccion | null = null;
+    let descuentoClubpay = 0;
+    if (body.clubpay) {
+      const key = await clubpayKey(req);
+      clubpayTx = await registrarTransaccion(key, {
+        membershipId: body.clubpay.membershipId,
+        offerId: body.clubpay.offerId,
+        ticketTotalCents: aCentavos(total),
+      });
+      descuentoClubpay = aPesos(clubpayTx.discount_cents);
+      if (descuentoClubpay > total) descuentoClubpay = total;
+    }
+
+    // Lo que efectivamente se cobra por el medio de pago elegido: el resto lo
+    // cubre el cupón. La venta sigue siendo por el total.
+    const aCobrar = Math.round((total - descuentoClubpay) * 100) / 100;
 
     const {
       rows: [sale],
     } = await client.query(
       `INSERT INTO sales (commerce_id, ticket_number, customer_id, payment_method,
-                          subtotal, discount, total, cash_session_id, paid_amount)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, ticket_number, created_at`,
+                          subtotal, discount, total, cash_session_id, paid_amount,
+                          clubpay_transaction_id, clubpay_member, clubpay_club, clubpay_discount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING id, ticket_number, created_at`,
       [commerceId, next_number, body.customerId ?? null, body.paymentMethod,
-       subtotal, body.discount, total, sesion?.id ?? null,
+       subtotal, body.discount, total, sesion.id,
        // El vuelto solo tiene sentido en efectivo
-       body.paymentMethod === "cash" ? body.paidAmount ?? null : null]
+       body.paymentMethod === "cash" ? body.paidAmount ?? null : null,
+       clubpayTx ? String(clubpayTx.transaction_id) : null,
+       body.clubpay?.memberName ?? null,
+       body.clubpay?.clubName ?? null,
+       clubpayTx ? descuentoClubpay : null]
     );
+
+    /*
+     * Formas de pago de la venta. Una venta de $100.000 con $8.000 de
+     * beneficio se compone de $92.000 cobrados + $8.000 de cupón: el
+     * descuento no achica la venta, entra como forma de pago. Así el comercio
+     * ve por separado cuánto vendió, cuánto cobró y cuánto entregó en
+     * beneficios.
+     */
+    await client.query(
+      `INSERT INTO sale_payments (commerce_id, sale_id, method, amount) VALUES ($1, $2, $3, $4)`,
+      [commerceId, sale.id, body.paymentMethod, aCobrar]
+    );
+    if (clubpayTx && descuentoClubpay > 0) {
+      await client.query(
+        `INSERT INTO sale_payments
+           (commerce_id, sale_id, method, amount, coupon_provider, coupon_reference, meta)
+         VALUES ($1, $2, 'coupon', $3, 'clubpay', $4, $5)`,
+        [commerceId, sale.id, descuentoClubpay, String(clubpayTx.transaction_id),
+         JSON.stringify({
+           member: body.clubpay?.memberName ?? null,
+           club: body.clubpay?.clubName ?? null,
+           discount_percent: clubpayTx.discount_percent,
+           recorte: clubpayTx.recorte,
+           points_earned: clubpayTx.points_earned,
+         })]
+      );
+    }
     for (const l of lines) {
       await client.query(
         `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price) VALUES ($1, $2, $3, $4)`,
@@ -116,10 +189,10 @@ salesRouter.post("/", async (req, res, next) => {
       await client.query(
         `INSERT INTO customer_transactions (commerce_id, customer_id, type, amount, sale_id, note)
          VALUES ($1, $2, 'sale_credit', $3, $4, $5)`,
-        [commerceId, body.customerId, total, sale.id, `Ticket #${sale.ticket_number}`]
+        [commerceId, body.customerId, aCobrar, sale.id, `Ticket #${sale.ticket_number}`]
       );
       await client.query("UPDATE customers SET balance = balance + $1 WHERE id = $2", [
-        total,
+        aCobrar,
         body.customerId,
       ]);
     }
@@ -128,9 +201,24 @@ salesRouter.post("/", async (req, res, next) => {
     await audit(commerceId, "sale.create", "sales", sale.id, { total, paymentMethod: body.paymentMethod });
     const vuelto =
       body.paymentMethod === "cash" && body.paidAmount != null
-        ? Math.max(0, Math.round((body.paidAmount - total) * 100) / 100)
+        ? Math.max(0, Math.round((body.paidAmount - aCobrar) * 100) / 100)
         : null;
-    res.status(201).json({ id: sale.id, ticketNumber: Number(sale.ticket_number), subtotal, total, vuelto });
+    res.status(201).json({
+      id: sale.id,
+      ticketNumber: Number(sale.ticket_number),
+      subtotal,
+      total,
+      vuelto,
+      // Lo que ClubPay resolvió para esta venta, para mostrarlo en el mostrador
+      clubpay: clubpayTx && {
+        descuento: descuentoClubpay,
+        aCobrar,
+        recorte: clubpayTx.recorte,
+        recorteTexto: RECORTE_TEXTO[clubpayTx.recorte] ?? null,
+        puntos: clubpayTx.points_earned,
+        transactionId: clubpayTx.transaction_id,
+      },
+    });
   } catch (err) {
     await client.query("ROLLBACK");
     next(err);
@@ -190,6 +278,30 @@ salesRouter.post("/:id/refund", async (req, res, next) => {
         sesionReembolso.id,   // el reembolso descuenta de la caja de HOY
       ]
     );
+    // Espejo de las formas de pago: si parte la cubrió un cupón de ClubPay,
+    // esa parte también se revierte. Ojo: ClubPay todavía no tiene endpoint
+    // de anulación, así que la devolución del beneficio hay que coordinarla
+    // con ellos (queda el transaction_id en la venta original).
+    const { rows: pagos } = await client.query(
+      "SELECT method, amount, coupon_provider, coupon_reference FROM sale_payments WHERE sale_id = $1",
+      [original.id]
+    );
+    for (const pago of pagos) {
+      await client.query(
+        `INSERT INTO sale_payments
+           (commerce_id, sale_id, method, amount, coupon_provider, coupon_reference)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [commerceId, refund.id, pago.method, -Number(pago.amount),
+         pago.coupon_provider, pago.coupon_reference]
+      );
+    }
+    if (original.clubpay_transaction_id) {
+      console.warn(
+        `[clubpay] reembolso del ticket #${original.ticket_number}: la transacción ` +
+        `${original.clubpay_transaction_id} sigue registrada en ClubPay y hay que anularla con ellos`
+      );
+    }
+
     for (const item of items) {
       await client.query(
         "INSERT INTO sale_items (sale_id, product_id, quantity, unit_price) VALUES ($1, $2, $3, $4)",

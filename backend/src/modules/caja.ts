@@ -29,13 +29,16 @@ export async function sesionAbierta(
  */
 async function calcularResumen(commerceId: number, sessionId: number) {
   const [ventas, cobros, movimientos, sesion] = await Promise.all([
+    // Se agrupa por forma de pago real, no por el medio principal de la
+    // venta: una venta puede estar cobrada en parte con un cupón de ClubPay.
     pool.query(
-      `SELECT payment_method,
-              COUNT(*)::int AS tickets,
-              COALESCE(SUM(total), 0) AS total
-       FROM sales
-       WHERE commerce_id = $1 AND cash_session_id = $2
-       GROUP BY payment_method`,
+      `SELECT sp.method AS payment_method,
+              COUNT(DISTINCT sp.sale_id)::int AS tickets,
+              COALESCE(SUM(sp.amount), 0) AS total
+       FROM sale_payments sp
+       JOIN sales s ON s.id = sp.sale_id
+       WHERE sp.commerce_id = $1 AND s.cash_session_id = $2
+       GROUP BY sp.method`,
       [commerceId, sessionId]
     ),
     pool.query(
@@ -55,7 +58,7 @@ async function calcularResumen(commerceId: number, sessionId: number) {
   ]);
 
   const porMedio: Record<string, { tickets: number; total: number }> = {};
-  for (const m of ["cash", "wallet", "card", "transfer", "account"]) porMedio[m] = { tickets: 0, total: 0 };
+  for (const m of ["cash", "wallet", "card", "transfer", "account", "coupon"]) porMedio[m] = { tickets: 0, total: 0 };
   for (const r of ventas.rows) {
     porMedio[r.payment_method] = { tickets: Number(r.tickets), total: Number(r.total) };
   }
@@ -71,8 +74,16 @@ async function calcularResumen(commerceId: number, sessionId: number) {
   const cobrosEfectivo = cobrosCtaCte.cash ?? 0;
   const efectivoEsperado = apertura + ventasEfectivo + cobrosEfectivo + ingresos - egresos;
 
-  const totalVendido = Object.values(porMedio).reduce((a, v) => a + v.total, 0);
-  const totalTickets = Object.values(porMedio).reduce((a, v) => a + v.tickets, 0);
+  // El total vendido sale de las ventas, no de sumar formas de pago: el cupón
+  // de ClubPay es una de ellas y ya está incluido en el total de la venta.
+  const { rows: [venta] } = await pool.query(
+    `SELECT COUNT(*)::int AS tickets, COALESCE(SUM(total), 0) AS total
+     FROM sales WHERE commerce_id = $1 AND cash_session_id = $2`,
+    [commerceId, sessionId]
+  );
+  const totalVendido = Number(venta?.total ?? 0);
+  const totalTickets = Number(venta?.tickets ?? 0);
+  const cuponesEntregados = porMedio.coupon.total;
 
   return {
     apertura,
@@ -83,6 +94,8 @@ async function calcularResumen(commerceId: number, sessionId: number) {
     egresos,
     totalVendido,
     totalTickets,
+    /** Lo que el comercio entregó en beneficios (cupones de ClubPay) */
+    cuponesEntregados,
     efectivoEsperado,
   };
 }

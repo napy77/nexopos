@@ -30,11 +30,16 @@ export default function ConfiguracionPage() {
   const [pruebaCodigo, setPruebaCodigo] = useState("");
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  const [clubpay, setClubpay] = useState<{ configurado: boolean; mockMode: boolean; clavePreview: string | null } | null>(null);
+  const [clubpayKey, setClubpayKey] = useState("");
 
   useEffect(() => {
     setSettings(loadPrintSettings());
     api<{ balanza: BalanzaConfig }>("/api/settings/balanza")
       .then((d) => setBalanza(d.balanza))
+      .catch(console.error);
+    api<{ configurado: boolean; mockMode: boolean; clavePreview: string | null }>("/api/clubpay/estado")
+      .then(setClubpay)
       .catch(console.error);
     api<{ commerce: Commerce; mockMode: boolean }>("/api/auth/me")
       .then((d) => { setCommerce(d.commerce); setMockMode(d.mockMode); })
@@ -67,6 +72,23 @@ export default function ConfiguracionPage() {
   const lecturaPrueba = pruebaCodigo.trim()
     ? leerCodigoBalanza(pruebaCodigo.trim(), { ...balanza, habilitado: true })
     : null;
+
+  async function guardarClubpay() {
+    setError("");
+    try {
+      await api("/api/clubpay/api-key", {
+        method: "PUT",
+        body: JSON.stringify({ apiKey: clubpayKey.trim() }),
+      });
+      setClubpayKey("");
+      setMsg("Clave de ClubPay guardada.");
+      setTimeout(() => setMsg(""), 2500);
+      const estado = await api<{ configurado: boolean; mockMode: boolean; clavePreview: string | null }>("/api/clubpay/estado");
+      setClubpay(estado);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar la clave");
+    }
+  }
 
   async function probarImpresion() {
     setError("");
@@ -241,6 +263,38 @@ export default function ConfiguracionPage() {
                 )}
               </div>
             </>
+          )}
+        </div>
+
+        <div className="card" style={{ minWidth: 320 }}>
+          <h2>ClubPay</h2>
+          <p className="muted">
+            Descuentos para socios de clubes e instituciones. La clave te la da ClubPay
+            cuando activás el servicio desde NexoB2B; es propia de tu comercio.
+          </p>
+          {clubpay?.mockMode && (
+            <p className="badge warn">
+              Modo demo: no está conectado a ClubPay real. Probá con los QR
+              QR-SIMPLE, QR-TOPE, QR-MIERCOLES, QR-SIN-OFERTAS, QR-PLAN,
+              QR-INACTIVO o QR-VENCIDO.
+            </p>
+          )}
+          <div className="toolbar">
+            <input
+              type="password"
+              placeholder={clubpay?.clavePreview ?? "Clave de POS (pos_…)"}
+              value={clubpayKey}
+              onChange={(e) => setClubpayKey(e.target.value)}
+              style={{ flex: 1, minWidth: 220 }}
+            />
+            <button onClick={guardarClubpay} disabled={!clubpayKey.trim()}>Guardar</button>
+          </div>
+          {clubpay?.configurado ? (
+            <p className="badge ok">
+              {clubpay.clavePreview ? `Configurado (${clubpay.clavePreview})` : "Activo"}
+            </p>
+          ) : (
+            <p className="muted">Todavía no configurado: el POS no va a ofrecer el descuento.</p>
           )}
         </div>
 

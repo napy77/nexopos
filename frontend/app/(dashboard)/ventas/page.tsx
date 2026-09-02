@@ -6,6 +6,7 @@ import { api, money } from "@/lib/api";
 import { loadPrintSettings, printTicket, openTicketPdf } from "@/lib/print";
 import { leerCodigoBalanza, buscarPorPlu, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
 import { Foto } from "@/lib/foto";
+import { centavosAPesos, type ClubPayValidacion, type ClubPayOferta, type ClubPayElegido } from "@/lib/clubpay";
 
 interface StockItem {
   product_id: number; name: string; ean: string; category: string | null;
@@ -68,6 +69,15 @@ export default function VentasPage() {
   const [newCustomerName, setNewCustomerName] = useState("");
   const [pagaCon, setPagaCon] = useState("");
   const [vueltoPendiente, setVueltoPendiente] = useState<number | null>(null);
+  // ClubPay: el QR vence a los 60 segundos, así que ni el token ni la
+  // validación se guardan más allá de la venta que se está cobrando.
+  const [clubpayDisponible, setClubpayDisponible] = useState(false);
+  const [qrSocio, setQrSocio] = useState("");
+  const [validando, setValidando] = useState(false);
+  const [socio, setSocio] = useState<ClubPayValidacion | null>(null);
+  const [clubpayElegido, setClubpayElegido] = useState<ClubPayElegido | null>(null);
+  const [clubpayError, setClubpayError] = useState("");
+  const qrRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const pagaConRef = useRef<HTMLInputElement>(null);
 
@@ -87,6 +97,9 @@ export default function VentasPage() {
     api<{ abierta: boolean }>("/api/caja")
       .then((d) => setCajaAbierta(d.abierta))
       .catch(console.error);
+    api<{ configurado: boolean }>("/api/clubpay/estado")
+      .then((d) => setClubpayDisponible(d.configurado))
+      .catch(() => setClubpayDisponible(false));
     searchRef.current?.focus();
   }, [loadStock, loadCustomers]);
 
@@ -141,9 +154,17 @@ export default function VentasPage() {
   const customer = customers.find((c) => c.id === customerId);
   const total = lines.reduce((acc, l) => acc + l.quantity * l.unitPrice, 0);
 
+  /*
+   * El beneficio de ClubPay no achica la venta: el total sigue siendo el
+   * mismo y el descuento entra como forma de pago (cupón). Lo que cambia es
+   * cuánto hay que cobrar por caja.
+   */
+  const descuentoClub = clubpayElegido?.descuento ?? 0;
+  const aCobrar = Math.round((total - descuentoClub) * 100) / 100;
+
   // ── Vuelto (solo en efectivo) ──────────────────────────────────────────────
   const montoPagado = pagaCon === "" ? null : Number(pagaCon.replace(",", "."));
-  const vuelto = montoPagado !== null && !isNaN(montoPagado) ? montoPagado - total : null;
+  const vuelto = montoPagado !== null && !isNaN(montoPagado) ? montoPagado - aCobrar : null;
   const faltaPlata = vuelto !== null && vuelto < 0;
 
   /**
@@ -152,12 +173,62 @@ export default function VentasPage() {
    */
   const sugerencias = useMemo(() => {
     const billetes = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
-    const mayores = billetes.filter((b) => b > total).slice(0, 3);
+    const mayores = billetes.filter((b) => b > aCobrar).slice(0, 3);
     // Redondeo "de bolsillo" al siguiente mil, si no quedó ya en la lista
-    const alMil = Math.ceil(total / 1000) * 1000;
-    if (alMil > total && !mayores.includes(alMil)) mayores.unshift(alMil);
+    const alMil = Math.ceil(aCobrar / 1000) * 1000;
+    if (alMil > aCobrar && !mayores.includes(alMil)) mayores.unshift(alMil);
     return [...new Set(mayores)].sort((a, b) => a - b).slice(0, 4);
-  }, [total]);
+  }, [aCobrar]);
+
+  // ── ClubPay ────────────────────────────────────────────────────────────────
+
+  /**
+   * Valida el QR del socio contra ClubPay. Se manda el total del ticket para
+   * que la respuesta ya traiga el importe exacto de cada beneficio, con los
+   * topes del acuerdo aplicados. El importe no se calcula acá: lo resuelve
+   * ClubPay, que es quien conoce las condiciones.
+   */
+  async function validarSocio() {
+    const token = qrSocio.trim();
+    if (!token) return;
+    setClubpayError("");
+    setValidando(true);
+    try {
+      const val = await api<ClubPayValidacion>("/api/clubpay/validar", {
+        method: "POST",
+        body: JSON.stringify({ qrToken: token, total }),
+      });
+      setSocio(val);
+      // El token no se guarda: vence a los 60 segundos y no se reutiliza
+      setQrSocio("");
+      // Si hay un único beneficio que aplica, se elige solo
+      const aplicables = val.offers.filter((o) => o.aplica_hoy);
+      if (aplicables.length === 1) elegirOferta(val, aplicables[0]);
+    } catch (err) {
+      // El mensaje viene escrito por ClubPay para leérselo al cliente
+      setClubpayError(err instanceof Error ? err.message : "No se pudo validar el socio");
+      setSocio(null);
+      setClubpayElegido(null);
+    } finally {
+      setValidando(false);
+    }
+  }
+
+  function elegirOferta(val: ClubPayValidacion, oferta: ClubPayOferta) {
+    setClubpayElegido({
+      socio: val.member,
+      oferta,
+      // El importe lo calculó ClubPay para este ticket
+      descuento: oferta.discount_cents !== undefined ? centavosAPesos(oferta.discount_cents) : 0,
+    });
+  }
+
+  function quitarClubpay() {
+    setSocio(null);
+    setClubpayElegido(null);
+    setClubpayError("");
+    setQrSocio("");
+  }
 
   // ── Armado del ticket ──────────────────────────────────────────────────────
 
@@ -296,6 +367,8 @@ export default function VentasPage() {
   function anularVenta() {
     setLines([]);
     setVueltoPendiente(null);
+    // La venta no se registró en ClubPay: se descarta el socio sin avisarles
+    quitarClubpay();
     setSelectedId(null);
     setBuffer("");
     setCustomerId("");
@@ -331,7 +404,10 @@ export default function VentasPage() {
   async function cobrar() {
     setError("");
     try {
-      const sale = await api<{ id: number; ticketNumber: number; total: number; vuelto: number | null }>("/api/sales", {
+      const sale = await api<{
+        id: number; ticketNumber: number; total: number; vuelto: number | null;
+        clubpay?: { descuento: number; aCobrar: number; recorteTexto: string | null; puntos: number } | null;
+      }>("/api/sales", {
         method: "POST",
         body: JSON.stringify({
           items: lines.filter((l) => l.quantity > 0).map((l) => ({
@@ -341,6 +417,14 @@ export default function VentasPage() {
           customerId: customerId || undefined,
           discount: 0,
           paidAmount: paymentMethod === "cash" && montoPagado ? montoPagado : undefined,
+          // Solo el socio y el beneficio: el importe lo resuelve ClubPay al
+          // registrar la transacción, que es la llamada que manda.
+          clubpay: clubpayElegido && {
+            membershipId: clubpayElegido.socio.membership_id,
+            offerId: clubpayElegido.oferta.id,
+            memberName: clubpayElegido.socio.name,
+            clubName: clubpayElegido.socio.club_name,
+          },
         }),
       });
       setLastTicket({ ...sale, total });
@@ -351,7 +435,13 @@ export default function VentasPage() {
       setCustomerId("");
       setPaymentMethod("cash");
       setPagaCon("");
+      quitarClubpay();
       setView("order");
+      if (sale.clubpay) {
+        const extra = sale.clubpay.recorteTexto ? ` · ${sale.clubpay.recorteTexto}` : "";
+        setNotice(`Beneficio ClubPay aplicado: ${money(sale.clubpay.descuento)}${extra}`);
+        setTimeout(() => setNotice(""), 8000);
+      }
       loadStock();
       loadCustomers();
       searchRef.current?.focus();
@@ -654,12 +744,87 @@ export default function VentasPage() {
         <div className="products-panel pay-screen">
           <div className="pay-header">
             <button className="secondary" onClick={() => setView("order")}>← Volver</button>
-            <h1 style={{ margin: 0 }}>Cobrar {money(total)}</h1>
+            <h1 style={{ margin: 0 }}>Cobrar {money(aCobrar)}</h1>
+            {descuentoClub > 0 && (
+              <span className="muted">
+                Venta {money(total)} − beneficio {money(descuentoClub)}
+              </span>
+            )}
           </div>
           <p className="muted">
             Cliente: <strong>{customer ? customer.name : "Consumidor Final"}</strong>
             {customer && Number(customer.balance) > 0 && ` (debe ${money(customer.balance)})`}
           </p>
+
+          {/* ── Socio ClubPay ── */}
+          {clubpayDisponible && (
+            <div className="clubpay-box">
+              {!socio ? (
+                <div className="toolbar" style={{ marginBottom: 0 }}>
+                  <label style={{ fontWeight: 600 }}>🎫 Socio ClubPay</label>
+                  <input
+                    ref={qrRef}
+                    value={qrSocio}
+                    onChange={(e) => setQrSocio(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") validarSocio(); }}
+                    placeholder="Escaneá el QR que muestra el socio…"
+                    style={{ flex: 1, minWidth: 240 }}
+                    disabled={validando}
+                  />
+                  <button onClick={validarSocio} disabled={validando || !qrSocio.trim()}>
+                    {validando ? "Validando…" : "Validar"}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="toolbar" style={{ marginBottom: 6 }}>
+                    <strong>{socio.member.name}</strong>
+                    <span className="badge info">{socio.member.club_name}</span>
+                    <span className="muted">
+                      Socio {socio.member.member_number}
+                      {socio.member.points > 0 && ` · ${socio.member.points} puntos`}
+                    </span>
+                    <button className="small secondary" onClick={quitarClubpay}>Quitar</button>
+                  </div>
+
+                  {socio.offers.length === 0 && (
+                    <p className="muted" style={{ margin: 0 }}>
+                      El socio está al día, pero hoy no tiene beneficios en este comercio.
+                    </p>
+                  )}
+
+                  {socio.offers.map((o) => {
+                    const elegida = clubpayElegido?.oferta.id === o.id;
+                    return (
+                      <div
+                        key={o.id}
+                        className={`oferta ${o.aplica_hoy ? "" : "no-aplica"} ${elegida ? "elegida" : ""}`}
+                        onClick={() => o.aplica_hoy && elegirOferta(socio, o)}
+                      >
+                        <div className="oferta-top">
+                          <strong>{o.description}</strong>
+                          {o.aplica_hoy && o.discount_cents !== undefined && (
+                            <span className="oferta-monto">−{money(centavosAPesos(o.discount_cents))}</span>
+                          )}
+                        </div>
+                        {/* El motivo lo escribe ClubPay para leérselo al cliente */}
+                        {!o.aplica_hoy && o.motivo && (
+                          <div className="oferta-motivo">{o.motivo}</div>
+                        )}
+                        {o.condiciones.length > 0 && (
+                          <div className="oferta-condiciones">
+                            {o.condiciones.map((c, i) => <span key={i}>{c}</span>)}
+                          </div>
+                        )}
+                        {elegida && <div className="oferta-elegida">✓ Aplicado a esta venta</div>}
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+              {clubpayError && <p className="error" style={{ marginBottom: 0 }}>{clubpayError}</p>}
+            </div>
+          )}
           <div className="pay-methods">
             {PAYMENT_METHODS.map((m) => {
               const disabled = m.id === "account" && !customerId;
