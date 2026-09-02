@@ -241,3 +241,132 @@ export async function registrarTransaccion(
     ticket_total_cents: datos.ticketTotalCents,
   });
 }
+
+// ── QR mostrado por el comercio ──────────────────────────────────────────────
+
+/**
+ * En el mostrador real el comercio casi nunca puede escanear el QR del socio:
+ * tiene un lector láser de código de barras, que lee 1D, y un QR es 2D. El
+ * flujo se da vuelta: el POS muestra un QR con el comercio y el importe, y el
+ * socio lo escanea con su teléfono, que sí tiene cámara y ya tiene la app.
+ *
+ * Contrato en docs/CLUBPAY-QR-DEL-COMERCIO.md. Mientras ClubPay no publique
+ * estos endpoints, el simulador de abajo permite usarlo igual.
+ */
+
+export type EstadoCharge = "pending" | "applied" | "rejected" | "expired" | "cancelled";
+
+export interface ClubPayCharge {
+  charge_id: string;
+  /** Texto que el POS codifica en el QR que muestra en pantalla */
+  qr_payload: string;
+  expires_at: string;
+  status: EstadoCharge;
+}
+
+export interface ClubPayChargeEstado {
+  charge_id: string;
+  status: EstadoCharge;
+  member?: ClubPaySocio | null;
+  offer?: Pick<ClubPayOferta, "id" | "description" | "discount_percent" | "condiciones"> | null;
+  transaction_id?: number;
+  ticket_total_cents?: number;
+  discount_cents?: number;
+  neto_cents?: number;
+  recorte?: string;
+  points_earned?: number;
+  /** Motivo cuando el socio escaneó pero no le corresponde beneficio */
+  error?: string;
+}
+
+async function apiGet<T>(path: string, apiKey: string): Promise<T> {
+  if (!apiKey) throw new HttpError(400, "Este comercio todavía no tiene configurado ClubPay.");
+  let res: Response;
+  try {
+    res = await fetch(`${config.clubpay.apiUrl}${path}`, {
+      headers: { "X-API-Key": apiKey },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err) {
+    const detalle = err instanceof Error ? err.message : "error de red";
+    throw new HttpError(502, `No se pudo conectar con ClubPay: ${detalle}`);
+  }
+  if (!res.ok) {
+    const crudo = await res.text();
+    let mensaje = `ClubPay respondió ${res.status}`;
+    try {
+      const data = JSON.parse(crudo) as { error?: string; message?: string };
+      mensaje = data.error ?? data.message ?? mensaje;
+    } catch { /* cuerpo no JSON */ }
+    console.error(`[clubpay] GET ${path} → ${res.status}: ${crudo.slice(0, 400)}`);
+    throw new HttpError(res.status >= 500 ? 502 : res.status, mensaje);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Simulador: el charge pasa a "applied" a los pocos segundos, como si el socio hubiera escaneado */
+const mockCharges = new Map<string, { creado: number; totalCents: number; qr: string }>();
+const MOCK_SEGUNDOS_HASTA_ESCANEO = 6;
+const MOCK_MINUTOS_VIGENCIA = 3;
+
+export async function crearCharge(
+  apiKey: string,
+  datos: { ticketTotalCents: number; externalReference: string }
+): Promise<ClubPayCharge> {
+  if (isMockMode()) {
+    const id = `chg_demo_${Date.now().toString(36)}`;
+    mockCharges.set(id, {
+      creado: Date.now(),
+      totalCents: datos.ticketTotalCents,
+      qr: `clubpay://charge/${id}`,
+    });
+    return {
+      charge_id: id,
+      qr_payload: `clubpay://charge/${id}`,
+      expires_at: new Date(Date.now() + MOCK_MINUTOS_VIGENCIA * 60_000).toISOString(),
+      status: "pending",
+    };
+  }
+  return api<ClubPayCharge>("/pos/charges", apiKey, {
+    ticket_total_cents: datos.ticketTotalCents,
+    external_reference: datos.externalReference,
+  });
+}
+
+export async function consultarCharge(apiKey: string, chargeId: string): Promise<ClubPayChargeEstado> {
+  if (isMockMode()) {
+    const ch = mockCharges.get(chargeId);
+    if (!ch) throw new HttpError(404, "Cobro no encontrado");
+    const segundos = (Date.now() - ch.creado) / 1000;
+    if (segundos > MOCK_MINUTOS_VIGENCIA * 60) {
+      return { charge_id: chargeId, status: "expired" };
+    }
+    if (segundos < MOCK_SEGUNDOS_HASTA_ESCANEO) {
+      return { charge_id: chargeId, status: "pending" };
+    }
+    // El socio escaneó y confirmó: 20% con tope de $8.000
+    const bruto = Math.round(ch.totalCents * 0.2);
+    const discount = Math.min(bruto, 800000);
+    return {
+      charge_id: chargeId,
+      status: "applied",
+      member: { membership_id: 1, name: "Pedro Gómez", member_number: "CU-00001", club_id: 1, club_name: "Club Unión", points: 0 },
+      offer: { id: 7, description: "20% con tope de $8.000", discount_percent: 20, condiciones: ["Hasta $8.000 por compra"] },
+      transaction_id: Math.floor(Math.random() * 9000) + 1000,
+      ticket_total_cents: ch.totalCents,
+      discount_cents: discount,
+      neto_cents: ch.totalCents - discount,
+      recorte: discount < bruto ? "por_compra" : "",
+      points_earned: 0,
+    };
+  }
+  return apiGet<ClubPayChargeEstado>(`/pos/charges/${chargeId}`, apiKey);
+}
+
+export async function cancelarCharge(apiKey: string, chargeId: string): Promise<void> {
+  if (isMockMode()) {
+    mockCharges.delete(chargeId);
+    return;
+  }
+  await api(`/pos/charges/${chargeId}/cancel`, apiKey, {});
+}

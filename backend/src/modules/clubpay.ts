@@ -3,7 +3,12 @@ import type { Request } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
-import { validarQR, aCentavos, isMockMode } from "../integrations/clubpay.js";
+import QRCode from "qrcode";
+import { randomUUID } from "node:crypto";
+import {
+  validarQR, aCentavos, aPesos, isMockMode,
+  crearCharge, consultarCharge, cancelarCharge, RECORTE_TEXTO,
+} from "../integrations/clubpay.js";
 
 export const clubpayRouter = Router();
 
@@ -81,6 +86,71 @@ clubpayRouter.put("/api-key", async (req, res, next) => {
     ]);
     await audit(req.auth.commerceId, "clubpay.api_key", "commerces", req.auth.commerceId);
     res.json({ ok: true, configurado: Boolean(apiKey) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── QR mostrado por el comercio ──────────────────────────────────────────────
+
+const chargeSchema = z.object({ total: z.coerce.number().positive() });
+
+/**
+ * POST /api/clubpay/cobro
+ * Crea la intención de cobro y devuelve el QR ya dibujado, listo para mostrar
+ * en la pantalla del mostrador. El socio lo escanea con su teléfono, que es
+ * el que tiene cámara: el comercio normalmente solo tiene lector láser, que
+ * lee código de barras pero no QR.
+ */
+clubpayRouter.post("/cobro", async (req, res, next) => {
+  try {
+    const { total } = chargeSchema.parse(req.body);
+    const key = await clubpayKey(req);
+    const charge = await crearCharge(key, {
+      ticketTotalCents: aCentavos(total),
+      // Identifica la operación para que un reintento por corte de red no
+      // genere dos cobros distintos
+      externalReference: `nexopos-${req.auth.commerceId}-${randomUUID().slice(0, 8)}`,
+    });
+    const qrDataUrl = await QRCode.toDataURL(charge.qr_payload, {
+      width: 320,
+      margin: 1,
+      errorCorrectionLevel: "M",
+    });
+    await audit(req.auth.commerceId, "clubpay.cobro", undefined, undefined, { chargeId: charge.charge_id, total });
+    res.status(201).json({ ...charge, qr_data_url: qrDataUrl });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/clubpay/cobro/:chargeId
+ * Estado del cobro mientras el QR está en pantalla. El POS consulta cada
+ * ~2 segundos hasta que el socio confirma en su teléfono o vence.
+ */
+clubpayRouter.get("/cobro/:chargeId", async (req, res, next) => {
+  try {
+    const key = await clubpayKey(req);
+    const estado = await consultarCharge(key, req.params.chargeId);
+    res.json({
+      ...estado,
+      // Para la pantalla, en pesos
+      descuento: estado.discount_cents !== undefined ? aPesos(estado.discount_cents) : null,
+      neto: estado.neto_cents !== undefined ? aPesos(estado.neto_cents) : null,
+      recorteTexto: estado.recorte ? RECORTE_TEXTO[estado.recorte] ?? null : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/clubpay/cobro/:chargeId/cancelar — el cajero cierra la pantalla */
+clubpayRouter.post("/cobro/:chargeId/cancelar", async (req, res, next) => {
+  try {
+    const key = await clubpayKey(req);
+    await cancelarCharge(key, req.params.chargeId);
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

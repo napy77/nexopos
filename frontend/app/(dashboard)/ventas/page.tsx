@@ -6,7 +6,7 @@ import { api, money } from "@/lib/api";
 import { loadPrintSettings, printTicket, openTicketPdf } from "@/lib/print";
 import { leerCodigoBalanza, buscarPorPlu, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
 import { Foto } from "@/lib/foto";
-import { centavosAPesos, type ClubPayValidacion, type ClubPayOferta, type ClubPayElegido } from "@/lib/clubpay";
+import { centavosAPesos, type ClubPayValidacion, type ClubPayOferta, type ClubPayElegido, type ClubPayCobro, type ClubPayCobroEstado } from "@/lib/clubpay";
 
 interface StockItem {
   product_id: number; name: string; ean: string; category: string | null;
@@ -78,6 +78,10 @@ export default function VentasPage() {
   const [clubpayElegido, setClubpayElegido] = useState<ClubPayElegido | null>(null);
   const [clubpayError, setClubpayError] = useState("");
   const qrRef = useRef<HTMLInputElement>(null);
+  // Cobro con QR mostrado por el comercio: el socio lo escanea con su teléfono
+  const [cobro, setCobro] = useState<ClubPayCobro | null>(null);
+  const [cobroEstado, setCobroEstado] = useState<ClubPayCobroEstado | null>(null);
+  const [chargeId, setChargeId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const pagaConRef = useRef<HTMLInputElement>(null);
 
@@ -102,6 +106,46 @@ export default function VentasPage() {
       .catch(() => setClubpayDisponible(false));
     searchRef.current?.focus();
   }, [loadStock, loadCustomers]);
+
+  /*
+   * Mientras el QR está en pantalla se consulta el estado cada 2 segundos,
+   * hasta que el socio confirma en su teléfono o el cobro vence. Cuando queda
+   * aplicado, ClubPay ya registró la transacción: el descuento sale de ahí.
+   */
+  useEffect(() => {
+    if (!chargeId) return;
+    let vivo = true;
+    const timer = setInterval(async () => {
+      try {
+        const est = await api<ClubPayCobroEstado>(`/api/clubpay/cobro/${chargeId}`);
+        if (!vivo) return;
+        setCobroEstado(est);
+        if (est.status === "applied") {
+          clearInterval(timer);
+          if (est.member && est.offer) {
+            setClubpayElegido({
+              socio: est.member,
+              oferta: {
+                ...est.offer, points_per_use: 0, valid_until: null,
+                aplica_hoy: true, motivo: "",
+              },
+              descuento: est.descuento ?? 0,
+            });
+          }
+          // El cobro queda cerrado, pero sin cancelarlo: ya está aplicado
+          setTimeout(() => { setCobro(null); setChargeId(null); }, 1800);
+        }
+        if (est.status === "expired" || est.status === "rejected" || est.status === "cancelled") {
+          clearInterval(timer);
+        }
+      } catch (err) {
+        if (!vivo) return;
+        clearInterval(timer);
+        setClubpayError(err instanceof Error ? err.message : "Se perdió la conexión con ClubPay");
+      }
+    }, 2000);
+    return () => { vivo = false; clearInterval(timer); };
+  }, [chargeId]);
 
   // La grilla muestra lo que tiene stock, pero el lector busca en todo el
   // stock local: si el cajero tiene el producto en la mano, existe, aunque el
@@ -214,6 +258,37 @@ export default function VentasPage() {
     }
   }
 
+  /**
+   * Muestra en pantalla un QR con el comercio y el importe para que el socio
+   * lo escanee con su teléfono. Es el camino que sirve en la mayoría de los
+   * mostradores: el lector del comercio lee código de barras, no QR, y la PC
+   * no suele tener cámara — pero el socio siempre tiene la suya.
+   */
+  async function mostrarQrCobro() {
+    setClubpayError("");
+    try {
+      const c = await api<ClubPayCobro>("/api/clubpay/cobro", {
+        method: "POST",
+        body: JSON.stringify({ total }),
+      });
+      setCobro(c);
+      setChargeId(c.charge_id);
+      setCobroEstado(null);
+    } catch (err) {
+      setClubpayError(err instanceof Error ? err.message : "No se pudo generar el QR");
+    }
+  }
+
+  async function cerrarQrCobro(cancelar = true) {
+    const id = chargeId;
+    setCobro(null);
+    setChargeId(null);
+    setCobroEstado(null);
+    if (cancelar && id) {
+      api(`/api/clubpay/cobro/${id}/cancelar`, { method: "POST" }).catch(() => {});
+    }
+  }
+
   function elegirOferta(val: ClubPayValidacion, oferta: ClubPayOferta) {
     setClubpayElegido({
       socio: val.member,
@@ -228,6 +303,7 @@ export default function VentasPage() {
     setClubpayElegido(null);
     setClubpayError("");
     setQrSocio("");
+    cerrarQrCobro();
   }
 
   // ── Armado del ticket ──────────────────────────────────────────────────────
@@ -420,8 +496,14 @@ export default function VentasPage() {
           // Solo el socio y el beneficio: el importe lo resuelve ClubPay al
           // registrar la transacción, que es la llamada que manda.
           clubpay: clubpayElegido && {
-            membershipId: clubpayElegido.socio.membership_id,
-            offerId: clubpayElegido.oferta.id,
+            // Si vino de un QR del comercio, alcanza con el id del cobro: el
+            // backend le vuelve a preguntar el importe a ClubPay.
+            ...(cobroEstado?.status === "applied"
+              ? { chargeId: cobroEstado.charge_id }
+              : {
+                  membershipId: clubpayElegido.socio.membership_id,
+                  offerId: clubpayElegido.oferta.id,
+                }),
             memberName: clubpayElegido.socio.name,
             clubName: clubpayElegido.socio.club_name,
           },
@@ -759,23 +841,35 @@ export default function VentasPage() {
           {/* ── Socio ClubPay ── */}
           {clubpayDisponible && (
             <div className="clubpay-box">
-              {!socio ? (
-                <div className="toolbar" style={{ marginBottom: 0 }}>
-                  <label style={{ fontWeight: 600 }}>🎫 Socio ClubPay</label>
-                  <input
-                    ref={qrRef}
-                    value={qrSocio}
-                    onChange={(e) => setQrSocio(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") validarSocio(); }}
-                    placeholder="Escaneá el QR que muestra el socio…"
-                    style={{ flex: 1, minWidth: 240 }}
-                    disabled={validando}
-                  />
-                  <button onClick={validarSocio} disabled={validando || !qrSocio.trim()}>
-                    {validando ? "Validando…" : "Validar"}
-                  </button>
-                </div>
-              ) : (
+              {!socio && !clubpayElegido ? (
+                <>
+                  <div className="toolbar" style={{ marginBottom: 6 }}>
+                    <label style={{ fontWeight: 600 }}>🎫 Socio ClubPay</label>
+                    <button onClick={mostrarQrCobro}>Mostrar QR al cliente</button>
+                    <span className="muted">El socio lo escanea con su teléfono</span>
+                  </div>
+                  {/* Alternativa para el comercio que sí tiene lector 2D o cámara */}
+                  <details>
+                    <summary className="muted" style={{ cursor: "pointer", fontSize: 13 }}>
+                      ¿Tenés lector de QR? Escaneá el del socio
+                    </summary>
+                    <div className="toolbar" style={{ marginTop: 6, marginBottom: 0 }}>
+                      <input
+                        ref={qrRef}
+                        value={qrSocio}
+                        onChange={(e) => setQrSocio(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") validarSocio(); }}
+                        placeholder="QR del socio…"
+                        style={{ flex: 1, minWidth: 220 }}
+                        disabled={validando}
+                      />
+                      <button className="secondary" onClick={validarSocio} disabled={validando || !qrSocio.trim()}>
+                        {validando ? "Validando…" : "Validar"}
+                      </button>
+                    </div>
+                  </details>
+                </>
+              ) : socio ? (
                 <>
                   <div className="toolbar" style={{ marginBottom: 6 }}>
                     <strong>{socio.member.name}</strong>
@@ -821,7 +915,15 @@ export default function VentasPage() {
                     );
                   })}
                 </>
-              )}
+              ) : clubpayElegido ? (
+                <div className="toolbar" style={{ marginBottom: 0 }}>
+                  <strong>{clubpayElegido.socio.name}</strong>
+                  <span className="badge info">{clubpayElegido.socio.club_name}</span>
+                  <span className="muted">{clubpayElegido.oferta.description}</span>
+                  <span className="oferta-monto">−{money(clubpayElegido.descuento)}</span>
+                  <button className="small secondary" onClick={quitarClubpay}>Quitar</button>
+                </div>
+              ) : null}
               {clubpayError && <p className="error" style={{ marginBottom: 0 }}>{clubpayError}</p>}
             </div>
           )}
@@ -897,6 +999,59 @@ export default function VentasPage() {
           >
             ✓ Validar y emitir ticket
           </button>
+        </div>
+      )}
+
+      {/* ══ QR del comercio: el socio lo escanea con su teléfono ══ */}
+      {cobro && (
+        <div className="modal-backdrop" onClick={() => cerrarQrCobro()}>
+          <div className="modal qr-modal" onClick={(e) => e.stopPropagation()}>
+            {cobroEstado?.status === "applied" ? (
+              <div className="qr-ok">
+                <div style={{ fontSize: 52 }}>✓</div>
+                <h2 style={{ margin: "6px 0" }}>Beneficio aplicado</h2>
+                <p style={{ margin: 0 }}>
+                  <strong>{cobroEstado.member?.name}</strong>
+                  {cobroEstado.member?.club_name && ` · ${cobroEstado.member.club_name}`}
+                </p>
+                <div className="qr-descuento">−{money(cobroEstado.descuento ?? 0)}</div>
+                {cobroEstado.recorteTexto && <p className="muted">{cobroEstado.recorteTexto}</p>}
+              </div>
+            ) : cobroEstado?.status === "rejected" ? (
+              <div className="qr-ok">
+                <div style={{ fontSize: 44 }}>🙁</div>
+                <h2 style={{ margin: "6px 0" }}>Sin descuento</h2>
+                {/* El motivo lo escribe ClubPay para leérselo al cliente */}
+                <p>{cobroEstado.error ?? "Al socio no le corresponde beneficio en esta compra."}</p>
+                <button className="secondary" onClick={() => cerrarQrCobro(false)}>Cobrar sin descuento</button>
+              </div>
+            ) : cobroEstado?.status === "expired" ? (
+              <div className="qr-ok">
+                <div style={{ fontSize: 44 }}>⏱</div>
+                <h2 style={{ margin: "6px 0" }}>El código venció</h2>
+                <p className="muted">Nadie lo escaneó a tiempo.</p>
+                <div className="toolbar" style={{ justifyContent: "center" }}>
+                  <button onClick={mostrarQrCobro}>Generar otro</button>
+                  <button className="secondary" onClick={() => cerrarQrCobro(false)}>Cerrar</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h2 style={{ textAlign: "center" }}>Que el cliente escanee con ClubPay</h2>
+                <div className="qr-lienzo">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={cobro.qr_data_url} alt="Código QR para escanear con ClubPay" />
+                </div>
+                <div className="qr-monto">{money(total)}</div>
+                <p className="muted" style={{ textAlign: "center", margin: "6px 0 0" }}>
+                  Esperando que confirme en su teléfono…
+                </p>
+                <div className="toolbar" style={{ justifyContent: "center", marginTop: 12 }}>
+                  <button className="secondary" onClick={() => cerrarQrCobro()}>Cancelar</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 

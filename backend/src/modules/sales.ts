@@ -5,7 +5,7 @@ import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { renderTicketHtml, fmtQty, fmtMoney, PAYMENT_LABEL } from "./ticket-render.js";
 import { sesionAbierta } from "./caja.js";
-import { registrarTransaccion, aCentavos, aPesos, RECORTE_TEXTO, type ClubPayTransaccion } from "../integrations/clubpay.js";
+import { registrarTransaccion, consultarCharge, aCentavos, aPesos, RECORTE_TEXTO } from "../integrations/clubpay.js";
 import { clubpayKey } from "./clubpay.js";
 
 export const salesRouter = Router();
@@ -32,8 +32,14 @@ const createSaleSchema = z.object({
    * viaja desde el cliente: lo calcula ClubPay al registrar la transacción.
    */
   clubpay: z.object({
-    membershipId: z.coerce.number().int(),
-    offerId: z.coerce.number().int(),
+    /**
+     * Cobro que el socio ya confirmó desde su teléfono. Solo viaja el id: el
+     * importe se le vuelve a preguntar a ClubPay, nunca se toma del cliente.
+     */
+    chargeId: z.string().optional(),
+    // Flujo en que el comercio escanea el QR del socio
+    membershipId: z.coerce.number().int().optional(),
+    offerId: z.coerce.number().int().optional(),
     memberName: z.string().optional(),
     clubName: z.string().optional(),
   }).optional(),
@@ -106,18 +112,48 @@ salesRouter.post("/", async (req, res, next) => {
      * Si ClubPay rechaza (el beneficio no aplica hoy, se agotó el tope), la
      * venta no se hace y el cajero ve el motivo tal como lo escribió ClubPay.
      */
-    let clubpayTx: ClubPayTransaccion | null = null;
     let descuentoClubpay = 0;
-    if (body.clubpay) {
+    let clubpayTransactionId: string | null = null;
+    let clubpayRecorte = "";
+    let clubpayPuntos = 0;
+    let clubpayPorcentaje = 0;
+    let clubpaySocio = body.clubpay?.memberName ?? null;
+    let clubpayClub = body.clubpay?.clubName ?? null;
+
+    if (body.clubpay?.chargeId) {
+      /*
+       * El socio escaneó el QR del comercio y confirmó en su teléfono: ClubPay
+       * ya registró la transacción. Acá solo se relee el estado para tomar el
+       * importe definitivo de la fuente, en vez de confiar en lo que mandó la
+       * pantalla.
+       */
       const key = await clubpayKey(req);
-      clubpayTx = await registrarTransaccion(key, {
+      const estado = await consultarCharge(key, body.clubpay.chargeId);
+      if (estado.status !== "applied") {
+        throw new HttpError(409, estado.error ?? "El socio todavía no confirmó el descuento en su teléfono.");
+      }
+      descuentoClubpay = aPesos(estado.discount_cents ?? 0);
+      clubpayTransactionId = estado.transaction_id != null ? String(estado.transaction_id) : null;
+      clubpayRecorte = estado.recorte ?? "";
+      clubpayPuntos = estado.points_earned ?? 0;
+      clubpayPorcentaje = estado.offer?.discount_percent ?? 0;
+      clubpaySocio = estado.member?.name ?? clubpaySocio;
+      clubpayClub = estado.member?.club_name ?? clubpayClub;
+    } else if (body.clubpay?.membershipId && body.clubpay.offerId) {
+      const key = await clubpayKey(req);
+      const tx = await registrarTransaccion(key, {
         membershipId: body.clubpay.membershipId,
         offerId: body.clubpay.offerId,
         ticketTotalCents: aCentavos(total),
       });
-      descuentoClubpay = aPesos(clubpayTx.discount_cents);
-      if (descuentoClubpay > total) descuentoClubpay = total;
+      descuentoClubpay = aPesos(tx.discount_cents);
+      clubpayTransactionId = String(tx.transaction_id);
+      clubpayRecorte = tx.recorte;
+      clubpayPuntos = tx.points_earned;
+      clubpayPorcentaje = tx.discount_percent;
     }
+    if (descuentoClubpay > total) descuentoClubpay = total;
+    const hayClubpay = clubpayTransactionId !== null;
 
     // Lo que efectivamente se cobra por el medio de pago elegido: el resto lo
     // cubre el cupón. La venta sigue siendo por el total.
@@ -135,10 +171,10 @@ salesRouter.post("/", async (req, res, next) => {
        subtotal, body.discount, total, sesion.id,
        // El vuelto solo tiene sentido en efectivo
        body.paymentMethod === "cash" ? body.paidAmount ?? null : null,
-       clubpayTx ? String(clubpayTx.transaction_id) : null,
-       body.clubpay?.memberName ?? null,
-       body.clubpay?.clubName ?? null,
-       clubpayTx ? descuentoClubpay : null]
+       clubpayTransactionId,
+       clubpaySocio,
+       clubpayClub,
+       hayClubpay ? descuentoClubpay : null]
     );
 
     /*
@@ -152,18 +188,18 @@ salesRouter.post("/", async (req, res, next) => {
       `INSERT INTO sale_payments (commerce_id, sale_id, method, amount) VALUES ($1, $2, $3, $4)`,
       [commerceId, sale.id, body.paymentMethod, aCobrar]
     );
-    if (clubpayTx && descuentoClubpay > 0) {
+    if (hayClubpay && descuentoClubpay > 0) {
       await client.query(
         `INSERT INTO sale_payments
            (commerce_id, sale_id, method, amount, coupon_provider, coupon_reference, meta)
          VALUES ($1, $2, 'coupon', $3, 'clubpay', $4, $5)`,
-        [commerceId, sale.id, descuentoClubpay, String(clubpayTx.transaction_id),
+        [commerceId, sale.id, descuentoClubpay, clubpayTransactionId,
          JSON.stringify({
-           member: body.clubpay?.memberName ?? null,
-           club: body.clubpay?.clubName ?? null,
-           discount_percent: clubpayTx.discount_percent,
-           recorte: clubpayTx.recorte,
-           points_earned: clubpayTx.points_earned,
+           member: clubpaySocio,
+           club: clubpayClub,
+           discount_percent: clubpayPorcentaje,
+           recorte: clubpayRecorte,
+           points_earned: clubpayPuntos,
          })]
       );
     }
@@ -210,14 +246,14 @@ salesRouter.post("/", async (req, res, next) => {
       total,
       vuelto,
       // Lo que ClubPay resolvió para esta venta, para mostrarlo en el mostrador
-      clubpay: clubpayTx && {
+      clubpay: hayClubpay ? {
         descuento: descuentoClubpay,
         aCobrar,
-        recorte: clubpayTx.recorte,
-        recorteTexto: RECORTE_TEXTO[clubpayTx.recorte] ?? null,
-        puntos: clubpayTx.points_earned,
-        transactionId: clubpayTx.transaction_id,
-      },
+        recorte: clubpayRecorte,
+        recorteTexto: clubpayRecorte ? RECORTE_TEXTO[clubpayRecorte] ?? null : null,
+        puntos: clubpayPuntos,
+        transactionId: clubpayTransactionId,
+      } : null,
     });
   } catch (err) {
     await client.query("ROLLBACK");

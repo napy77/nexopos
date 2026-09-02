@@ -307,6 +307,17 @@ button.small { padding: 4px 10px; font-size: 12px; }
 }
 .oferta-elegida { margin-top: 6px; font-size: 12px; font-weight: 700; color: var(--success); }
 
+/* QR que el comercio muestra para que lo escanee el socio */
+.qr-modal { max-width: 420px; text-align: center; }
+.qr-lienzo {
+  display: flex; justify-content: center; padding: 12px;
+  background: #fff; border-radius: 12px;
+}
+.qr-lienzo img { width: 280px; height: 280px; image-rendering: pixelated; }
+.qr-monto { font-size: 30px; font-weight: 700; margin-top: 4px; }
+.qr-ok { padding: 12px 0; }
+.qr-descuento { font-size: 38px; font-weight: 700; color: var(--success); margin: 10px 0; }
+
 /* Vuelto en la pantalla de cobro */
 .vuelto-box {
   width: 100%; max-width: 640px; margin: 4px 0 12px;

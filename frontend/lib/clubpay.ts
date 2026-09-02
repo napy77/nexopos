@@ -41,3 +41,27 @@ export interface ClubPayElegido {
 }
 
 export const centavosAPesos = (c: number): number => c / 100;
+
+// ── QR mostrado por el comercio ──────────────────────────────────────────────
+
+export type EstadoCobro = "pending" | "applied" | "rejected" | "expired" | "cancelled";
+
+export interface ClubPayCobro {
+  charge_id: string;
+  /** El QR ya dibujado por el backend, listo para mostrar en pantalla */
+  qr_data_url: string;
+  expires_at: string;
+  status: EstadoCobro;
+}
+
+export interface ClubPayCobroEstado {
+  charge_id: string;
+  status: EstadoCobro;
+  member?: ClubPaySocio | null;
+  offer?: { id: number; description: string; discount_percent: number; condiciones: string[] } | null;
+  transaction_id?: number;
+  descuento: number | null;
+  neto: number | null;
+  recorteTexto: string | null;
+  error?: string;
+}
