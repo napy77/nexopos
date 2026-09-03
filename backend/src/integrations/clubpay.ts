@@ -370,3 +370,101 @@ export async function cancelarCharge(apiKey: string, chargeId: string): Promise<
   }
   await api(`/pos/charges/${chargeId}/cancel`, apiKey, {});
 }
+
+// ── Cuenta corriente del cliente en la app ───────────────────────────────────
+
+/**
+ * El cliente de un almacén ve en ClubPay lo que hoy está en un cuaderno: qué
+ * compró en cuenta y cuánto debe. NexoPOS es la fuente de verdad y le empuja
+ * los hechos a ClubPay a medida que pasan; ClubPay guarda una copia para
+ * mostrarla rápido.
+ *
+ * Dos cosas que no son detalles de implementación:
+ *
+ * - **No hay períodos.** NexoPOS lleva saldo corriente, sin cierre mensual ni
+ *   vencimientos, porque el almacenero cobra cuando el cliente pasa y no el
+ *   día 10. Por eso acá no viaja ningún `period` ni existen los resúmenes: un
+ *   campo que parece contable pero es un mes derivado de la fecha, tarde o
+ *   temprano alguien lo lee como un corte.
+ *
+ * - **Van con la clave del comercio**, no con una de plataforma. Son
+ *   operaciones de un comercio sobre sus propios clientes, así que si la clave
+ *   se filtra el alcance del daño es ese comercio y no el ecosistema entero.
+ *
+ * Contrato en docs/CLUBPAY-CUENTA-CORRIENTE.md.
+ */
+
+/** Los cuatro hechos que le pueden pasar a una cuenta corriente */
+export type MovimientoKind = "compra" | "pago" | "ajuste" | "devolucion";
+
+export interface MovimientoCuenta {
+  external_id: string;
+  movement_id: string;
+  kind: MovimientoKind;
+  /**
+   * Con signo: positivo aumenta la deuda, negativo la baja. El signo va acá y
+   * no en el `kind` porque un ajuste que sube y uno que baja son el mismo
+   * hecho —una corrección— y separarlos en dos tipos sería decir dos veces lo
+   * mismo.
+   */
+  amount_cents: number;
+  occurred_at: string;
+  description: string;
+}
+
+export interface VinculacionCliente {
+  encontrado: boolean;
+  status: "sin_cuenta" | "propuesta" | "aceptada" | "rechazada";
+  persona?: string;
+  mensaje?: string;
+}
+
+/**
+ * Le propone a una persona vincular su cuenta corriente de este comercio con
+ * su cuenta de ClubPay.
+ *
+ * Nace como propuesta y no como vínculo hecho porque en el mostrador se tipean
+ * DNI mal, y un dígito de más hace que el match caiga en otra persona que abre
+ * la app y ve la deuda de un desconocido. Hasta que la persona confirma,
+ * ClubPay no le muestra ningún saldo.
+ *
+ * Que el DNI no esté en ClubPay tampoco es un error: la mayoría de los
+ * clientes de un almacén no tienen la app y la cuenta anda igual.
+ */
+export async function vincularCliente(
+  apiKey: string,
+  datos: { dni: string; externalId: string }
+): Promise<VinculacionCliente> {
+  if (isMockMode()) {
+    // El último dígito del DNI elige el caso, para poder probar los tres:
+    // 0 = no está en ClubPay, 9 = ya aceptó, el resto queda propuesto.
+    if (datos.dni.endsWith("0")) {
+      return { encontrado: false, status: "sin_cuenta", mensaje: "El DNI no tiene cuenta en ClubPay" };
+    }
+    if (datos.dni.endsWith("9")) {
+      return { encontrado: true, status: "aceptada", persona: "Germán Yovan" };
+    }
+    return {
+      encontrado: true,
+      status: "propuesta",
+      persona: "Germán Yovan",
+      mensaje: "Le propusimos la vinculación: la ve en su app y decide si la acepta",
+    };
+  }
+  return api<VinculacionCliente>("/pos/customers", apiKey, {
+    dni: datos.dni,
+    external_id: datos.externalId,
+  });
+}
+
+/**
+ * Avisa un movimiento de cuenta corriente. Idempotente por `movement_id`: si
+ * la red se corta después de que ClubPay lo recibió, el reintento no duplica.
+ */
+export async function empujarMovimiento(apiKey: string, mov: MovimientoCuenta): Promise<void> {
+  if (isMockMode()) {
+    console.log(`[clubpay:mock] movimiento ${mov.movement_id} ${mov.kind} ${mov.amount_cents} → ${mov.external_id}`);
+    return;
+  }
+  await api<unknown>("/pos/account/movements", apiKey, mov);
+}

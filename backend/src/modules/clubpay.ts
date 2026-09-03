@@ -3,6 +3,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
+import { sesionAbierta } from "./caja.js";
 import QRCode from "qrcode";
 import { randomUUID } from "node:crypto";
 import {
@@ -153,5 +154,98 @@ clubpayRouter.post("/cobro/:chargeId/cancelar", async (req, res, next) => {
     res.json({ ok: true });
   } catch (err) {
     next(err);
+  }
+});
+
+// ── Pago hecho desde la app del cliente ─────────────────────────────────────
+
+/**
+ * Router del webhook. Va montado SIN requireAuth: quien llama es ClubPay, no
+ * un cajero con sesión.
+ *
+ * Se autentica con la clave del comercio en X-API-Key, la misma que usamos
+ * para hablarles a ellos. Es un secreto que ya comparten las dos partes, así
+ * que no agrega exposición nueva, y mantiene la propiedad que nos importaba:
+ * si se filtra, el alcance del daño es ese comercio y no el ecosistema.
+ */
+export const clubpayWebhookRouter = Router();
+
+const pagoSchema = z.object({
+  external_id: z.string(),
+  amount_cents: z.coerce.number().int().positive(),
+  paid_at: z.string().optional(),
+  clubpay_payment_id: z.string().min(1),
+});
+
+/**
+ * POST /api/clubpay/webhook/pago
+ *
+ * El importe es libre: el fiado de pueblo funciona con flexibilidad y si solo
+ * aceptáramos el pago total la app sería peor que el cuaderno.
+ *
+ * Es idempotente por clubpay_payment_id, y no de palabra: lo garantiza el
+ * índice único, que es lo único que sirve si dos reintentos llegan a la vez.
+ */
+clubpayWebhookRouter.post("/pago", async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const apiKey = req.header("X-API-Key") ?? "";
+    if (!apiKey) throw new HttpError(401, "Falta la clave del comercio");
+    const body = pagoSchema.parse(req.body);
+
+    const { rows: comercios } = await pool.query(
+      "SELECT id FROM commerces WHERE clubpay_api_key = $1",
+      [apiKey]
+    );
+    if (!comercios[0]) throw new HttpError(401, "Clave desconocida");
+    const commerceId = Number(comercios[0].id);
+
+    const customerId = Number(body.external_id.replace(/^CLI-/, ""));
+    if (!Number.isInteger(customerId)) throw new HttpError(400, "external_id inválido");
+
+    await client.query("BEGIN");
+    const { rows: customers } = await client.query(
+      "SELECT id FROM customers WHERE id = $1 AND commerce_id = $2 FOR UPDATE",
+      [customerId, commerceId]
+    );
+    // El cliente tiene que ser de ESTE comercio: la clave no alcanza para
+    // tocar la cuenta de un cliente de otro.
+    if (!customers[0]) throw new HttpError(404, "Cliente no encontrado");
+
+    const monto = aPesos(body.amount_cents);
+    const sesion = await sesionAbierta(commerceId, client);
+
+    // Si el pago ya estaba registrado no se inserta nada y, sobre todo, no se
+    // vuelve a descontar del saldo.
+    const { rows: insertadas } = await client.query(
+      `INSERT INTO customer_transactions
+         (commerce_id, customer_id, type, amount, note, payment_method,
+          cash_session_id, clubpay_payment_id)
+       VALUES ($1, $2, 'payment', $3, 'Pago desde ClubPay', 'clubpay', $4, $5)
+       ON CONFLICT (clubpay_payment_id) WHERE clubpay_payment_id IS NOT NULL
+       DO NOTHING
+       RETURNING id`,
+      [commerceId, customerId, -monto, sesion?.id ?? null, body.clubpay_payment_id]
+    );
+
+    if (insertadas[0]) {
+      await client.query("UPDATE customers SET balance = balance - $1 WHERE id = $2", [
+        monto, customerId,
+      ]);
+    }
+    await client.query("COMMIT");
+
+    const { rows: saldo } = await pool.query("SELECT balance FROM customers WHERE id = $1", [customerId]);
+    if (insertadas[0]) {
+      await audit(commerceId, "clubpay.pago", "customers", customerId, {
+        monto, paymentId: body.clubpay_payment_id,
+      });
+    }
+    res.json({ ok: true, duplicado: !insertadas[0], balance: Number(saldo[0].balance) });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
   }
 });

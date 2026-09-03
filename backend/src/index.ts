@@ -19,7 +19,8 @@ import { reportsRouter } from "./modules/reports.js";
 import { exportRouter } from "./modules/export.js";
 import { settingsRouter } from "./modules/settings.js";
 import { cajaRouter } from "./modules/caja.js";
-import { clubpayRouter } from "./modules/clubpay.js";
+import { clubpayRouter, clubpayWebhookRouter } from "./modules/clubpay.js";
+import { iniciarOutbox } from "./modules/clubpay-outbox.js";
 
 const arranque = new Date().toISOString();
 const app = express();
@@ -56,6 +57,9 @@ app.use("/api/reports", requireAuth, reportsRouter);
 app.use("/api/export", requireAuth, exportRouter);
 app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/caja", requireAuth, cajaRouter);
+// El webhook lo llama ClubPay, no un cajero: se autentica con la clave del
+// comercio y por eso va antes y sin requireAuth.
+app.use("/api/clubpay/webhook", clubpayWebhookRouter);
 app.use("/api/clubpay", requireAuth, clubpayRouter);
 
 app.use(errorHandler);
@@ -70,6 +74,9 @@ async function main() {
   setInterval(() => {
     refreshProductTaxonomy().catch((err) => console.error("[taxonomia] fallo la sincronización:", err));
   }, 12 * 3600_000);
+
+  // Avisos de cuenta corriente pendientes de entregar a ClubPay
+  iniciarOutbox();
 
   app.listen(config.port, () => {
     console.log(`NexoPOS backend escuchando en http://localhost:${config.port}`);

@@ -59,7 +59,7 @@ export function renderCierreHtml(
   // Orden fijo: el resumen guardado es JSONB y Postgres no conserva el orden
   // en que se escribieron las claves. Solo se listan los medios con
   // movimiento, para no llenar el ticket de ceros.
-  const ORDEN_MEDIOS = ["cash", "wallet", "card", "transfer", "account"];
+  const ORDEN_MEDIOS = ["cash", "wallet", "card", "transfer", "account", "clubpay"];
   const ventas = ORDEN_MEDIOS
     .map((medio) => [medio, r.ventasPorMedio[medio]] as const)
     .filter(([, v]) => v && (v.total !== 0 || v.tickets !== 0))

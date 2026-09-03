@@ -1,8 +1,12 @@
 import { Router } from "express";
+import type { Request } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { sesionAbierta } from "./caja.js";
+import { clubpayKey } from "./clubpay.js";
+import { vincularCliente } from "../integrations/clubpay.js";
+import { encolarMovimiento } from "./clubpay-outbox.js";
 
 export const customersRouter = Router();
 
@@ -17,7 +21,8 @@ const customerSchema = z.object({
 customersRouter.get("/", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, name, doc_number, phone, email, balance, created_at
+      `SELECT id, name, doc_number, phone, email, balance, created_at,
+              clubpay_status, clubpay_checked_at
        FROM customers WHERE commerce_id = $1 ORDER BY name`,
       [req.auth.commerceId]
     );
@@ -39,7 +44,56 @@ customersRouter.post("/", async (req, res, next) => {
       [req.auth.commerceId, body.name, body.docNumber ?? null, body.phone ?? null, body.email ?? null]
     );
     await audit(req.auth.commerceId, "customer.create", "customers", customer.id);
+    if (body.docNumber) await proponerVinculacion(req, customer.id, body.docNumber);
     res.status(201).json(customer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Le propone a la persona ver esta cuenta corriente en su ClubPay.
+ *
+ * Nunca hace fallar el alta: que ClubPay esté caído no puede impedir que el
+ * almacenero cargue un cliente. Si no sale, queda sin estado y se puede
+ * reintentar desde la ficha.
+ */
+async function proponerVinculacion(req: Request, customerId: number, dni: string): Promise<string | null> {
+  try {
+    const key = await clubpayKey(req);
+    const r = await vincularCliente(key, { dni, externalId: `CLI-${customerId}` });
+    await pool.query(
+      "UPDATE customers SET clubpay_status = $1, clubpay_checked_at = now() WHERE id = $2",
+      [r.status, customerId]
+    );
+    return r.status;
+  } catch (err) {
+    console.error("[clubpay] no se pudo proponer la vinculación:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * POST /api/customers/:id/clubpay — propone la vinculación, o vuelve a
+ * preguntar en qué quedó.
+ *
+ * Hace falta porque ClubPay no nos avisa cuando la persona acepta: la única
+ * forma de enterarse es volver a preguntar. Repetirlo es inofensivo, no pisa
+ * una vinculación ya aceptada.
+ */
+customersRouter.post("/:id/clubpay", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, doc_number FROM customers WHERE id = $1 AND commerce_id = $2",
+      [Number(req.params.id), req.auth.commerceId]
+    );
+    if (!rows[0]) throw new HttpError(404, "Cliente no encontrado");
+    if (!rows[0].doc_number) {
+      throw new HttpError(400, "Cargale el DNI al cliente para poder proponerle la vinculación.");
+    }
+    const status = await proponerVinculacion(req, rows[0].id, rows[0].doc_number);
+    if (!status) throw new HttpError(502, "No se pudo consultar ClubPay. Probá de nuevo en un rato.");
+    res.json({ status });
   } catch (err) {
     next(err);
   }
@@ -48,8 +102,13 @@ customersRouter.post("/", async (req, res, next) => {
 /** GET /api/customers/:id/transactions — historial de cuenta corriente */
 customersRouter.get("/:id/transactions", async (req, res, next) => {
   try {
+    // Devuelve la ficha completa, no solo el saldo: la pantalla reemplaza con
+    // esto al cliente que tenía seleccionado, así que lo que falte acá
+    // desaparece de la ficha.
     const { rows: customers } = await pool.query(
-      "SELECT id, name, balance FROM customers WHERE id = $1 AND commerce_id = $2",
+      `SELECT id, name, doc_number, phone, email, balance,
+              clubpay_status, clubpay_checked_at
+       FROM customers WHERE id = $1 AND commerce_id = $2`,
       [Number(req.params.id), req.auth.commerceId]
     );
     if (!customers[0]) throw new HttpError(404, "Cliente no encontrado");
@@ -84,13 +143,21 @@ customersRouter.post("/:id/payments", async (req, res, next) => {
     );
     if (!customers[0]) throw new HttpError(404, "Cliente no encontrado");
     const sesion = await sesionAbierta(commerceId, client);
-    await client.query(
+    const { rows: [movimiento] } = await client.query(
       `INSERT INTO customer_transactions
          (commerce_id, customer_id, type, amount, note, payment_method, cash_session_id)
-       VALUES ($1, $2, 'payment', $3, $4, $5, $6)`,
+       VALUES ($1, $2, 'payment', $3, $4, $5, $6) RETURNING id`,
       [commerceId, customers[0].id, -body.amount, body.note ?? "Pago recibido",
        body.paymentMethod, sesion?.id ?? null]
     );
+    await encolarMovimiento(client, {
+      commerceId,
+      customerId: Number(customers[0].id),
+      transactionId: movimiento.id,
+      kind: "pago",
+      amount: -body.amount,
+      description: body.note ?? "Pago recibido",
+    });
     const {
       rows: [updated],
     } = await client.query(

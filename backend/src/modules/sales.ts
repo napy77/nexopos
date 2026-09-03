@@ -7,6 +7,7 @@ import { renderTicketHtml, fmtQty, fmtMoney, PAYMENT_LABEL } from "./ticket-rend
 import { sesionAbierta } from "./caja.js";
 import { registrarTransaccion, consultarCharge, aCentavos, aPesos, RECORTE_TEXTO } from "../integrations/clubpay.js";
 import { clubpayKey } from "./clubpay.js";
+import { encolarMovimiento } from "./clubpay-outbox.js";
 
 export const salesRouter = Router();
 
@@ -222,15 +223,23 @@ salesRouter.post("/", async (req, res, next) => {
         [body.customerId, commerceId]
       );
       if (!custRows[0]) throw new HttpError(404, "Cliente no encontrado");
-      await client.query(
+      const { rows: [movimiento] } = await client.query(
         `INSERT INTO customer_transactions (commerce_id, customer_id, type, amount, sale_id, note)
-         VALUES ($1, $2, 'sale_credit', $3, $4, $5)`,
+         VALUES ($1, $2, 'sale_credit', $3, $4, $5) RETURNING id`,
         [commerceId, body.customerId, aCobrar, sale.id, `Ticket #${sale.ticket_number}`]
       );
       await client.query("UPDATE customers SET balance = balance + $1 WHERE id = $2", [
         aCobrar,
         body.customerId,
       ]);
+      await encolarMovimiento(client, {
+        commerceId,
+        customerId: body.customerId,
+        transactionId: movimiento.id,
+        kind: "compra",
+        amount: aCobrar,
+        description: `Ticket #${sale.ticket_number}`,
+      });
     }
 
     await client.query("COMMIT");
@@ -356,14 +365,22 @@ salesRouter.post("/:id/refund", async (req, res, next) => {
       );
     }
     if (original.payment_method === "account" && original.customer_id) {
-      await client.query(
+      const { rows: [movimiento] } = await client.query(
         `INSERT INTO customer_transactions (commerce_id, customer_id, type, amount, sale_id, note)
-         VALUES ($1, $2, 'adjustment', $3, $4, $5)`,
+         VALUES ($1, $2, 'adjustment', $3, $4, $5) RETURNING id`,
         [commerceId, original.customer_id, -original.total, refund.id, `Reembolso ticket #${original.ticket_number}`]
       );
       await client.query("UPDATE customers SET balance = balance - $1 WHERE id = $2", [
         original.total, original.customer_id,
       ]);
+      await encolarMovimiento(client, {
+        commerceId,
+        customerId: Number(original.customer_id),
+        transactionId: movimiento.id,
+        kind: "devolucion",
+        amount: -original.total,
+        description: `Reembolso ticket #${original.ticket_number}`,
+      });
     }
     await client.query("COMMIT");
     await audit(commerceId, "sale.refund", "sales", refund.id, { originalId: original.id });
