@@ -67,12 +67,10 @@ por DNI, que es donde tiene que pasar.
 Lo que no pueden asumir: que `external_id` identifica a una persona. Identifica
 una cuenta en un comercio.
 
-**Un detalle de `nexo_b2b_id`**: nuestro `commerces.nexob2b_id` es texto y puede
-estar vacío. Un comercio que se dio de alta en NexoPOS sin vincularse a NexoB2B
-todavía no tiene id de marketplace. Para esos, hoy, no podríamos ni siquiera
-armar la URL de sus endpoints. Necesitamos saber qué quieren que hagamos: lo más
-sano nos parece que ese comercio simplemente no participe de la integración
-hasta que se vincule, y que lo digamos así en la config del POS.
+**Sobre `nexo_b2b_id` pueden estar tranquilos**: siempre está. La única forma de
+entrar a NexoPOS es con la cuenta de NexoB2B —no hay alta propia—, así que el
+comercio existe en el marketplace antes de existir para nosotros y el id llega
+en el login. La URL de sus endpoints se puede armar siempre.
 
 ### 3. ¿Admite pagos parciales hoy?
 
@@ -193,5 +191,4 @@ Del lado nuestro, para la versión que respondimos acá (sin resúmenes):
 La vinculación por DNI que ya tienen construida no la tocamos: la llamamos desde
 el alta de cliente cuando hay DNI cargado.
 
-No arrancamos hasta que respondan lo de períodos y lo de `nexo_b2b_id` vacío, que
-son las dos que cambian el diseño.
+No arrancamos hasta que respondan lo de períodos, que es lo que cambia el diseño.
