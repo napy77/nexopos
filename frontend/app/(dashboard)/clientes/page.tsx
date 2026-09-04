@@ -53,6 +53,7 @@ export default function ClientesPage() {
   const [selected, setSelected] = useState<Customer | null>(null);
   const [txs, setTxs] = useState<Tx[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [editando, setEditando] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
@@ -62,6 +63,7 @@ export default function ClientesPage() {
 
   async function select(c: Customer) {
     setSelected(c);
+    setEditando(false);
     const data = await api<{ customer: Customer; transactions: Tx[] }>(
       `/api/customers/${c.id}/transactions`
     );
@@ -85,6 +87,27 @@ export default function ClientesPage() {
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al crear cliente");
+    }
+  }
+
+  async function editCustomer(form: FormData) {
+    if (!selected) return;
+    setError("");
+    try {
+      const actualizado = await api<Customer>(`/api/customers/${selected.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: String(form.get("name")),
+          docNumber: String(form.get("doc") || "") || undefined,
+          phone: String(form.get("phone") || "") || undefined,
+          email: String(form.get("email") || "") || undefined,
+        }),
+      });
+      setSelected(actualizado);
+      setEditando(false);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al guardar");
     }
   }
 
@@ -155,7 +178,26 @@ export default function ClientesPage() {
 
         {selected && (
           <div className="card">
-            <h2>{selected.name} — saldo {money(selected.balance)}</h2>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <h2 style={{ margin: 0 }}>{selected.name} — saldo {money(selected.balance)}</h2>
+              <button type="button" className="ghost" onClick={() => setEditando(!editando)}>
+                {editando ? "Cancelar" : "✎ Editar ficha"}
+              </button>
+            </div>
+            {editando ? (
+              <form action={editCustomer} className="toolbar" style={{ margin: "8px 0" }}>
+                <input name="name" defaultValue={selected.name} placeholder="Nombre *" required />
+                <input name="doc" defaultValue={selected.doc_number ?? ""} placeholder="DNI/CUIT" />
+                <input name="phone" defaultValue={selected.phone ?? ""} placeholder="Teléfono" />
+                <input name="email" defaultValue={selected.email ?? ""} type="email" placeholder="Email" />
+                <button type="submit">Guardar</button>
+              </form>
+            ) : (
+              <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>
+                {selected.doc_number ?? "sin DNI"}
+                {selected.phone ? ` · ${selected.phone}` : ""}
+              </p>
+            )}
             <ClubPayVinculo cliente={selected} onCambio={(status) => {
               setSelected({ ...selected, clubpay_status: status });
               load();

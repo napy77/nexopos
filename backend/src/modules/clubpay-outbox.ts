@@ -4,6 +4,7 @@ import {
   aCentavos,
   empujarMovimiento,
   isMockMode,
+  vincularCliente,
   vinculacionAceptada,
   type MovimientoKind,
 } from "../integrations/clubpay.js";
@@ -135,4 +136,134 @@ export function iniciarOutbox(): void {
   setInterval(() => {
     despacharPendientes().catch((err) => console.error("[clubpay] outbox:", err));
   }, 15_000).unref();
+
+  // Y cada minuto se fija si alguno de los que estaban esperando ya aceptó.
+  // El filtro por clubpay_checked_at hace que a cada cliente se le pregunte
+  // cada MINUTOS_ENTRE_CONSULTAS, no una vez por minuto.
+  setInterval(() => {
+    refrescarPendientes().catch((err) => console.error("[clubpay] vinculaciones:", err));
+  }, 60_000).unref();
+}
+
+// ── Enterarse de que la persona aceptó ──────────────────────────────────────
+
+/**
+ * ClubPay no avisa cuando alguien acepta la vinculación: la persona toca
+ * "aceptar" en su teléfono y de este lado no pasa nada. Si nadie vuelve a
+ * preguntar, el POS se queda creyendo que sigue pendiente y deja de mandarle
+ * los movimientos —que es justo lo que la persona acaba de pedir ver—.
+ *
+ * Así que se pregunta solo, cada tanto, por los que están en "propuesta".
+ */
+const MINUTOS_ENTRE_CONSULTAS = 10;
+
+/**
+ * Cuánto para atrás se recuperan los movimientos al aceptar.
+ *
+ * No es la historia completa: es la ventana donde pudo perderse algo por esta
+ * misma demora —la persona ya había aceptado en su teléfono y el POS todavía
+ * no se había enterado—. Volcarle un año de fiado a alguien que recién vincula
+ * sería otra cosa, y nadie la pidió.
+ */
+const DIAS_A_RECUPERAR = 30;
+
+/**
+ * Vuelve a preguntarle a ClubPay en qué quedó la vinculación de un cliente.
+ * Devuelve el estado nuevo, o null si no se pudo consultar.
+ *
+ * Nunca lanza: se llama desde pantallas y desde el worker, y en ninguno de los
+ * dos lados un problema de red de ClubPay puede romper lo que se estaba
+ * haciendo.
+ */
+export async function refrescarVinculacion(
+  commerceId: number,
+  customerId: number
+): Promise<string | null> {
+  const { rows } = await pool.query(
+    `SELECT c.doc_number, c.clubpay_status, co.clubpay_api_key
+       FROM customers c JOIN commerces co ON co.id = c.commerce_id
+      WHERE c.id = $1 AND c.commerce_id = $2`,
+    [customerId, commerceId]
+  );
+  const cliente = rows[0];
+  if (!cliente?.doc_number) return null;
+
+  try {
+    const r = await vincularCliente(cliente.clubpay_api_key ?? "", {
+      dni: cliente.doc_number,
+      externalId: `CLI-${customerId}`,
+    });
+    await pool.query(
+      "UPDATE customers SET clubpay_status = $1, clubpay_checked_at = now() WHERE id = $2",
+      [r.status, customerId]
+    );
+    // Recién aceptada: lo que se vendió mientras esperábamos no se había
+    // encolado, y sin esto no lo vería nunca.
+    if (!vinculacionAceptada(cliente.clubpay_status) && vinculacionAceptada(r.status)) {
+      const recuperados = await recuperarMovimientos(commerceId, customerId);
+      if (recuperados > 0) {
+        console.log(`[clubpay] CLI-${customerId} aceptó: se recuperaron ${recuperados} movimientos`);
+      }
+    }
+    return r.status;
+  } catch (err) {
+    console.error("[clubpay] no se pudo consultar la vinculación:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/** Encola los movimientos recientes que quedaron sin avisar */
+async function recuperarMovimientos(commerceId: number, customerId: number): Promise<number> {
+  const { rows } = await pool.query(
+    `SELECT t.id, t.type, t.amount, t.note, t.created_at
+       FROM customer_transactions t
+       LEFT JOIN clubpay_outbox o ON o.transaction_id = t.id
+      WHERE t.customer_id = $1 AND t.commerce_id = $2
+        AND o.id IS NULL
+        AND t.created_at > now() - ($3 || ' days')::interval
+      ORDER BY t.created_at`,
+    [customerId, commerceId, DIAS_A_RECUPERAR]
+  );
+
+  for (const t of rows) {
+    const amount = Number(t.amount);
+    await pool.query(
+      `INSERT INTO clubpay_outbox (commerce_id, transaction_id, payload)
+       VALUES ($1, $2, $3) ON CONFLICT (transaction_id) DO NOTHING`,
+      [commerceId, t.id, {
+        external_id: `CLI-${customerId}`,
+        movement_id: movementId(t.id),
+        kind: kindDeTransaccion(t.type, amount),
+        amount_cents: aCentavos(amount),
+        // La fecha real del movimiento, no la de ahora: la app los ordena por
+        // esto y si mintiéramos aparecerían todos juntos al final.
+        occurred_at: new Date(t.created_at).toISOString(),
+        description: t.note ?? "",
+      }]
+    );
+  }
+  return rows.length;
+}
+
+/** El tipo de NexoPOS al `kind` de ClubPay. El signo lo lleva el importe. */
+function kindDeTransaccion(type: string, amount: number): MovimientoKind {
+  if (type === "payment") return "pago";
+  if (type === "sale_credit") return amount >= 0 ? "compra" : "devolucion";
+  return amount < 0 ? "devolucion" : "ajuste";
+}
+
+/** Repasa los que están esperando respuesta de la persona */
+export async function refrescarPendientes(): Promise<void> {
+  const { rows } = await pool.query(
+    `SELECT id, commerce_id FROM customers
+      WHERE clubpay_status = 'propuesta'
+        AND doc_number IS NOT NULL
+        AND (clubpay_checked_at IS NULL
+             OR clubpay_checked_at < now() - ($1 || ' minutes')::interval)
+      LIMIT 25`,
+    [MINUTOS_ENTRE_CONSULTAS]
+  );
+  for (const c of rows) {
+    await refrescarVinculacion(Number(c.commerce_id), Number(c.id));
+  }
 }

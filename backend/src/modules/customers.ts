@@ -6,7 +6,7 @@ import { HttpError } from "../middleware/error.js";
 import { sesionAbierta } from "./caja.js";
 import { clubpayKey } from "./clubpay.js";
 import { vincularCliente } from "../integrations/clubpay.js";
-import { encolarMovimiento } from "./clubpay-outbox.js";
+import { encolarMovimiento, refrescarVinculacion } from "./clubpay-outbox.js";
 
 export const customersRouter = Router();
 
@@ -52,6 +52,50 @@ customersRouter.post("/", async (req, res, next) => {
 });
 
 /**
+ * PUT /api/customers/:id — corregir la ficha.
+ *
+ * En el mostrador se tipea mal: un DNI con un dígito de menos, un nombre a las
+ * apuradas. Sin esto el error queda para siempre y, peor, la vinculación con
+ * ClubPay queda apuntando a otra persona o a nadie.
+ *
+ * Si cambia el DNI se vuelve a proponer la vinculación con el nuevo y se borra
+ * el estado anterior: era el de otro documento y no dice nada de este.
+ */
+customersRouter.put("/:id", async (req, res, next) => {
+  try {
+    const body = customerSchema.parse(req.body);
+    const id = Number(req.params.id);
+    const { rows: previas } = await pool.query(
+      "SELECT doc_number FROM customers WHERE id = $1 AND commerce_id = $2",
+      [id, req.auth.commerceId]
+    );
+    if (!previas[0]) throw new HttpError(404, "Cliente no encontrado");
+
+    const docNuevo = body.docNumber ?? null;
+    const cambioDni = (previas[0].doc_number ?? null) !== docNuevo;
+
+    const { rows: [customer] } = await pool.query(
+      `UPDATE customers SET name = $1, doc_number = $2, phone = $3, email = $4
+         ${cambioDni ? ", clubpay_status = NULL, clubpay_checked_at = NULL" : ""}
+       WHERE id = $5 AND commerce_id = $6 RETURNING *`,
+      [body.name, docNuevo, body.phone ?? null, body.email ?? null, id, req.auth.commerceId]
+    );
+    await audit(req.auth.commerceId, "customer.update", "customers", id, body);
+    if (cambioDni && docNuevo) await proponerVinculacion(req, id, docNuevo);
+
+    const { rows: [fresco] } = await pool.query(
+      `SELECT id, name, doc_number, phone, email, balance, created_at,
+              clubpay_status, clubpay_checked_at
+       FROM customers WHERE id = $1`,
+      [customer.id]
+    );
+    res.json(fresco);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * Le propone a la persona ver esta cuenta corriente en su ClubPay.
  *
  * Nunca hace fallar el alta: que ClubPay esté caído no puede impedir que el
@@ -91,7 +135,9 @@ customersRouter.post("/:id/clubpay", async (req, res, next) => {
     if (!rows[0].doc_number) {
       throw new HttpError(400, "Cargale el DNI al cliente para poder proponerle la vinculación.");
     }
-    const status = await proponerVinculacion(req, rows[0].id, rows[0].doc_number);
+    // Por acá y no por proponerVinculacion: este camino además recupera los
+    // movimientos que quedaron sin avisar si la persona ya había aceptado.
+    const status = await refrescarVinculacion(req.auth.commerceId, Number(rows[0].id));
     if (!status) throw new HttpError(502, "No se pudo consultar ClubPay. Probá de nuevo en un rato.");
     res.json({ status });
   } catch (err) {
@@ -112,6 +158,14 @@ customersRouter.get("/:id/transactions", async (req, res, next) => {
       [Number(req.params.id), req.auth.commerceId]
     );
     if (!customers[0]) throw new HttpError(404, "Cliente no encontrado");
+
+    // Si estaba esperando respuesta, se vuelve a preguntar al abrir la ficha:
+    // es el momento en que al almacenero le importa saberlo, y es cuando
+    // suele estar la persona delante preguntando por qué no lo ve.
+    if (customers[0].clubpay_status === "propuesta") {
+      const nuevo = await refrescarVinculacion(req.auth.commerceId, customers[0].id);
+      if (nuevo) customers[0].clubpay_status = nuevo;
+    }
     const { rows: transactions } = await pool.query(
       `SELECT id, type, amount, sale_id, note, created_at
        FROM customer_transactions WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 200`,
