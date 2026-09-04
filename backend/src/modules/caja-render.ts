@@ -21,6 +21,8 @@ export interface ResumenCaja {
   egresos: number;
   totalVendido: number;
   totalTickets: number;
+  /** Beneficios entregados: se vendió por eso, pero no entró en dinero */
+  cuponesEntregados?: number;
   efectivoEsperado: number;
   contado?: number;
   diferencia?: number;
@@ -113,6 +115,7 @@ export function renderCierreHtml(
   ${ventas || '<div class="linea"><span>Sin ventas</span><span class="val">$0,00</span></div>'}
   <div class="sep"></div>
   ${fila("Total vendido", `$${fmtMoney(r.totalVendido)}`, "destacado")}
+  ${r.cuponesEntregados ? fila("Descuentos ClubPay", `-$${fmtMoney(r.cuponesEntregados)}`) : ""}
   ${fila("Tickets", String(r.totalTickets))}
 
   ${r.totalCobrosCuentaCorriente || r.ingresos || r.egresos ? `

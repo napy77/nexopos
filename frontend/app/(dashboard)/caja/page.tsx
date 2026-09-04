@@ -9,6 +9,8 @@ interface Resumen {
   ventasPorMedio: Record<string, { tickets: number; total: number }>;
   cobrosCuentaCorriente: Record<string, number>;
   totalCobrosCuentaCorriente: number;
+  /** Lo que el comercio entregó en beneficios y no cobró en dinero */
+  cuponesEntregados: number;
   ingresos: number;
   egresos: number;
   totalVendido: number;
@@ -364,6 +366,17 @@ function ResumenArqueo({ r }: { r: Resumen }) {
           <td><strong>Total vendido</strong></td>
           <td className="num"><strong>{money(r.totalVendido)}</strong></td>
         </tr>
+        {/* Sin esta línea el turno no cierra a la vista: se vendió por más de
+            lo que entró, y la diferencia no falta, se entregó en beneficios. */}
+        {r.cuponesEntregados > 0 && (
+          <tr>
+            <td>
+              🎟️ Descuentos ClubPay
+              <span className="muted" style={{ fontSize: 11 }}> · no entró dinero, lo cubre ClubPay</span>
+            </td>
+            <td className="num" style={{ color: "var(--danger)" }}>−{money(r.cuponesEntregados)}</td>
+          </tr>
+        )}
         <tr style={{ background: "#f0fdf4" }}>
           <td><strong>Efectivo que debería haber</strong></td>
           <td className="num"><strong>{money(r.efectivoEsperado)}</strong></td>
