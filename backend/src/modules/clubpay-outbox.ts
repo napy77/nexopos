@@ -4,6 +4,7 @@ import {
   aCentavos,
   empujarMovimiento,
   isMockMode,
+  vinculacionAceptada,
   type MovimientoKind,
 } from "../integrations/clubpay.js";
 
@@ -65,7 +66,7 @@ export async function encolarMovimiento(client: PoolClient, aviso: Aviso): Promi
     "SELECT clubpay_status FROM customers WHERE id = $1",
     [aviso.customerId]
   );
-  if (rows[0]?.clubpay_status !== "aceptada") return;
+  if (!vinculacionAceptada(rows[0]?.clubpay_status)) return;
 
   const payload = {
     external_id: `CLI-${aviso.customerId}`,

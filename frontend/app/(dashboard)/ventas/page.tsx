@@ -513,7 +513,9 @@ export default function VentasPage() {
           paidAmount: paymentMethod === "cash" && montoPagado ? montoPagado : undefined,
           // Solo el socio y el beneficio: el importe lo resuelve ClubPay al
           // registrar la transacción, que es la llamada que manda.
-          clubpay: clubpayElegido && {
+          // `undefined` y no `null`: JSON.stringify borra el campo cuando es
+          // undefined, y mandarlo en null es mandar un dato que no hay.
+          clubpay: !clubpayElegido ? undefined : {
             // Si vino de un QR del comercio, alcanza con el id del cobro: el
             // backend le vuelve a preguntar el importe a ClubPay.
             ...(cobroEstado?.status === "applied"

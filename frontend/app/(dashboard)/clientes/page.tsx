@@ -23,11 +23,17 @@ const TX_LABEL: Record<string, string> = {
  * mayoría de los clientes de un almacén no tienen la app y la cuenta corriente
  * funciona igual. Lo único que cambia es si esa persona la ve en el teléfono.
  */
+const ACEPTADA = {
+  texto: "Ve su cuenta en ClubPay", clase: "ok",
+  ayuda: "Cada compra y cada pago le aparecen en la app.",
+};
+
 const CLUBPAY_ESTADO: Record<string, { texto: string; clase: string; ayuda: string }> = {
-  aceptada: {
-    texto: "Ve su cuenta en ClubPay", clase: "ok",
-    ayuda: "Cada compra y cada pago le aparecen en la app.",
-  },
+  // ClubPay lo llama `vinculada` en su base y `aceptada` en su documentación:
+  // se contemplan las dos, porque la que no matchee no da error, solo deja de
+  // mostrar el estado y nadie se entera.
+  vinculada: ACEPTADA,
+  aceptada: ACEPTADA,
   propuesta: {
     texto: "Vinculación propuesta", clase: "warn",
     ayuda: "Le llegó la propuesta a su app y todavía no la aceptó. Hasta que acepte no ve nada.",

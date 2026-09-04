@@ -436,10 +436,27 @@ export interface MovimientoCuenta {
 
 export interface VinculacionCliente {
   encontrado: boolean;
-  status: "sin_cuenta" | "propuesta" | "aceptada" | "rechazada";
+  /**
+   * En la base de ClubPay el vínculo aceptado se llama `vinculada`; en su
+   * documentación aparece como `aceptada`. Se aceptan las dos.
+   */
+  status: "sin_cuenta" | "propuesta" | "vinculada" | "aceptada" | "rechazada";
   persona?: string;
   mensaje?: string;
 }
+
+/**
+ * Si la persona aceptó ver esta cuenta en su teléfono.
+ *
+ * Las dos formas conviven a propósito. Ya nos pasó con los estados de las
+ * órdenes de NexoB2B: la guarda comparaba contra la palabra de la
+ * documentación, la API mandaba otra, y como la comparación simplemente
+ * nunca daba verdadero no falló nada —siguió de largo—. Un vínculo que no
+ * matchea acá no rompe nada tampoco: deja de mandar movimientos y el cliente
+ * ve una cuenta vacía sin que nadie se entere.
+ */
+export const vinculacionAceptada = (status: string | null | undefined): boolean =>
+  status === "vinculada" || status === "aceptada";
 
 /**
  * Le propone a una persona vincular su cuenta corriente de este comercio con
@@ -464,7 +481,7 @@ export async function vincularCliente(
       return { encontrado: false, status: "sin_cuenta", mensaje: "El DNI no tiene cuenta en ClubPay" };
     }
     if (datos.dni.endsWith("9")) {
-      return { encontrado: true, status: "aceptada", persona: "Germán Yovan" };
+      return { encontrado: true, status: "vinculada", persona: "Germán Yovan" };
     }
     return {
       encontrado: true,

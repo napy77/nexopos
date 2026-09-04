@@ -43,7 +43,11 @@ const createSaleSchema = z.object({
     offerId: z.coerce.number().int().optional(),
     memberName: z.string().optional(),
     clubName: z.string().optional(),
-  }).optional(),
+    // nullish y no optional: un cliente que manda `null` para decir "no hay
+    // descuento" está diciendo lo mismo que si omitiera el campo, y rechazarlo
+    // con "Datos inválidos" deja al cajero sin poder cobrar por una diferencia
+    // que no significa nada.
+  }).nullish(),
 });
 
 /**
