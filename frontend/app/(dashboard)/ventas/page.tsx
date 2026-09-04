@@ -82,6 +82,8 @@ export default function VentasPage() {
   const [cobro, setCobro] = useState<ClubPayCobro | null>(null);
   const [cobroEstado, setCobroEstado] = useState<ClubPayCobroEstado | null>(null);
   const [chargeId, setChargeId] = useState<string | null>(null);
+  /** Identifica el intento de cobro en curso, para no abrir dos por un ticket */
+  const refCobro = useRef<{ id: string; total: number } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const pagaConRef = useRef<HTMLInputElement>(null);
 
@@ -127,6 +129,9 @@ export default function VentasPage() {
               socio: est.member,
               oferta: {
                 ...est.offer, points_per_use: 0, valid_until: null,
+                // El cobro por QR no manda la letra chica: el tope que actuó
+                // ya viene explicado aparte, en `recorte`.
+                condiciones: est.offer.condiciones ?? [],
                 aplica_hoy: true, motivo: "",
               },
               descuento: est.descuento ?? 0,
@@ -267,9 +272,19 @@ export default function VentasPage() {
   async function mostrarQrCobro() {
     setClubpayError("");
     try {
+      // Se reusa la referencia del intento anterior solo si es por el mismo
+      // importe: así tocar dos veces devuelve el mismo cobro en vez de abrir
+      // dos por la misma compra. Si el ticket cambió, es otro cobro —y tiene
+      // que serlo, o el socio confirmaría un descuento calculado sobre un
+      // total que ya no es el suyo.
+      let ref = refCobro.current;
+      if (!ref || ref.total !== total) {
+        ref = { id: crypto.randomUUID().slice(0, 8), total };
+        refCobro.current = ref;
+      }
       const c = await api<ClubPayCobro>("/api/clubpay/cobro", {
         method: "POST",
-        body: JSON.stringify({ total }),
+        body: JSON.stringify({ total, referencia: ref.id }),
       });
       setCobro(c);
       setChargeId(c.charge_id);
@@ -284,6 +299,9 @@ export default function VentasPage() {
     setCobro(null);
     setChargeId(null);
     setCobroEstado(null);
+    // El intento terminó: el próximo QR es un cobro nuevo, no un reintento de
+    // este. Reusar la referencia devolvería el cobro que se acaba de cerrar.
+    refCobro.current = null;
     if (cancelar && id) {
       api(`/api/clubpay/cobro/${id}/cancelar`, { method: "POST" }).catch(() => {});
     }
@@ -1014,6 +1032,14 @@ export default function VentasPage() {
                   <strong>{cobroEstado.member?.name}</strong>
                   {cobroEstado.member?.club_name && ` · ${cobroEstado.member.club_name}`}
                 </p>
+                {/* El número de socio es lo que le permite al cajero comprobar
+                    que quien escaneó es la persona que tiene delante, y no
+                    alguien de la fila que apuntó al QR desde atrás. */}
+                {cobroEstado.member?.member_number && (
+                  <p className="muted" style={{ margin: "2px 0 0" }}>
+                    Socio {cobroEstado.member.member_number}
+                  </p>
+                )}
                 <div className="qr-descuento">−{money(cobroEstado.descuento ?? 0)}</div>
                 {cobroEstado.recorteTexto && <p className="muted">{cobroEstado.recorteTexto}</p>}
               </div>

@@ -268,7 +268,9 @@ export interface ClubPayChargeEstado {
   charge_id: string;
   status: EstadoCharge;
   member?: ClubPaySocio | null;
-  offer?: Pick<ClubPayOferta, "id" | "description" | "discount_percent" | "condiciones"> | null;
+  // El contrato del cobro no incluye `condiciones`: la letra chica se
+  // explica con `recorte`, que dice qué tope actuó.
+  offer?: Pick<ClubPayOferta, "id" | "description" | "discount_percent"> & { condiciones?: string[] } | null;
   transaction_id?: number;
   ticket_total_cents?: number;
   discount_cents?: number;
@@ -306,6 +308,8 @@ async function apiGet<T>(path: string, apiKey: string): Promise<T> {
 
 /** Simulador: el charge pasa a "applied" a los pocos segundos, como si el socio hubiera escaneado */
 const mockCharges = new Map<string, { creado: number; totalCents: number; qr: string }>();
+/** external_reference → charge_id, para que el simulador sea idempotente como la API real */
+const mockRefs = new Map<string, string>();
 const MOCK_SEGUNDOS_HASTA_ESCANEO = 6;
 const MOCK_MINUTOS_VIGENCIA = 3;
 
@@ -314,15 +318,33 @@ export async function crearCharge(
   datos: { ticketTotalCents: number; externalReference: string }
 ): Promise<ClubPayCharge> {
   if (isMockMode()) {
+    // Idempotente por external_reference, igual que la API real: reintentar
+    // devuelve el mismo cobro y no uno nuevo por la misma compra. El
+    // simulador lo respeta para que esto se pueda probar sin salir a la red;
+    // un mock que se porta distinto del contrato esconde justo los errores
+    // que tendría que hacer visibles.
+    const yaCreado = mockRefs.get(datos.externalReference);
+    if (yaCreado) {
+      const ch = mockCharges.get(yaCreado)!;
+      return {
+        charge_id: yaCreado,
+        qr_payload: ch.qr,
+        expires_at: new Date(ch.creado + MOCK_MINUTOS_VIGENCIA * 60_000).toISOString(),
+        status: "pending",
+      };
+    }
     const id = `chg_demo_${Date.now().toString(36)}`;
-    mockCharges.set(id, {
-      creado: Date.now(),
-      totalCents: datos.ticketTotalCents,
-      qr: `clubpay://charge/${id}`,
-    });
+    // Con la misma forma que el de verdad: una URL https. El QR real es una
+    // URL a propósito, para que quien escanee con la cámara sin tener la app
+    // caiga en una página que le explica qué es. Un esquema propio tipo
+    // clubpay:// no lo abre nadie y el QR parece roto — y si el simulador
+    // usara uno, probar acá no diría nada sobre lo que va a pasar afuera.
+    const payload = `https://api.clubpay.com.ar/c/${id}`;
+    mockCharges.set(id, { creado: Date.now(), totalCents: datos.ticketTotalCents, qr: payload });
+    mockRefs.set(datos.externalReference, id);
     return {
       charge_id: id,
-      qr_payload: `clubpay://charge/${id}`,
+      qr_payload: payload,
       expires_at: new Date(Date.now() + MOCK_MINUTOS_VIGENCIA * 60_000).toISOString(),
       status: "pending",
     };

@@ -43,6 +43,10 @@ JWT_SECRET=${JWT_SECRET}
 NEXOB2B_API_URL=
 NEXOB2B_API_KEY=
 CATALOG_SYNC_INTERVAL_MIN=60
+# Vacío = simulador. Con el simulador el QR lleva una URL de mentira que la
+# app de ClubPay no puede abrir: para que el socio pueda escanearlo de verdad
+# esto tiene que apuntar a la API real.
+CLUBPAY_API_URL=https://api.clubpay.com.ar
 EOF
   chown nexopos:nexopos "$ENV_FILE"
   chmod 600 "$ENV_FILE"

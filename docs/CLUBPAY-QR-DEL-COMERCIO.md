@@ -1,5 +1,10 @@
 # ClubPay · QR mostrado por el comercio
 
+> **Este documento ya cumplió su función.** Era la especificación que le
+> pedimos a ClubPay; ellos la implementaron y el contrato vigente es el de
+> ellos, en `clubapp/docs/nexopos-cobro-qr.md`. Ante cualquier diferencia,
+> manda ese. Queda acá el porqué del diseño, que sigue siendo el mismo.
+
 Especificación de los endpoints que NexoPOS necesita para invertir el flujo del
 descuento. **Para el equipo de ClubPay.**
 
@@ -150,8 +155,9 @@ importe actualizado, pero conviene que ClubPay valide contra el
 `ticket_total_cents` del charge y no permita aplicar un descuento calculado
 sobre un importe viejo.
 
-## Estado de la implementación en NexoPOS
+## Estado
 
-Ya está implementado contra esta especificación y anda con un simulador. Apenas
-ClubPay publique los endpoints, se configura la URL y funciona: no hace falta
-tocar el POS salvo que el contrato cambie.
+Los endpoints están arriba en `https://api.clubpay.com.ar` y NexoPOS habla
+contra ellos. Lo único que hace falta es que `CLUBPAY_API_URL` apunte ahí: con
+la variable vacía el POS usa el simulador, que da por escaneado el cobro solo y
+dibuja un QR que la app no puede abrir.

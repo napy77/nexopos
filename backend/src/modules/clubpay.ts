@@ -94,7 +94,11 @@ clubpayRouter.put("/api-key", async (req, res, next) => {
 
 // ── QR mostrado por el comercio ──────────────────────────────────────────────
 
-const chargeSchema = z.object({ total: z.coerce.number().positive() });
+const chargeSchema = z.object({
+  total: z.coerce.number().positive(),
+  /** Identifica el intento de cobro; ver la nota en el handler */
+  referencia: z.string().min(1).max(60).optional(),
+});
 
 /**
  * POST /api/clubpay/cobro
@@ -105,13 +109,22 @@ const chargeSchema = z.object({ total: z.coerce.number().positive() });
  */
 clubpayRouter.post("/cobro", async (req, res, next) => {
   try {
-    const { total } = chargeSchema.parse(req.body);
+    const { total, referencia } = chargeSchema.parse(req.body);
     const key = await clubpayKey(req);
+    // La referencia la manda la pantalla y se mantiene igual mientras sea el
+    // mismo intento de cobro sobre el mismo ticket. Es lo que hace que el
+    // cobro sea idempotente del lado de ClubPay: si el cajero toca dos veces
+    // o se corta la red y se reintenta, vuelve el mismo cobro con el mismo QR
+    // en vez de un segundo cobro por la misma compra.
+    //
+    // Si no viene, se genera una: es un intento nuevo y no hay nada que
+    // reusar.
+    const externalReference = referencia
+      ? `nexopos-${req.auth.commerceId}-${referencia}`
+      : `nexopos-${req.auth.commerceId}-${randomUUID().slice(0, 8)}`;
     const charge = await crearCharge(key, {
       ticketTotalCents: aCentavos(total),
-      // Identifica la operación para que un reintento por corte de red no
-      // genere dos cobros distintos
-      externalReference: `nexopos-${req.auth.commerceId}-${randomUUID().slice(0, 8)}`,
+      externalReference,
     });
     const qrDataUrl = await QRCode.toDataURL(charge.qr_payload, {
       width: 320,

@@ -58,7 +58,7 @@ export interface ClubPayCobroEstado {
   charge_id: string;
   status: EstadoCobro;
   member?: ClubPaySocio | null;
-  offer?: { id: number; description: string; discount_percent: number; condiciones: string[] } | null;
+  offer?: { id: number; description: string; discount_percent: number; condiciones?: string[] } | null;
   transaction_id?: number;
   descuento: number | null;
   neto: number | null;
