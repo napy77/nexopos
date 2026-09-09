@@ -20,6 +20,7 @@ import { exportRouter } from "./modules/export.js";
 import { settingsRouter } from "./modules/settings.js";
 import { cajaRouter } from "./modules/caja.js";
 import { clubpayRouter, clubpayWebhookRouter } from "./modules/clubpay.js";
+import { disponibilidadRouter } from "./modules/disponibilidad.js";
 import { iniciarOutbox } from "./modules/clubpay-outbox.js";
 
 const arranque = new Date().toISOString();
@@ -57,6 +58,7 @@ app.use("/api/reports", requireAuth, reportsRouter);
 app.use("/api/export", requireAuth, exportRouter);
 app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/caja", requireAuth, cajaRouter);
+app.use("/api/disponibilidad", requireAuth, disponibilidadRouter);
 // El webhook lo llama ClubPay, no un cajero: se autentica con la clave del
 // comercio y por eso va antes y sin requireAuth.
 app.use("/api/clubpay/webhook", clubpayWebhookRouter);

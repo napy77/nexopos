@@ -317,8 +317,13 @@ stockRouter.post("/producto-propio", async (req, res, next) => {
     );
 
     await client.query(
-      `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price, min_stock, updated_at)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), now())`,
+      // El default lo da el origen: lo que el comercio hace se controla por
+      // declaración, no por inventario. Es un default y no una regla —la
+      // panadera que envasa su dulce de leche en frascos tiene doce frascos
+      // reales—, así que se puede dar vuelta desde /api/disponibilidad.
+      `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price,
+                                min_stock, availability_policy, updated_at)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), 'declared', now())`,
       [commerceId, product.id, body.quantity, body.cost ?? null, body.salePrice, body.minStock ?? null]
     );
     if (body.quantity > 0) {

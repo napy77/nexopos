@@ -8,6 +8,7 @@ import { sesionAbierta } from "./caja.js";
 import { registrarTransaccion, consultarCharge, aCentavos, aPesos, RECORTE_TEXTO } from "../integrations/clubpay.js";
 import { clubpayKey } from "./clubpay.js";
 import { encolarMovimiento } from "./clubpay-outbox.js";
+import { descontarCupo } from "./disponibilidad.js";
 
 export const salesRouter = Router();
 
@@ -75,8 +76,10 @@ salesRouter.post("/", async (req, res, next) => {
     const lines: { productId: number; quantity: number; unitPrice: number }[] = [];
     for (const item of body.items) {
       const { rows } = await client.query(
-        `SELECT quantity, sale_price FROM stock_items
-         WHERE commerce_id = $1 AND product_id = $2 FOR UPDATE`,
+        `SELECT quantity, sale_price, availability_policy, declared_state,
+                quota_total, quota_remaining, quota_day
+           FROM stock_items
+          WHERE commerce_id = $1 AND product_id = $2 FOR UPDATE`,
         [commerceId, item.productId]
       );
       if (!rows[0]) throw new HttpError(400, `El producto ${item.productId} no está en el stock local`);
@@ -87,11 +90,18 @@ salesRouter.post("/", async (req, res, next) => {
       if (!unitPrice) throw new HttpError(400, `El producto ${item.productId} no tiene precio de venta definido`);
       lines.push({ productId: item.productId, quantity: item.quantity, unitPrice });
 
-      await client.query(
-        `UPDATE stock_items SET quantity = quantity - $3, updated_at = now()
-         WHERE commerce_id = $1 AND product_id = $2`,
-        [commerceId, item.productId, item.quantity]
-      );
+      // Un producto declarado no tiene inventario que descontar: tiene, si
+      // acaso, un cupo del día. Descontarle stock a la pizza sería inventar un
+      // número que después no coincide con nada.
+      if (rows[0].availability_policy === "declared") {
+        await descontarCupo(client, commerceId, item.productId, item.quantity);
+      } else {
+        await client.query(
+          `UPDATE stock_items SET quantity = quantity - $3, updated_at = now()
+           WHERE commerce_id = $1 AND product_id = $2`,
+          [commerceId, item.productId, item.quantity]
+        );
+      }
     }
 
     const subtotal = lines.reduce((acc, l) => acc + l.quantity * l.unitPrice, 0);
