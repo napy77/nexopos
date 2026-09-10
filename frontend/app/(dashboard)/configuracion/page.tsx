@@ -15,6 +15,19 @@ interface Commerce {
 }
 interface Sale { id: number; ticket_number: number }
 
+interface Tienda {
+  habilitada: boolean;
+  pagos: {
+    contraEntrega: boolean; transferencia: boolean;
+    transferenciaAlias: string | null; transferenciaTitular: string | null;
+    clubpay: boolean; clubpayDisponible: boolean; cuentaCorriente: boolean;
+  };
+  envios: {
+    retiroEnLocal: boolean; envioPropio: boolean;
+    nexoRider: boolean; nexoRiderDisponible: boolean; nexoRiderMotivo: string;
+  };
+}
+
 const ANCHOS = [
   { id: "80mm", label: "Ticketera 80mm", detalle: "El formato más común de comandera térmica" },
   { id: "58mm", label: "Ticketera 58mm", detalle: "Térmica angosta, tipo mini impresora" },
@@ -32,6 +45,9 @@ export default function ConfiguracionPage() {
   const [error, setError] = useState("");
   const [clubpay, setClubpay] = useState<{ configurado: boolean; mockMode: boolean; clavePreview: string | null } | null>(null);
   const [clubpayKey, setClubpayKey] = useState("");
+  const [tienda, setTienda] = useState<Tienda | null>(null);
+  const [alias, setAlias] = useState("");
+  const [titular, setTitular] = useState("");
 
   useEffect(() => {
     setSettings(loadPrintSettings());
@@ -44,10 +60,33 @@ export default function ConfiguracionPage() {
     api<{ commerce: Commerce; mockMode: boolean }>("/api/auth/me")
       .then((d) => { setCommerce(d.commerce); setMockMode(d.mockMode); })
       .catch(console.error);
+    api<Tienda>("/api/settings/nexotienda")
+      .then((t) => { setTienda(t); setAlias(t.pagos.transferenciaAlias ?? ""); setTitular(t.pagos.transferenciaTitular ?? ""); })
+      .catch(console.error);
     api<Sale[]>("/api/sales")
       .then((ventas) => setUltimaVenta(ventas[0] ?? null))
       .catch(console.error);
   }, []);
+
+  /**
+   * Guarda un cambio de la tienda. Si el backend lo rechaza —por ejemplo
+   * publicar sin forma de pago— se muestra el motivo y el switch vuelve solo:
+   * mostrarlo encendido cuando no se guardó sería mentirle al comerciante.
+   */
+  async function guardarTienda(cambio: Record<string, unknown>) {
+    setError(""); setMsg("");
+    try {
+      setTienda(await api<Tienda>("/api/settings/nexotienda", {
+        method: "PUT", body: JSON.stringify(cambio),
+      }));
+      setMsg("Guardado");
+      setTimeout(() => setMsg(""), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+      const actual = await api<Tienda>("/api/settings/nexotienda").catch(() => null);
+      if (actual) setTienda(actual);
+    }
+  }
 
   function update(cambio: Partial<PrintSettings>) {
     const next = { ...settings, ...cambio };
@@ -298,6 +337,64 @@ export default function ConfiguracionPage() {
           )}
         </div>
 
+        <div className="card" style={{ minWidth: 340 }}>
+          <h2>Tienda online</h2>
+          {!tienda ? <p className="muted">Cargando…</p> : (
+            <>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+                <input type="checkbox" checked={tienda.habilitada}
+                  onChange={(ev) => guardarTienda({ habilitada: ev.target.checked })} />
+                <strong>Publicar mi tienda en NexoTienda</strong>
+              </label>
+              <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                {tienda.habilitada
+                  ? "Tus clientes pueden comprar desde el teléfono."
+                  : "Mientras esté apagada, en NexoTienda aparecen tus datos pero no tu catálogo."}
+              </p>
+
+              <h3 style={{ fontSize: 14, marginBottom: 6 }}>Cómo te pagan</h3>
+              <Switch label="Pago contra entrega" ayuda="Paga cuando recibe el pedido o cuando pasa a retirarlo"
+                on={tienda.pagos.contraEntrega}
+                set={(v) => guardarTienda({ pagos: { contraEntrega: v } })} />
+
+              <Switch label="Transferencia" ayuda="El cliente transfiere y sube el comprobante"
+                on={tienda.pagos.transferencia}
+                set={(v) => guardarTienda({ pagos: { transferencia: v, transferenciaAlias: alias, transferenciaTitular: titular } })} />
+              {tienda.pagos.transferencia && (
+                <div style={{ margin: "2px 0 10px 24px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <input value={alias} onChange={(ev) => setAlias(ev.target.value)}
+                    placeholder="Alias o CBU" style={{ width: 150 }} />
+                  <input value={titular} onChange={(ev) => setTitular(ev.target.value)}
+                    placeholder="Titular de la cuenta" style={{ width: 170 }} />
+                  <button type="button" className="ghost"
+                    onClick={() => guardarTienda({ pagos: { transferenciaAlias: alias, transferenciaTitular: titular } })}>
+                    Guardar
+                  </button>
+                </div>
+              )}
+
+              <Switch label="ClubPay" ayuda={tienda.pagos.clubpayDisponible
+                  ? "Con la billetera del cliente"
+                  : "Cargá primero la clave de ClubPay, más arriba"}
+                on={tienda.pagos.clubpay} disabled={!tienda.pagos.clubpayDisponible}
+                set={(v) => guardarTienda({ pagos: { clubpay: v } })} />
+
+              <Switch label="Cuenta corriente" ayuda="Solo para clientes que ya tienen cuenta abierta en el mostrador"
+                on={tienda.pagos.cuentaCorriente}
+                set={(v) => guardarTienda({ pagos: { cuentaCorriente: v } })} />
+
+              <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>Cómo entregás</h3>
+              <Switch label="Retira del local" on={tienda.envios.retiroEnLocal}
+                set={(v) => guardarTienda({ envios: { retiroEnLocal: v } })} />
+              <Switch label="Envío propio" ayuda="Repartís vos, con tus horarios y tu costo"
+                on={tienda.envios.envioPropio}
+                set={(v) => guardarTienda({ envios: { envioPropio: v } })} />
+              <Switch label="NexoRider" ayuda={tienda.envios.nexoRiderMotivo}
+                on={false} disabled set={() => {}} />
+            </>
+          )}
+        </div>
+
         <div className="card" style={{ minWidth: 300 }}>
           <h2>Datos del comercio</h2>
           <p className="muted">
@@ -337,5 +434,25 @@ export default function ConfiguracionPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Un switch con su explicación al lado. Deshabilitado dice por qué. */
+function Switch({ label, ayuda, on, set, disabled }: {
+  label: string; ayuda?: string; on: boolean;
+  set: (v: boolean) => void; disabled?: boolean;
+}) {
+  return (
+    <label style={{ display: "block", marginBottom: 8, opacity: disabled ? 0.55 : 1,
+                    cursor: disabled ? "not-allowed" : "pointer" }}>
+      <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="checkbox" checked={on} disabled={disabled}
+          onChange={(ev) => set(ev.target.checked)} />
+        {label}
+      </span>
+      {ayuda && (
+        <span className="muted" style={{ fontSize: 11, marginLeft: 24, display: "block" }}>{ayuda}</span>
+      )}
+    </label>
   );
 }

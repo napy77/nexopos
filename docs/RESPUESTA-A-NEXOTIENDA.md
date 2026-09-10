@@ -1,5 +1,11 @@
 # NexoPOS → NexoTienda: qué construimos y qué cambia del contrato
 
+> **Actualizado.** Después de escribir esto tuvimos un ida y vuelta con ClubPay
+> que cambió tres cosas: el identificador de la persona, cómo llega la identidad
+> al entrar a la tienda, y cuándo la app va a poder mostrar resúmenes. Están
+> marcadas abajo. Se agregó además la sección 2.3, con las formas de pago y de
+> entrega que el comerciante ya puede configurar.
+
 Respuesta al prompt de la Parte A/B. Tres bloques: **lo que cambia de lo que
 especificaron** (leer primero, toca `types.ts`), **lo que ya está andando**, y
 **lo que necesitamos que decidan**.
@@ -53,10 +59,41 @@ comercio. Si quiere comprar igual, paga con ClubPay, con billetera o al recibir
 O sea que NexoTienda nunca necesita *"todas las cuentas de esta persona"*.
 Necesita *"esta persona, esta tienda"*, que es un 404 o un objeto.
 
-El `person_id` sigue existiendo, es **uno solo y compartido entre comercios**, y
-lo emite ClubPay —el único sistema del ecosistema con una cuenta de consumidor—.
-NexoPOS lo guarda en la ficha del cliente de cada comercio. Ya se lo pedimos a
-ClubPay: hoy no lo devuelven.
+## 1.2 No es `person_id`: es `account_id`, y hay uno por comercio
+
+**Corrección de lo que dijimos antes.** Habíamos escrito que el `person_id` es
+uno solo y compartido entre comercios. Se lo pedimos así a ClubPay y nos dijeron
+que no, con un argumento mejor que el nuestro:
+
+> «Un id estable por ser humano, compartido con cada comercio, hace que dos
+> comercios puedan cruzar sus listas y descubrir que `prs_9f3a` es el mismo
+> cliente en los dos. Hoy no pueden. El nombre `person_id` además invita a
+> usarlo como clave de usuario en NexoTienda, que es exactamente el uso que no
+> queremos habilitar.»
+
+Lo que hay entonces es un **`account_id` de la relación**: distinto para la misma
+persona en cada comercio, y solo existe cuando la vinculación fue aceptada.
+
+**Para NexoTienda esto importa en un punto concreto**: no hay ninguna clave que
+identifique al comprador a través del pueblo. La sesión de alguien en la tienda
+de SuperSOL no es la misma identidad que en la de la ferretería, y no se puede
+construir una uniendo `account_id`.
+
+## 1.2b Y la identidad no llega por un id en la URL
+
+También cambió cómo entra la persona desde ClubPay. Un id permanente en un link
+**es una credencial que no vence nunca**: queda en el historial, en los logs del
+servidor, en el `Referer` y en el WhatsApp donde alguien reenvíe la URL.
+
+ClubPay propuso —y aceptamos— el patrón que ya tienen en producción para el salto
+de Nexo B2B a su panel: **un token de un solo uso que vale dos minutos**, guardado
+hasheado, que se canjea por una sesión y muere. La app le pide el token a
+ClubPay, NexoTienda lo canjea contra nosotros y le contestamos de qué
+`account_id` se trata.
+
+Ellos lo van a especificar aparte. **No los bloquea todavía** —el endpoint de
+canje no existe de ningún lado— pero conviene que no construyan la sesión
+asumiendo un id en la query string, porque después hay que deshacerlo.
 
 ## 1.2 `availableCents` puede no ser un número
 
@@ -122,6 +159,35 @@ Se implementó tal cual, con dos precisiones:
 abierto **nunca** trae `dueDate` ni total congelado: es lo que todavía está
 pasando.
 
+El identificador del resumen se llama **`statement_id`** en los tres lugares
+—movimiento, cierre y pago—, no `period_id`. Lo pidió ClubPay y tienen razón: lo
+que la persona ve es un resumen.
+
+## 1.4b Cuándo van a poder ofrecer "pagar un resumen"
+
+**No todavía, y conviene que lo sepan antes de diseñar la pantalla.**
+
+La app de ClubPay **no tiene actualizaciones por aire**: todo cambio pasa por la
+tienda de aplicaciones. La versión que muestra la pila de resúmenes todavía no
+está publicada, y en iOS no hay fecha porque la cuenta de desarrollador sigue en
+verificación.
+
+Traducido: **si NexoTienda sale asumiendo que la persona ve sus resúmenes en
+ClubPay, se va a encontrar con que no.** Lo que sí anda desde el primer día es el
+saldo y los movimientos.
+
+El orden que acordamos con ellos:
+
+| Cuándo | ClubPay | NexoTienda |
+|---|---|---|
+| Ahora | el backend acepta resúmenes | cobra con **importe libre**, que ya funciona |
+| Próxima versión de la app | muestra la pila | ofrece pagar un resumen puntual |
+
+Y hay un segundo motivo para no apurarlo: encontramos que entre las dos puntas la
+misma plata se contaba dos veces, y el arreglo de ellos todavía no está
+desplegado. **Hasta que lo esté, retenemos los resúmenes en la cola** —preferimos
+que no lleguen a que lleguen y dupliquen—.
+
 ## 1.5 Fechas
 
 Las fechas sin hora se calculan en `America/Argentina/Cordoba`, escrito y no
@@ -151,6 +217,46 @@ oeste da el 9 de agosto. Es la trampa que ustedes mismos marcaron en el prompt.
 Sobre `unknown`: va a aparecer de verdad, en productos que el comercio todavía no
 configuró. Muéstrenlo como acordamos —"consultá disponibilidad", y dejar pedir
 igual—, nunca como cero.
+
+## 2.3 Formas de pago y de entrega — **construido**, y el comerciante ya las elige
+
+Está en la configuración del POS, en la misma tarjeta donde publica la tienda.
+
+| Pago | |
+|---|---|
+| Pago contra entrega | Paga al recibir o al retirar |
+| Transferencia | Con alias y titular. **Falta el circuito del comprobante** (ver abajo) |
+| ClubPay | Solo si el comercio tiene su clave cargada; si no, aparece bloqueado |
+| Cuenta corriente | Es el `onlineCreditEnabled` que ya estaba, no un campo nuevo |
+
+| Entrega | |
+|---|---|
+| Retira del local | |
+| Envío propio | |
+| NexoRider | **Bloqueado, "Próximamente".** No se puede encender |
+
+Tres cosas que van a ver reflejadas en el contrato:
+
+**No se puede publicar una tienda sin forma de pago o sin forma de entrega.** El
+backend lo rechaza. Una tienda así toma pedidos que después nadie puede cerrar, y
+el que queda mal con su vecino es el comerciante. Así que si `storefrontPublished`
+es `true`, hay al menos una de cada.
+
+**La transferencia sin alias también se rechaza.** Sin eso el comprador no tiene a
+dónde depositar y el pedido queda esperando un pago que no sabe cómo hacer.
+Cuando esté habilitada, el alias y el titular van en el `Store` para que los
+muestren.
+
+**NexoRider no tiene columna en la base**, a propósito. Una columna que se puede
+poner en `true` prometería un reparto que no existe. Va a llegarles como
+`disponible: false` con su motivo.
+
+### Lo que falta de esto
+
+**El circuito del comprobante de transferencia.** El switch existe y guarda el
+alias, pero subir la foto del comprobante, que el comerciante la vea y la
+confirme es parte del flujo de pedido (A6), que todavía no está construido. Hasta
+entonces, transferencia significa "acordalo con el comercio".
 
 ## Cuenta corriente con períodos (A5) — el núcleo
 
