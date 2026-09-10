@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { pool } from "../db.js";
+import { config } from "../config.js";
 import { statementId } from "./cuenta-corriente.js";
 import {
   aCentavos,
@@ -149,6 +150,9 @@ export async function despacharPendientes(): Promise<number> {
 export function iniciarOutbox(): void {
   if (isMockMode()) {
     console.log("[clubpay] modo mock: los movimientos de cuenta corriente se loguean, no se envían");
+  }
+  if (!config.clubpay.enviarResumenes) {
+    console.log("[clubpay] resúmenes RETENIDOS (CLUBPAY_STATEMENTS != on): se acumulan sin enviar");
   }
   setInterval(() => {
     despacharPendientes().catch((err) => console.error("[clubpay] outbox:", err));
@@ -314,6 +318,10 @@ export async function refrescarPendientes(): Promise<void> {
  * por statement_id justamente para esto.
  */
 export async function despacharResumenes(): Promise<number> {
+  // Retenidos hasta que ClubPay despliegue su mitad del arreglo. Ver la nota en
+  // config.ts: mandarlos antes le muestra al cliente el doble de lo que debe.
+  if (!config.clubpay.enviarResumenes) return 0;
+
   const { rows } = await pool.query(
     `SELECT p.id, p.customer_id, p.label, p.period_start, p.period_end,
             p.total, p.paid, p.due_date, p.closed_at, co.clubpay_api_key

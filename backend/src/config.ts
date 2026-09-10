@@ -22,5 +22,18 @@ export const config = {
   clubpay: {
     // Vacío → modo mock, con socios de prueba para el mostrador
     apiUrl: process.env.CLUBPAY_API_URL || "",
+    /**
+     * Los resúmenes de cuenta corriente arrancan retenidos, y se sueltan
+     * poniendo esto en "on".
+     *
+     * No es prudencia genérica: hasta que ClubPay despliegue la adjudicación de
+     * movimientos a su resumen, la misma compra queda contada dos veces —una en
+     * el saldo y otra en el pendiente del resumen— y al cliente le aparece el
+     * doble. Es preferible que no lleguen a que lleguen mal.
+     *
+     * Se sueltan cuando ellos confirmen. Mientras tanto se acumulan en la
+     * cola: nada se pierde, sale todo junto en la primera vuelta.
+     */
+    enviarResumenes: (process.env.CLUBPAY_STATEMENTS || "").toLowerCase() === "on",
   },
 };
