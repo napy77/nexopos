@@ -271,7 +271,6 @@ salesRouter.post("/", async (req, res, next) => {
         kind: "compra",
         amount: aCobrar,
         description: `Ticket #${sale.ticket_number}`,
-        periodId: periodo.id,
       });
     }
 

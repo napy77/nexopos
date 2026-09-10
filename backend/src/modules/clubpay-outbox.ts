@@ -51,8 +51,6 @@ interface Aviso {
   /** En pesos y con signo: positivo aumenta la deuda, negativo la baja */
   amount: number;
   description: string;
-  /** El período al que cae, para que ClubPay lo cuelgue del resumen */
-  periodId?: number;
 }
 
 /**
@@ -81,9 +79,20 @@ export async function encolarMovimiento(client: PoolClient, aviso: Aviso): Promi
     amount_cents: aCentavos(aviso.amount),
     occurred_at: new Date().toISOString(),
     description: aviso.description,
-    // A qué resumen pertenece. Del lado de ClubPay el total del resumen es la
-    // verdad del período y estos movimientos son su detalle: no suman.
-    ...(aviso.periodId ? { statement_id: statementId(aviso.periodId) } : {}),
+    /*
+     * Sin statement_id, a propósito.
+     *
+     * Del lado de ClubPay el saldo es la suma de los movimientos **con
+     * statement_id vacío**: los que ya entraron en un resumen son el detalle de
+     * ese resumen y no suman, porque su total manda. Un movimiento que nace en
+     * el período abierto todavía no entró en ningún resumen, así que mandarle
+     * un id le diría a ClubPay que ya está contado en otro lado y la compra
+     * desaparecería del saldo.
+     *
+     * Solo lleva id el movimiento que llega cuando su período YA cerró —la cola
+     * reintentando, o una recuperación—: ese sí es detalle de un documento que
+     * ya existe.
+     */
   };
 
   await client.query(
@@ -230,8 +239,10 @@ export async function refrescarVinculacion(
 /** Encola los movimientos recientes que quedaron sin avisar */
 export async function recuperarMovimientos(commerceId: number, customerId: number): Promise<number> {
   const { rows } = await pool.query(
-    `SELECT t.id, t.type, t.amount, t.note, t.created_at, t.period_id
+    `SELECT t.id, t.type, t.amount, t.note, t.created_at, t.period_id,
+            p.status AS period_status
        FROM customer_transactions t
+       LEFT JOIN account_periods p ON p.id = t.period_id
        LEFT JOIN clubpay_outbox o ON o.transaction_id = t.id
       WHERE t.customer_id = $1 AND t.commerce_id = $2
         AND o.id IS NULL
@@ -254,7 +265,11 @@ export async function recuperarMovimientos(commerceId: number, customerId: numbe
         // esto y si mintiéramos aparecerían todos juntos al final.
         occurred_at: new Date(t.created_at).toISOString(),
         description: t.note ?? "",
-        ...(t.period_id ? { statement_id: statementId(Number(t.period_id)) } : {}),
+        // Solo si el resumen ya está cerrado: si el período sigue abierto, el
+        // movimiento tiene que sumar y para eso el id va vacío.
+        ...(t.period_id && t.period_status && t.period_status !== "abierto"
+          ? { statement_id: statementId(Number(t.period_id)) }
+          : {}),
       }]
     );
   }
