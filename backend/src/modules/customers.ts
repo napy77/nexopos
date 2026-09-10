@@ -7,6 +7,7 @@ import { sesionAbierta } from "./caja.js";
 import { clubpayKey } from "./clubpay.js";
 import { vincularCliente } from "../integrations/clubpay.js";
 import { encolarMovimiento, refrescarVinculacion } from "./clubpay-outbox.js";
+import { periodoAbierto, imputarPago, pilaDe } from "./cuenta-corriente.js";
 
 export const customersRouter = Router();
 
@@ -171,7 +172,8 @@ customersRouter.get("/:id/transactions", async (req, res, next) => {
        FROM customer_transactions WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 200`,
       [customers[0].id]
     );
-    res.json({ customer: customers[0], transactions });
+    const { periods } = await pilaDe(req.auth.commerceId, Number(customers[0].id));
+    res.json({ customer: customers[0], transactions, periods });
   } catch (err) {
     next(err);
   }
@@ -182,6 +184,12 @@ const paymentSchema = z.object({
   note: z.string().optional(),
   // Con qué pagó: importa para el arqueo (si fue efectivo, está en el cajón)
   paymentMethod: z.enum(["cash", "wallet", "card", "transfer"]).default("cash"),
+  /**
+   * Forzar a qué resumen se imputa. Sin esto va del más viejo al más nuevo,
+   * que es lo que hace el cuaderno; el override existe porque a veces el
+   * comerciante dice "no, dejá, esto es lo de este mes".
+   */
+  periodId: z.coerce.number().int().optional(),
 });
 
 /** POST /api/customers/:id/payments — registra un pago que baja la deuda */
@@ -197,12 +205,19 @@ customersRouter.post("/:id/payments", async (req, res, next) => {
     );
     if (!customers[0]) throw new HttpError(404, "Cliente no encontrado");
     const sesion = await sesionAbierta(commerceId, client);
+    const periodo = await periodoAbierto(client, commerceId, Number(customers[0].id));
     const { rows: [movimiento] } = await client.query(
       `INSERT INTO customer_transactions
-         (commerce_id, customer_id, type, amount, note, payment_method, cash_session_id)
-       VALUES ($1, $2, 'payment', $3, $4, $5, $6) RETURNING id`,
+         (commerce_id, customer_id, type, amount, note, payment_method, cash_session_id, period_id)
+       VALUES ($1, $2, 'payment', $3, $4, $5, $6, $7) RETURNING id`,
       [commerceId, customers[0].id, -body.amount, body.note ?? "Pago recibido",
-       body.paymentMethod, sesion?.id ?? null]
+       body.paymentMethod, sesion?.id ?? null, periodo.id]
+    );
+    // Se imputa a los resúmenes cerrados, del más viejo al más nuevo. Lo que
+    // sobre queda a cuenta del período abierto: la plata no queda colgada.
+    const imputado = await imputarPago(
+      client, commerceId, Number(customers[0].id), Number(movimiento.id),
+      body.amount, body.periodId
     );
     await encolarMovimiento(client, {
       commerceId,
@@ -220,7 +235,7 @@ customersRouter.post("/:id/payments", async (req, res, next) => {
     );
     await client.query("COMMIT");
     await audit(commerceId, "customer.payment", "customers", customers[0].id, body);
-    res.json({ ok: true, balance: Number(updated.balance) });
+    res.json({ ok: true, balance: Number(updated.balance), imputado });
   } catch (err) {
     await client.query("ROLLBACK");
     next(err);

@@ -9,6 +9,7 @@ import { registrarTransaccion, consultarCharge, aCentavos, aPesos, RECORTE_TEXTO
 import { clubpayKey } from "./clubpay.js";
 import { encolarMovimiento } from "./clubpay-outbox.js";
 import { descontarCupo } from "./disponibilidad.js";
+import { periodoAbierto } from "./cuenta-corriente.js";
 
 export const salesRouter = Router();
 
@@ -237,10 +238,14 @@ salesRouter.post("/", async (req, res, next) => {
         [body.customerId, commerceId]
       );
       if (!custRows[0]) throw new HttpError(404, "Cliente no encontrado");
+      // Toda compra fiada cae en el período abierto. Si el anterior venció, se
+      // cierra acá: así el resumen que ya se le mostró a alguien no cambia
+      // porque llegó una venta nueva.
+      const periodo = await periodoAbierto(client, commerceId, body.customerId);
       const { rows: [movimiento] } = await client.query(
-        `INSERT INTO customer_transactions (commerce_id, customer_id, type, amount, sale_id, note)
-         VALUES ($1, $2, 'sale_credit', $3, $4, $5) RETURNING id`,
-        [commerceId, body.customerId, aCobrar, sale.id, `Ticket #${sale.ticket_number}`]
+        `INSERT INTO customer_transactions (commerce_id, customer_id, type, amount, sale_id, note, period_id)
+         VALUES ($1, $2, 'sale_credit', $3, $4, $5, $6) RETURNING id`,
+        [commerceId, body.customerId, aCobrar, sale.id, `Ticket #${sale.ticket_number}`, periodo.id]
       );
       await client.query("UPDATE customers SET balance = balance + $1 WHERE id = $2", [
         aCobrar,

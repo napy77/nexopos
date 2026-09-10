@@ -69,3 +69,60 @@ settingsRouter.put("/balanza", async (req, res, next) => {
     next(err);
   }
 });
+
+// ── Cuenta corriente y tienda online ────────────────────────────────────────
+
+const cuentaSchema = z.object({
+  /**
+   * El día en que cierra el resumen. Es del comercio y no nuestro: hay pueblos
+   * que cierran el 10 porque ahí cobra la gente, y el 31 fijo se rompe en la
+   * calle. Un 31 en febrero se recorta al último día del mes.
+   */
+  closingDay: z.coerce.number().int().min(1).max(31).optional(),
+  /** Hasta cuándo tiene para pagarlo. Si es menor al de cierre, vence al mes siguiente. */
+  dueDay: z.coerce.number().int().min(1).max(31).optional(),
+  /** Un comercio puede estar en el POS y no tener tienda publicada. */
+  nexotiendaEnabled: z.boolean().optional(),
+});
+
+/** GET /api/settings/cuenta-corriente */
+settingsRouter.get("/cuenta-corriente", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT closing_day, due_day, nexotienda_enabled FROM commerces WHERE id = $1",
+      [req.auth.commerceId]
+    );
+    res.json({
+      closingDay: Number(rows[0].closing_day),
+      dueDay: Number(rows[0].due_day),
+      nexotiendaEnabled: rows[0].nexotienda_enabled,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** PUT /api/settings/cuenta-corriente */
+settingsRouter.put("/cuenta-corriente", async (req, res, next) => {
+  try {
+    const body = cuentaSchema.parse(req.body);
+    const { rows } = await pool.query(
+      `UPDATE commerces SET
+         closing_day = COALESCE($2, closing_day),
+         due_day = COALESCE($3, due_day),
+         nexotienda_enabled = COALESCE($4, nexotienda_enabled)
+       WHERE id = $1
+       RETURNING closing_day, due_day, nexotienda_enabled`,
+      [req.auth.commerceId, body.closingDay ?? null, body.dueDay ?? null,
+       body.nexotiendaEnabled ?? null]
+    );
+    await audit(req.auth.commerceId, "settings.cuenta-corriente", "commerces", req.auth.commerceId, body);
+    res.json({
+      closingDay: Number(rows[0].closing_day),
+      dueDay: Number(rows[0].due_day),
+      nexotiendaEnabled: rows[0].nexotienda_enabled,
+    });
+  } catch (err) {
+    next(err);
+  }
+});

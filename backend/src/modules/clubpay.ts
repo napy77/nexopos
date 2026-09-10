@@ -4,6 +4,7 @@ import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { sesionAbierta } from "./caja.js";
+import { periodoAbierto, imputarPago } from "./cuenta-corriente.js";
 import QRCode from "qrcode";
 import { randomUUID } from "node:crypto";
 import {
@@ -230,21 +231,25 @@ clubpayWebhookRouter.post("/pago", async (req, res, next) => {
 
     // Si el pago ya estaba registrado no se inserta nada y, sobre todo, no se
     // vuelve a descontar del saldo.
+    const periodo = await periodoAbierto(client, commerceId, customerId);
     const { rows: insertadas } = await client.query(
       `INSERT INTO customer_transactions
          (commerce_id, customer_id, type, amount, note, payment_method,
-          cash_session_id, clubpay_payment_id)
-       VALUES ($1, $2, 'payment', $3, 'Pago desde ClubPay', 'clubpay', $4, $5)
+          cash_session_id, clubpay_payment_id, period_id)
+       VALUES ($1, $2, 'payment', $3, 'Pago desde ClubPay', 'clubpay', $4, $5, $6)
        ON CONFLICT (clubpay_payment_id) WHERE clubpay_payment_id IS NOT NULL
        DO NOTHING
        RETURNING id`,
-      [commerceId, customerId, -monto, sesion?.id ?? null, body.clubpay_payment_id]
+      [commerceId, customerId, -monto, sesion?.id ?? null, body.clubpay_payment_id, periodo.id]
     );
 
     if (insertadas[0]) {
       await client.query("UPDATE customers SET balance = balance - $1 WHERE id = $2", [
         monto, customerId,
       ]);
+      // Un pago desde la app se imputa igual que uno del mostrador: al resumen
+      // más viejo primero. Acá no hay comerciante para elegir otro.
+      await imputarPago(client, commerceId, customerId, Number(insertadas[0].id), monto);
     }
     await client.query("COMMIT");
 
