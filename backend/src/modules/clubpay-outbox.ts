@@ -1,10 +1,13 @@
 import type { PoolClient } from "pg";
 import { pool } from "../db.js";
+import { statementId } from "./cuenta-corriente.js";
 import {
   aCentavos,
   empujarMovimiento,
   isMockMode,
   vincularCliente,
+  consultarVinculacion,
+  empujarResumen,
   vinculacionAceptada,
   type MovimientoKind,
 } from "../integrations/clubpay.js";
@@ -48,6 +51,8 @@ interface Aviso {
   /** En pesos y con signo: positivo aumenta la deuda, negativo la baja */
   amount: number;
   description: string;
+  /** El período al que cae, para que ClubPay lo cuelgue del resumen */
+  periodId?: number;
 }
 
 /**
@@ -76,6 +81,9 @@ export async function encolarMovimiento(client: PoolClient, aviso: Aviso): Promi
     amount_cents: aCentavos(aviso.amount),
     occurred_at: new Date().toISOString(),
     description: aviso.description,
+    // A qué resumen pertenece. Del lado de ClubPay el total del resumen es la
+    // verdad del período y estos movimientos son su detalle: no suman.
+    ...(aviso.periodId ? { statement_id: statementId(aviso.periodId) } : {}),
   };
 
   await client.query(
@@ -142,6 +150,7 @@ export function iniciarOutbox(): void {
   // cada MINUTOS_ENTRE_CONSULTAS, no una vez por minuto.
   setInterval(() => {
     refrescarPendientes().catch((err) => console.error("[clubpay] vinculaciones:", err));
+    despacharResumenes().catch((err) => console.error("[clubpay] resúmenes:", err));
   }, 60_000).unref();
 }
 
@@ -189,13 +198,19 @@ export async function refrescarVinculacion(
   if (!cliente?.doc_number) return null;
 
   try {
-    const r = await vincularCliente(cliente.clubpay_api_key ?? "", {
-      dni: cliente.doc_number,
-      externalId: `CLI-${customerId}`,
-    });
+    /*
+     * Consulta de solo lectura: no propone nada y no manda el DNI.
+     *
+     * Antes se llamaba a la ruta que escribe, porque era la única que había, y
+     * escribir implica mandar el documento. Así el DNI viaja una sola vez en la
+     * vida de la relación —cuando se propone— que es lo que dice el acuerdo.
+     */
+    const r = await consultarVinculacion(cliente.clubpay_api_key ?? "", `CLI-${customerId}`);
     await pool.query(
-      "UPDATE customers SET clubpay_status = $1, clubpay_checked_at = now() WHERE id = $2",
-      [r.status, customerId]
+      `UPDATE customers SET clubpay_status = $1, clubpay_checked_at = now(),
+              clubpay_account_id = COALESCE($3, clubpay_account_id)
+        WHERE id = $2`,
+      [r.status, customerId, r.account_id ?? null]
     );
     // Recién aceptada: lo que se vendió mientras esperábamos no se había
     // encolado, y sin esto no lo vería nunca.
@@ -213,9 +228,9 @@ export async function refrescarVinculacion(
 }
 
 /** Encola los movimientos recientes que quedaron sin avisar */
-async function recuperarMovimientos(commerceId: number, customerId: number): Promise<number> {
+export async function recuperarMovimientos(commerceId: number, customerId: number): Promise<number> {
   const { rows } = await pool.query(
-    `SELECT t.id, t.type, t.amount, t.note, t.created_at
+    `SELECT t.id, t.type, t.amount, t.note, t.created_at, t.period_id
        FROM customer_transactions t
        LEFT JOIN clubpay_outbox o ON o.transaction_id = t.id
       WHERE t.customer_id = $1 AND t.commerce_id = $2
@@ -239,6 +254,7 @@ async function recuperarMovimientos(commerceId: number, customerId: number): Pro
         // esto y si mintiéramos aparecerían todos juntos al final.
         occurred_at: new Date(t.created_at).toISOString(),
         description: t.note ?? "",
+        ...(t.period_id ? { statement_id: statementId(Number(t.period_id)) } : {}),
       }]
     );
   }
@@ -266,4 +282,61 @@ export async function refrescarPendientes(): Promise<void> {
   for (const c of rows) {
     await refrescarVinculacion(Number(c.commerce_id), Number(c.id));
   }
+}
+
+// ── Los resúmenes ───────────────────────────────────────────────────────────
+
+/**
+ * Manda a ClubPay los resúmenes cerrados que cambiaron desde el último envío.
+ *
+ * No alcanza con avisar el cierre una vez. ClubPay no puede saber cuánto se
+ * pagó de un resumen: ve los pagos que salieron por su app, no los que la
+ * persona hizo en efectivo en el mostrador, que en el fiado de pueblo son la
+ * mayoría. Un resumen que dice "debés $47.300" cuando ya pagó $20.000 en
+ * efectivo es peor que no mostrar nada.
+ *
+ * Por eso se reenvía cada vez que cambia lo pagado. Su endpoint es idempotente
+ * por statement_id justamente para esto.
+ */
+export async function despacharResumenes(): Promise<number> {
+  const { rows } = await pool.query(
+    `SELECT p.id, p.customer_id, p.label, p.period_start, p.period_end,
+            p.total, p.paid, p.due_date, p.closed_at, co.clubpay_api_key
+       FROM account_periods p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN commerces co ON co.id = p.commerce_id
+      WHERE p.status <> 'abierto'
+        AND (p.clubpay_synced_at IS NULL OR p.clubpay_synced_at < p.updated_at)
+        AND c.clubpay_status IN ('vinculada', 'aceptada')
+      ORDER BY p.updated_at
+      LIMIT 50`
+  );
+
+  const fecha = (v: unknown): string | null =>
+    v ? new Date(v as string).toISOString().slice(0, 10) : null;
+
+  let enviados = 0;
+  for (const p of rows) {
+    try {
+      await empujarResumen(p.clubpay_api_key ?? "", {
+        external_id: `CLI-${p.customer_id}`,
+        statement_id: statementId(Number(p.id)),
+        label: p.label,
+        period_start: fecha(p.period_start)!,
+        period_end: fecha(p.period_end)!,
+        total_cents: aCentavos(Number(p.total)),
+        paid_cents: aCentavos(Number(p.paid)),
+        due_date: fecha(p.due_date),
+        closed_at: p.closed_at ? new Date(p.closed_at).toISOString() : null,
+      });
+      await pool.query("UPDATE account_periods SET clubpay_synced_at = now() WHERE id = $1", [p.id]);
+      enviados++;
+    } catch (err) {
+      // No se marca como sincronizado: la próxima vuelta lo reintenta. No hace
+      // falta backoff propio —son pocos y el intervalo ya es de un minuto—.
+      console.error(`[clubpay] resumen ${statementId(Number(p.id))}:`,
+        err instanceof Error ? err.message : err);
+    }
+  }
+  return enviados;
 }

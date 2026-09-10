@@ -23,6 +23,9 @@ type Ejecutor = PoolClient | typeof pool;
  *   Mismo número, significados opuestos.
  */
 
+/** Cómo se llama este resumen para ClubPay */
+export const statementId = (periodId: number): string => `nexopos-per-${periodId}`;
+
 export interface Periodo {
   id: number;
   label: string;
@@ -140,7 +143,8 @@ export async function cerrarPeriodo(db: Ejecutor, periodId: number, cfg: ConfigC
 
   await db.query(
     `UPDATE account_periods
-        SET status = $2, total = $3, paid = $4, closed_at = now(), due_date = $5
+        SET status = $2, total = $3, paid = $4, closed_at = now(), due_date = $5,
+            updated_at = now()
       WHERE id = $1`,
     [periodId, estado, total, pagado, vencimientoDe(fin, cfg.closing_day, cfg.due_day)]
   );
@@ -197,11 +201,12 @@ export async function imputarPago(
     // A un período abierto se le toca `paid` y nunca `status`: si dejara de
     // estar abierto, las compras de hoy no tendrían dónde caer.
     if (p.status === "abierto") {
-      await db.query("UPDATE account_periods SET paid = $2 WHERE id = $1", [p.id, pagadoNuevo]);
+      await db.query("UPDATE account_periods SET paid = $2, updated_at = now() WHERE id = $1", [p.id, pagadoNuevo]);
     } else {
       await db.query(
         `UPDATE account_periods
-            SET paid = $2, status = CASE WHEN $2 >= total THEN 'pagado' ELSE 'pagado_parcial' END
+            SET paid = $2, updated_at = now(),
+                status = CASE WHEN $2 >= total THEN 'pagado' ELSE 'pagado_parcial' END
           WHERE id = $1`,
         [p.id, pagadoNuevo]
       );

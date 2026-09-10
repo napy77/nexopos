@@ -5,6 +5,7 @@ import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { sesionAbierta } from "./caja.js";
 import { periodoAbierto, imputarPago } from "./cuenta-corriente.js";
+import { recuperarMovimientos } from "./clubpay-outbox.js";
 import QRCode from "qrcode";
 import { randomUUID } from "node:crypto";
 import {
@@ -265,5 +266,68 @@ clubpayWebhookRouter.post("/pago", async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+// ── La persona contestó la propuesta de vinculación ─────────────────────────
+
+const vinculacionSchema = z.object({
+  external_id: z.string().min(1),
+  status: z.enum(["vinculada", "rechazada"]),
+  /** Solo viene con la relación aceptada. Es de la relación, no de la persona. */
+  account_id: z.string().optional(),
+});
+
+/**
+ * POST /api/clubpay/webhook/vinculacion
+ *
+ * Cierra el agujero que nos obligaba a preguntar cada diez minutos: la persona
+ * tocaba "aceptar" en su teléfono y de este lado no pasaba nada, así que el POS
+ * seguía creyendo que estaba pendiente y no le mandaba sus movimientos —justo
+ * lo que ella acababa de pedir ver—.
+ *
+ * **El rechazo importa tanto como la aceptación**, y es un agregado de ClubPay
+ * sobre lo que habíamos pedido: alguien que dice "esa cuenta no es mía" casi
+ * siempre significa que en el mostrador se tipeó un dígito de más y esa cuenta
+ * corriente quedó apuntando a otra persona. Es la segunda mano de la defensa
+ * contra un match equivocado de DNI.
+ */
+clubpayWebhookRouter.post("/vinculacion", async (req, res, next) => {
+  try {
+    const apiKey = req.header("X-API-Key") ?? "";
+    if (!apiKey) throw new HttpError(401, "Falta la clave del comercio");
+    const body = vinculacionSchema.parse(req.body);
+
+    const { rows: comercios } = await pool.query(
+      "SELECT id FROM commerces WHERE clubpay_api_key = $1",
+      [apiKey]
+    );
+    if (!comercios[0]) throw new HttpError(401, "Clave desconocida");
+    const commerceId = Number(comercios[0].id);
+
+    const customerId = Number(body.external_id.replace(/^CLI-/, ""));
+    if (!Number.isInteger(customerId)) throw new HttpError(400, "external_id inválido");
+
+    const { rows } = await pool.query(
+      `UPDATE customers SET clubpay_status = $3, clubpay_checked_at = now(),
+              clubpay_account_id = COALESCE($4, clubpay_account_id)
+        WHERE id = $1 AND commerce_id = $2
+        RETURNING id`,
+      [customerId, commerceId, body.status, body.account_id ?? null]
+    );
+    if (!rows[0]) throw new HttpError(404, "Cliente no encontrado");
+
+    // Aceptó: lo que se le vendió mientras esperábamos no se había encolado,
+    // porque no se le mandan movimientos a quien todavía no dijo que sí.
+    if (body.status === "vinculada") {
+      const recuperados = await recuperarMovimientos(commerceId, customerId);
+      if (recuperados > 0) {
+        console.log(`[clubpay] CLI-${customerId} aceptó: se recuperaron ${recuperados} movimientos`);
+      }
+    }
+    await audit(commerceId, "clubpay.vinculacion", "customers", customerId, { status: body.status });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
   }
 });

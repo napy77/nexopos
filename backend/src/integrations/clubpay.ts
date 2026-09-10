@@ -507,3 +507,45 @@ export async function empujarMovimiento(apiKey: string, mov: MovimientoCuenta): 
   }
   await api<unknown>("/pos/account/movements", apiKey, mov);
 }
+
+/**
+ * Consulta en qué quedó una vinculación, sin proponer nada y sin mandar DNI.
+ *
+ * Es la ruta que pedimos y que resuelve el problema de fondo: hasta ahora, para
+ * saber el estado había que volver a llamar a la que escribe, y escribir
+ * implica mandar el documento. Con esto el DNI viaja una sola vez en la vida de
+ * la relación, que es lo que dice el acuerdo.
+ */
+export async function consultarVinculacion(
+  apiKey: string,
+  externalId: string
+): Promise<VinculacionCliente & { account_id?: string }> {
+  if (isMockMode()) {
+    return { encontrado: true, status: "propuesta", persona: "Germán Yovan" };
+  }
+  return apiGet<VinculacionCliente & { account_id?: string }>(
+    `/pos/customers/${encodeURIComponent(externalId)}`,
+    apiKey
+  );
+}
+
+/** Un resumen cerrado. Se reenvía cada vez que cambia lo pagado. */
+export interface ResumenCuenta {
+  external_id: string;
+  statement_id: string;
+  label: string;
+  period_start: string;
+  period_end: string;
+  total_cents: number;
+  paid_cents: number;
+  due_date: string | null;
+  closed_at: string | null;
+}
+
+export async function empujarResumen(apiKey: string, resumen: ResumenCuenta): Promise<void> {
+  if (isMockMode()) {
+    console.log(`[clubpay:mock] resumen ${resumen.statement_id} total ${resumen.total_cents} pagado ${resumen.paid_cents} → ${resumen.external_id}`);
+    return;
+  }
+  await api<unknown>("/pos/account/statements", apiKey, resumen);
+}

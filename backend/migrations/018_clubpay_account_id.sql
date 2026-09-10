@@ -1,0 +1,12 @@
+-- El id que devuelve ClubPay es de la RELACIÓN, no de la persona.
+--
+-- Habíamos pedido un person_id compartido entre comercios y ClubPay contestó
+-- que no, con un argumento mejor que el nuestro: un id estable por ser humano
+-- deja que dos comercios crucen sus listas y descubran que son el mismo
+-- cliente. Hoy no pueden —cada uno conoce los DNI de su propia gente y nada
+-- más—, y un id compartido abriría esa puerta sin que nadie la haya pedido.
+--
+-- Con account_id distinto por comercio sirve igual para lo que lo necesitamos
+-- —saber en qué quedó una vinculación, conciliar, recibir avisos— y no sirve
+-- para cruzar clientes. Se renombra la columna para que diga lo que guarda.
+ALTER TABLE customers RENAME COLUMN clubpay_person_id TO clubpay_account_id;
