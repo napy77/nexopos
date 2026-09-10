@@ -7,7 +7,7 @@ import { sesionAbierta } from "./caja.js";
 import { clubpayKey } from "./clubpay.js";
 import { vincularCliente } from "../integrations/clubpay.js";
 import { encolarMovimiento, refrescarVinculacion } from "./clubpay-outbox.js";
-import { periodoAbierto, imputarPago, pilaDe } from "./cuenta-corriente.js";
+import { periodoAbierto, imputarPago, pilaDe, estadoCredito, ritmoDePago } from "./cuenta-corriente.js";
 
 export const customersRouter = Router();
 
@@ -172,8 +172,12 @@ customersRouter.get("/:id/transactions", async (req, res, next) => {
        FROM customer_transactions WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 200`,
       [customers[0].id]
     );
-    const { periods } = await pilaDe(req.auth.commerceId, Number(customers[0].id));
-    res.json({ customer: customers[0], transactions, periods });
+    const [{ periods }, credito, ritmo] = await Promise.all([
+      pilaDe(req.auth.commerceId, Number(customers[0].id)),
+      estadoCredito(pool, req.auth.commerceId, Number(customers[0].id)),
+      ritmoDePago(req.auth.commerceId, Number(customers[0].id)),
+    ]);
+    res.json({ customer: customers[0], transactions, periods, credito, ritmo });
   } catch (err) {
     next(err);
   }
@@ -241,5 +245,38 @@ customersRouter.post("/:id/payments", async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+const creditoSchema = z.object({
+  /** null saca el límite. Sin límite es el default: así funciona el cuaderno. */
+  creditLimit: z.coerce.number().nonnegative().nullable().optional(),
+  creditPaused: z.boolean().optional(),
+});
+
+/**
+ * PUT /api/customers/:id/credito — el límite y la pausa.
+ *
+ * Decidir tiene que costar un toque: es un switch en la ficha, no un formulario
+ * de configuración. Y la decisión es del comerciante siempre — el sistema puede
+ * sugerirle que pause a alguien con dos cierres impagos, nunca hacerlo solo.
+ */
+customersRouter.put("/:id/credito", async (req, res, next) => {
+  try {
+    const body = creditoSchema.parse(req.body);
+    const id = Number(req.params.id);
+    const { rowCount } = await pool.query(
+      `UPDATE customers SET
+         credit_limit = CASE WHEN $3::boolean THEN $4 ELSE credit_limit END,
+         credit_paused = COALESCE($5, credit_paused)
+       WHERE id = $1 AND commerce_id = $2`,
+      [id, req.auth.commerceId, body.creditLimit !== undefined,
+       body.creditLimit ?? null, body.creditPaused ?? null]
+    );
+    if (rowCount === 0) throw new HttpError(404, "Cliente no encontrado");
+    await audit(req.auth.commerceId, "customer.credito", "customers", id, body);
+    res.json(await estadoCredito(pool, req.auth.commerceId, id));
+  } catch (err) {
+    next(err);
   }
 });

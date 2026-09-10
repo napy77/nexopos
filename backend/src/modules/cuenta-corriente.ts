@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { pool } from "../db.js";
-import { hoy, partes, diaDelMes, correrMes, sumarDias, etiquetaPeriodo } from "../lib/fechas.js";
+import { HttpError } from "../middleware/error.js";
+import { hoy, partes, diaDelMes, correrMes, sumarDias, etiquetaPeriodo, ZONA } from "../lib/fechas.js";
 
 type Ejecutor = PoolClient | typeof pool;
 
@@ -252,5 +253,88 @@ function aPeriodo(r: Record<string, unknown>): Periodo {
     dueDate: r.due_date ? fecha(r.due_date) : null,
     total: Number(r.total),
     paid: Number(r.paid),
+  };
+}
+
+// ── Si se puede fiar, y cuánto ──────────────────────────────────────────────
+
+export interface EstadoCredito {
+  /** Lo que la persona puede seguir comprando. Se muestra así, nunca el tope. */
+  disponible: number | null;
+  limite: number | null;
+  pausado: boolean;
+  /** El comercio habilitó la compra a cuenta desde la tienda online */
+  onlineHabilitado: boolean;
+  saldo: number;
+}
+
+/**
+ * Por qué "Disponible: $18.000" y nunca "Tu límite es $20.000".
+ *
+ * Es el mismo número y son dos objetos sociales distintos: uno es un saldo, el
+ * otro es una calificación. En un pueblo donde Juan se entera de que tiene 20 y
+ * su primo tiene 80, la segunda versión trae un problema que no necesitamos.
+ *
+ * `disponible: null` es sin límite, y es el default: el cuaderno no tiene tope,
+ * y ponerle uno a todo el mundo el día que se enciende esto sería cambiarle las
+ * reglas a relaciones que ya existen.
+ */
+export async function estadoCredito(
+  db: Ejecutor,
+  commerceId: number,
+  customerId: number
+): Promise<EstadoCredito> {
+  const { rows } = await db.query(
+    `SELECT c.balance, c.credit_limit, c.credit_paused, co.online_credit_enabled
+       FROM customers c JOIN commerces co ON co.id = c.commerce_id
+      WHERE c.id = $1 AND c.commerce_id = $2`,
+    [customerId, commerceId]
+  );
+  const r = rows[0];
+  if (!r) throw new HttpError(404, "Cliente no encontrado");
+  const saldo = Number(r.balance);
+  const limite = r.credit_limit === null ? null : Number(r.credit_limit);
+  return {
+    saldo,
+    limite,
+    disponible: limite === null ? null : Math.round((limite - saldo) * 100) / 100,
+    pausado: r.credit_paused,
+    onlineHabilitado: r.online_credit_enabled,
+  };
+}
+
+/**
+ * El ritmo de pago de este cliente con este comercio.
+ *
+ * Describe, no califica. "Pagó 6 de 6 cierres, en promedio el día 9" es un
+ * hecho de los datos del comerciante sobre su propio cliente y lo ayuda a
+ * decidir; un puntaje decidiría por él.
+ *
+ * Sin resúmenes cerrados devuelve null en vez de un cero o un "sin datos"
+ * disfrazado de dato: si no se puede respaldar, no se afirma.
+ */
+export async function ritmoDePago(
+  commerceId: number,
+  customerId: number
+): Promise<{ cerrados: number; pagados: number; diaPromedio: number | null } | null> {
+  const { rows } = await pool.query(
+    `SELECT p.id, p.status,
+            (SELECT MAX(ap.created_at) FROM account_payments ap WHERE ap.period_id = p.id) AS ultimo_pago
+       FROM account_periods p
+      WHERE p.commerce_id = $1 AND p.customer_id = $2 AND p.status <> 'abierto'`,
+    [commerceId, customerId]
+  );
+  if (rows.length === 0) return null;
+
+  const pagados = rows.filter((r) => r.status === "pagado");
+  const dias = pagados
+    .filter((r) => r.ultimo_pago)
+    .map((r) => new Date(r.ultimo_pago).toLocaleDateString("en-CA", { timeZone: ZONA }))
+    .map((f) => partes(f).dia);
+
+  return {
+    cerrados: rows.length,
+    pagados: pagados.length,
+    diaPromedio: dias.length > 0 ? Math.round(dias.reduce((a, b) => a + b, 0) / dias.length) : null,
   };
 }

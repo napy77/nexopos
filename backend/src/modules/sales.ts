@@ -9,7 +9,7 @@ import { registrarTransaccion, consultarCharge, aCentavos, aPesos, RECORTE_TEXTO
 import { clubpayKey } from "./clubpay.js";
 import { encolarMovimiento } from "./clubpay-outbox.js";
 import { descontarCupo } from "./disponibilidad.js";
-import { periodoAbierto } from "./cuenta-corriente.js";
+import { periodoAbierto, estadoCredito } from "./cuenta-corriente.js";
 
 export const salesRouter = Router();
 
@@ -238,6 +238,19 @@ salesRouter.post("/", async (req, res, next) => {
         [body.customerId, commerceId]
       );
       if (!custRows[0]) throw new HttpError(404, "Cliente no encontrado");
+
+      /*
+       * La pausa bloquea el fiado y nada más. El mensaje se lo lee el cajero a
+       * la persona que tiene delante, así que dice cómo seguir en vez de
+       * cerrarle la puerta: se pausó el crédito, no el comercio.
+       *
+       * Volver a habilitarlo es un toque en la ficha, sin salir de acá.
+       */
+      const credito = await estadoCredito(client, commerceId, body.customerId);
+      if (credito.pausado) {
+        throw new HttpError(409,
+          "La cuenta corriente de este cliente está pausada. Se puede cobrar de otra forma, o reactivarla desde su ficha.");
+      }
       // Toda compra fiada cae en el período abierto. Si el anterior venció, se
       // cierra acá: así el resumen que ya se le mostró a alguien no cambia
       // porque llegó una venta nueva.

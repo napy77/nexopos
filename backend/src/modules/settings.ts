@@ -83,19 +83,25 @@ const cuentaSchema = z.object({
   dueDay: z.coerce.number().int().min(1).max(31).optional(),
   /** Un comercio puede estar en el POS y no tener tienda publicada. */
   nexotiendaEnabled: z.boolean().optional(),
+  /**
+   * Fiado desde la tienda online. Apagado por default, para el comerciante
+   * conservador que quiere entrar sin abrir de una la compra fiada desde casa.
+   */
+  onlineCreditEnabled: z.boolean().optional(),
 });
 
 /** GET /api/settings/cuenta-corriente */
 settingsRouter.get("/cuenta-corriente", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      "SELECT closing_day, due_day, nexotienda_enabled FROM commerces WHERE id = $1",
+      "SELECT closing_day, due_day, nexotienda_enabled, online_credit_enabled FROM commerces WHERE id = $1",
       [req.auth.commerceId]
     );
     res.json({
       closingDay: Number(rows[0].closing_day),
       dueDay: Number(rows[0].due_day),
       nexotiendaEnabled: rows[0].nexotienda_enabled,
+      onlineCreditEnabled: rows[0].online_credit_enabled,
     });
   } catch (err) {
     next(err);
@@ -110,17 +116,19 @@ settingsRouter.put("/cuenta-corriente", async (req, res, next) => {
       `UPDATE commerces SET
          closing_day = COALESCE($2, closing_day),
          due_day = COALESCE($3, due_day),
-         nexotienda_enabled = COALESCE($4, nexotienda_enabled)
+         nexotienda_enabled = COALESCE($4, nexotienda_enabled),
+         online_credit_enabled = COALESCE($5, online_credit_enabled)
        WHERE id = $1
-       RETURNING closing_day, due_day, nexotienda_enabled`,
+       RETURNING closing_day, due_day, nexotienda_enabled, online_credit_enabled`,
       [req.auth.commerceId, body.closingDay ?? null, body.dueDay ?? null,
-       body.nexotiendaEnabled ?? null]
+       body.nexotiendaEnabled ?? null, body.onlineCreditEnabled ?? null]
     );
     await audit(req.auth.commerceId, "settings.cuenta-corriente", "commerces", req.auth.commerceId, body);
     res.json({
       closingDay: Number(rows[0].closing_day),
       dueDay: Number(rows[0].due_day),
       nexotiendaEnabled: rows[0].nexotienda_enabled,
+      onlineCreditEnabled: rows[0].online_credit_enabled,
     });
   } catch (err) {
     next(err);
