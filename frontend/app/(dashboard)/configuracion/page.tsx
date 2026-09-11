@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import {
   loadPrintSettings, savePrintSettings, printTicket,
@@ -667,74 +667,94 @@ const ORDEN_DIAS = [1, 2, 3, 4, 5, 6, 0];
  * El horario, con dos tramos por día.
  *
  * Dos y no uno porque el almacén cierra al mediodía, que es el caso normal.
- * Y con "copiar al resto de la semana" porque cargar siete días a mano es
- * exactamente la fricción que hace que el comerciante lo deje sin completar —y
- * sin horario la tienda no puede decir si está abierta.
+ *
+ * **Los inputs van sin controlar, a propósito.** Un `input type="time"`
+ * controlado por estado pierde lo que se tipea: mientras la hora está a medias
+ * el navegador reporta valor vacío, el re-render lo pisa y el campo vuelve a
+ * `--:--` en la cara del que está escribiendo. Acá el DOM manda mientras se
+ * edita y se lee al guardar, que es como funcionan los campos nativos de hora.
+ *
+ * El `key` sobre el contenedor es lo que hace que los valores se refresquen
+ * cuando el horario cambió por otra vía —guardar, o copiar la semana—: sin él,
+ * los `defaultValue` quedarían pegados al primer render.
  */
 function Horario({ tramos, onGuardar }: { tramos: Tramo[]; onGuardar: (t: Tramo[]) => void }) {
+  const caja = useRef<HTMLDivElement>(null);
+  const [aviso, setAviso] = useState("");
+
   const porDia = (dia: number, n: number) =>
     tramos.filter((t) => t.dia === dia).sort((a, b) => a.desde.localeCompare(b.desde))[n];
 
-  const [borrador, setBorrador] = useState<Record<string, string>>({});
-  const valor = (dia: number, n: number, campo: "desde" | "hasta") =>
-    borrador[`${dia}-${n}-${campo}`] ?? porDia(dia, n)?.[campo] ?? "";
-
-  function armar(cambios: Record<string, string>): Tramo[] {
+  /** Lo que hay escrito ahora mismo en la pantalla */
+  function leer(): Tramo[] {
     const out: Tramo[] = [];
     for (const dia of ORDEN_DIAS) {
       for (const n of [0, 1]) {
-        const d = cambios[`${dia}-${n}-desde`] ?? porDia(dia, n)?.desde ?? "";
-        const h = cambios[`${dia}-${n}-hasta`] ?? porDia(dia, n)?.hasta ?? "";
+        const d = caja.current?.querySelector<HTMLInputElement>(`[data-k="${dia}-${n}-desde"]`)?.value ?? "";
+        const h = caja.current?.querySelector<HTMLInputElement>(`[data-k="${dia}-${n}-hasta"]`)?.value ?? "";
         if (d && h) out.push({ dia, desde: d, hasta: h });
       }
     }
     return out;
   }
 
-  const set = (dia: number, n: number, campo: string, v: string) =>
-    setBorrador((b) => ({ ...b, [`${dia}-${n}-${campo}`]: v }));
-
-  /** Lo que tiene el lunes, para todos los días hábiles */
-  function copiarSemana() {
-    const base = [0, 1].map((n) => ({
-      desde: valor(1, n, "desde"), hasta: valor(1, n, "hasta"),
-    })).filter((t) => t.desde && t.hasta);
-    const out: Tramo[] = [];
-    for (const dia of [1, 2, 3, 4, 5, 6]) for (const t of base) out.push({ dia, ...t });
-    const domingo = tramos.filter((t) => t.dia === 0);
-    setBorrador({});
-    onGuardar([...out, ...domingo]);
+  function guardar() {
+    setAviso("");
+    onGuardar(leer());
   }
 
-  const hay = Object.keys(borrador).length > 0;
+  /**
+   * Copiar el lunes al resto de la semana, porque cargar seis días a mano es
+   * la fricción que hace que el horario quede sin completar.
+   *
+   * Si el lunes está vacío no hace nada y lo dice. Antes guardaba la lista
+   * vacía y borraba todo el horario de un toque, sin preguntar.
+   */
+  function copiarSemana() {
+    const actual = leer();
+    const base = actual.filter((t) => t.dia === 1);
+    if (base.length === 0) {
+      setAviso("Cargá primero el horario del lunes y después copialo.");
+      return;
+    }
+    const resto = actual.filter((t) => t.dia === 0);
+    const out: Tramo[] = [];
+    for (const dia of [1, 2, 3, 4, 5, 6]) {
+      for (const t of base) out.push({ dia, desde: t.desde, hasta: t.hasta });
+    }
+    setAviso("");
+    onGuardar([...out, ...resto]);
+  }
 
   return (
     <div>
-      <table style={{ fontSize: 12 }}>
-        <tbody>
-          {ORDEN_DIAS.map((dia) => (
-            <tr key={dia}>
-              <td style={{ width: 80 }}>{NOMBRE_DIA[dia]}</td>
-              {[0, 1].map((n) => (
-                <td key={n}>
-                  <input type="time" value={valor(dia, n, "desde")} style={{ width: 92 }}
-                    onChange={(ev) => set(dia, n, "desde", ev.target.value)} />
-                  <span className="muted"> a </span>
-                  <input type="time" value={valor(dia, n, "hasta")} style={{ width: 92 }}
-                    onChange={(ev) => set(dia, n, "hasta", ev.target.value)} />
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-        <button type="button" onClick={() => { onGuardar(armar(borrador)); setBorrador({}); }} disabled={!hay}>
-          Guardar horario
-        </button>
+      {/* El key rearma los campos cuando el horario cambió por otra vía */}
+      <div ref={caja} key={JSON.stringify(tramos)}>
+        <table style={{ fontSize: 12 }}>
+          <tbody>
+            {ORDEN_DIAS.map((dia) => (
+              <tr key={dia}>
+                <td style={{ width: 80 }}>{NOMBRE_DIA[dia]}</td>
+                {[0, 1].map((n) => (
+                  <td key={n}>
+                    <input type="time" data-k={`${dia}-${n}-desde`} style={{ width: 92 }}
+                      defaultValue={porDia(dia, n)?.desde ?? ""} />
+                    <span className="muted"> a </span>
+                    <input type="time" data-k={`${dia}-${n}-hasta`} style={{ width: 92 }}
+                      defaultValue={porDia(dia, n)?.hasta ?? ""} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <button type="button" onClick={guardar}>Guardar horario</button>
         <button type="button" className="ghost" onClick={copiarSemana}>
           Copiar el lunes al resto de la semana
         </button>
+        {aviso && <span className="muted" style={{ fontSize: 12 }}>{aviso}</span>}
       </div>
     </div>
   );
