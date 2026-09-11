@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { isMockMode } from "../integrations/clubpay.js";
+import { formaDelSlug, sugerirSlug } from "../lib/slug.js";
 
 export const settingsRouter = Router();
 
@@ -134,15 +135,21 @@ const tiendaSchema = z.object({
   }).optional(),
 });
 
-const COLUMNAS = `nexotienda_enabled, pay_on_delivery_enabled, transfer_enabled,
+const COLUMNAS = `slug, name, nexotienda_enabled, pay_on_delivery_enabled, transfer_enabled,
                   transfer_alias, transfer_holder, clubpay_pay_enabled,
                   online_credit_enabled, pickup_enabled, own_delivery_enabled,
                   clubpay_api_key`;
 
-function armarTienda(r: Record<string, unknown>) {
+function armarTienda(r: Record<string, unknown>, regiones: unknown[] = []) {
   const clubpayListo = Boolean(r.clubpay_api_key) || isMockMode();
+  const slug = (r.slug as string | null) ?? null;
   return {
     habilitada: r.nexotienda_enabled,
+    slug,
+    /** La propuesta, para que la acepte o la cambie */
+    slugSugerido: sugerirSlug(String(r.name ?? "")),
+    direccion: slug ? `https://${slug}.nexotienda.app` : null,
+    regiones,
     pagos: {
       contraEntrega: r.pay_on_delivery_enabled,
       transferencia: r.transfer_enabled,
@@ -174,7 +181,7 @@ settingsRouter.get("/nexotienda", async (req, res, next) => {
       `SELECT ${COLUMNAS} FROM commerces WHERE id = $1`,
       [req.auth.commerceId]
     );
-    res.json(armarTienda(rows[0]));
+    res.json(armarTienda(rows[0], await regionesDe(req.auth.commerceId)));
   } catch (err) {
     next(err);
   }
@@ -226,6 +233,10 @@ settingsRouter.put("/nexotienda", async (req, res, next) => {
     // pedidos que no se pueden cerrar. Se bloquea al publicar y no al apagar
     // el último switch: el comerciante puede estar en el medio de reordenar.
     if (nuevo.habilitada) {
+      // Sin slug no hay dirección: la tienda existiría sin lugar donde abrirla.
+      if (!antes.slug) {
+        throw new HttpError(400, "Elegí la dirección de tu tienda antes de publicarla.");
+      }
       const pagos = [nuevo.contraEntrega, nuevo.transferencia, nuevo.clubpay, nuevo.cuentaCorriente];
       if (!pagos.some(Boolean)) {
         throw new HttpError(400, "Elegí al menos una forma de pago antes de publicar la tienda.");
@@ -247,7 +258,114 @@ settingsRouter.put("/nexotienda", async (req, res, next) => {
        nuevo.retiro, nuevo.envioPropio]
     );
     await audit(commerceId, "settings.nexotienda", "commerces", commerceId, nuevo);
-    res.json(armarTienda(rows[0]));
+    res.json(armarTienda(rows[0], await regionesDe(commerceId)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── La dirección de la tienda ───────────────────────────────────────────────
+
+/**
+ * Las regiones a las que pertenece el comercio, con el switch de si aparece.
+ *
+ * Pertenecer y aparecer son dos decisiones distintas: la primera se deriva de
+ * su zona de reparto y la decide Nexo; la segunda la decide el comerciante y
+ * arranca apagada. Poner a dos supermercados del mismo pueblo uno al lado del
+ * otro con los precios a la vista es un objeto social distinto en un pueblo que
+ * en Amazon: los dos dueños se conocen.
+ */
+async function regionesDe(commerceId: number) {
+  const { rows } = await pool.query(
+    `SELECT r.slug, r.name, r.label, cr.aparece
+       FROM commerce_regions cr JOIN regions r ON r.slug = cr.region_slug
+      WHERE cr.commerce_id = $1 ORDER BY r.name`,
+    [commerceId]
+  );
+  return rows.map((r) => ({
+    slug: r.slug, nombre: r.name, label: r.label || r.name, aparece: r.aparece,
+  }));
+}
+
+const slugSchema = z.object({
+  slug: z.string().trim().toLowerCase().min(1),
+});
+
+/**
+ * PUT /api/settings/tienda-slug — el comerciante elige su dirección.
+ *
+ * Cambiarla rompe links, y acá los links viajan por WhatsApp: el estado del
+ * súper, el grupo del barrio, la señora que reenvía. Por eso el anterior no se
+ * libera —queda tomado para siempre— y NexoTienda lo sigue resolviendo con un
+ * redirect al nuevo. Reasignarlo le daría a otro comercio el tráfico del
+ * primero.
+ */
+settingsRouter.put("/tienda-slug", async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { slug } = slugSchema.parse(req.body);
+    const commerceId = req.auth.commerceId;
+
+    const forma = formaDelSlug(slug);
+    if (!forma.ok) throw new HttpError(400, forma.motivo!);
+
+    await client.query("BEGIN");
+    const { rows: actuales } = await client.query(
+      "SELECT slug FROM commerces WHERE id = $1 FOR UPDATE", [commerceId]
+    );
+    const anterior: string | null = actuales[0]?.slug ?? null;
+    if (anterior === slug) {
+      await client.query("COMMIT");
+      res.json({ slug, direccion: `https://${slug}.nexotienda.app` });
+      return;
+    }
+
+    // Contra los tres conjuntos. El propio anterior sí se puede retomar: es
+    // suyo, nadie más pudo haberlo agarrado.
+    const { rows: choques } = await client.query(
+      `SELECT 'Ya lo usa otro comercio' AS motivo FROM commerces WHERE slug = $1 AND id <> $2
+       UNION ALL
+       SELECT 'Lo usaba otro comercio antes' FROM commerce_previous_slugs
+        WHERE slug = $1 AND commerce_id <> $2
+       UNION ALL
+       SELECT 'Es la página de un pueblo' FROM regions WHERE slug = $1
+       LIMIT 1`,
+      [slug, commerceId]
+    );
+    if (choques[0]) throw new HttpError(409, `No se puede usar "${slug}": ${choques[0].motivo}.`);
+
+    if (anterior) {
+      await client.query(
+        `INSERT INTO commerce_previous_slugs (slug, commerce_id) VALUES ($1, $2)
+         ON CONFLICT (slug) DO NOTHING`,
+        [anterior, commerceId]
+      );
+    }
+    await client.query("UPDATE commerces SET slug = $2 WHERE id = $1", [commerceId, slug]);
+    await client.query("COMMIT");
+    await audit(commerceId, "settings.slug", "commerces", commerceId, { anterior, slug });
+    res.json({ slug, direccion: `https://${slug}.nexotienda.app`, anterior });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+/** PUT /api/settings/regiones/:slug — aparecer o no en la página del pueblo */
+settingsRouter.put("/regiones/:slug", async (req, res, next) => {
+  try {
+    const aparece = Boolean(req.body?.aparece);
+    const { rowCount } = await pool.query(
+      `UPDATE commerce_regions SET aparece = $3
+        WHERE commerce_id = $1 AND region_slug = $2`,
+      [req.auth.commerceId, String(req.params.slug), aparece]
+    );
+    if (rowCount === 0) throw new HttpError(404, "Este comercio no reparte en esa región.");
+    await audit(req.auth.commerceId, "settings.region", "commerces", req.auth.commerceId,
+      { region: req.params.slug, aparece });
+    res.json({ regiones: await regionesDe(req.auth.commerceId) });
   } catch (err) {
     next(err);
   }

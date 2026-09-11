@@ -15,8 +15,14 @@ interface Commerce {
 }
 interface Sale { id: number; ticket_number: number }
 
+interface Region { slug: string; nombre: string; label: string; aparece: boolean }
+
 interface Tienda {
   habilitada: boolean;
+  slug: string | null;
+  slugSugerido: string;
+  direccion: string | null;
+  regiones: Region[];
   pagos: {
     contraEntrega: boolean; transferencia: boolean;
     transferenciaAlias: string | null; transferenciaTitular: string | null;
@@ -48,6 +54,7 @@ export default function ConfiguracionPage() {
   const [tienda, setTienda] = useState<Tienda | null>(null);
   const [alias, setAlias] = useState("");
   const [titular, setTitular] = useState("");
+  const [slug, setSlug] = useState("");
 
   useEffect(() => {
     setSettings(loadPrintSettings());
@@ -61,7 +68,12 @@ export default function ConfiguracionPage() {
       .then((d) => { setCommerce(d.commerce); setMockMode(d.mockMode); })
       .catch(console.error);
     api<Tienda>("/api/settings/nexotienda")
-      .then((t) => { setTienda(t); setAlias(t.pagos.transferenciaAlias ?? ""); setTitular(t.pagos.transferenciaTitular ?? ""); })
+      .then((t) => {
+        setTienda(t);
+        setAlias(t.pagos.transferenciaAlias ?? "");
+        setTitular(t.pagos.transferenciaTitular ?? "");
+        setSlug(t.slug ?? t.slugSugerido);
+      })
       .catch(console.error);
     api<Sale[]>("/api/sales")
       .then((ventas) => setUltimaVenta(ventas[0] ?? null))
@@ -85,6 +97,31 @@ export default function ConfiguracionPage() {
       setError(err instanceof Error ? err.message : "No se pudo guardar");
       const actual = await api<Tienda>("/api/settings/nexotienda").catch(() => null);
       if (actual) setTienda(actual);
+    }
+  }
+
+  async function guardarSlug() {
+    setError(""); setMsg("");
+    try {
+      await api("/api/settings/tienda-slug", { method: "PUT", body: JSON.stringify({ slug }) });
+      const t = await api<Tienda>("/api/settings/nexotienda");
+      setTienda(t); setSlug(t.slug ?? "");
+      setMsg("Dirección guardada");
+      setTimeout(() => setMsg(""), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar la dirección");
+    }
+  }
+
+  async function guardarRegion(regionSlug: string, aparece: boolean) {
+    setError("");
+    try {
+      const r = await api<{ regiones: Region[] }>(`/api/settings/regiones/${regionSlug}`, {
+        method: "PUT", body: JSON.stringify({ aparece }),
+      });
+      setTienda((t) => (t ? { ...t, regiones: r.regiones } : t));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
     }
   }
 
@@ -352,7 +389,42 @@ export default function ConfiguracionPage() {
                   : "Mientras esté apagada, en NexoTienda aparecen tus datos pero no tu catálogo."}
               </p>
 
-              <h3 style={{ fontSize: 14, marginBottom: 6 }}>Cómo te pagan</h3>
+              <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>La dirección de tu tienda</h3>
+              <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                <input value={slug} onChange={(ev) => setSlug(ev.target.value.toLowerCase())}
+                  placeholder="mi-almacen" style={{ width: 150 }} />
+                <span className="muted" style={{ fontSize: 13 }}>.nexotienda.app</span>
+                <button type="button" className="ghost" onClick={guardarSlug}
+                  disabled={!slug || slug === tienda.slug}>Guardar</button>
+              </div>
+              {tienda.direccion ? (
+                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Tu tienda abre en <strong>{tienda.direccion}</strong>
+                </p>
+              ) : (
+                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Todavía no elegiste dirección. Sin ella no se puede publicar la tienda.
+                </p>
+              )}
+              {tienda.slug && (
+                <p className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                  Si la cambiás, los links que ya circularon van a seguir funcionando —te llevan a
+                  la nueva—, pero conviene no cambiarla seguido.
+                </p>
+              )}
+
+              {tienda.regiones.length > 0 && (
+                <>
+                  <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>La página de tu pueblo</h3>
+                  {tienda.regiones.map((r) => (
+                    <Switch key={r.slug} label={`Aparecer en ${r.label}`}
+                      ayuda={`${r.slug}.nexotienda.app`}
+                      on={r.aparece} set={(v) => guardarRegion(r.slug, v)} />
+                  ))}
+                </>
+              )}
+
+              <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>Cómo te pagan</h3>
               <Switch label="Pago contra entrega" ayuda="Paga cuando recibe el pedido o cuando pasa a retirarlo"
                 on={tienda.pagos.contraEntrega}
                 set={(v) => guardarTienda({ pagos: { contraEntrega: v } })} />
