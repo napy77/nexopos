@@ -19,6 +19,16 @@ export const config = {
     publicUrl:
       process.env.NEXOB2B_PUBLIC_URL || process.env.NEXOB2B_API_URL || "https://nexob2b.app",
   },
+  /**
+   * Clave que usan los otros sistemas de Nexo para hablarnos servidor a
+   * servidor. Hoy la usa el admin de B2B para verificar si un slug está libre
+   * antes de crear una región.
+   *
+   * Vacía deja los endpoints de plataforma cerrados: es preferible que B2B no
+   * pueda verificar —y no guarde la región— a que cualquiera pueda.
+   */
+  platformKey: process.env.NEXOPOS_PLATFORM_KEY || "",
+
   clubpay: {
     // Vacío → modo mock, con socios de prueba para el mostrador
     apiUrl: process.env.CLUBPAY_API_URL || "",
