@@ -135,7 +135,8 @@ const tiendaSchema = z.object({
   }).optional(),
 });
 
-const COLUMNAS = `slug, name, nexotienda_enabled, pay_on_delivery_enabled, transfer_enabled,
+const COLUMNAS = `slug, name, logo_url, banner_url, whatsapp, opening_hours,
+                  free_delivery_over, nexotienda_enabled, pay_on_delivery_enabled, transfer_enabled,
                   transfer_alias, transfer_holder, clubpay_pay_enabled,
                   online_credit_enabled, pickup_enabled, own_delivery_enabled,
                   clubpay_api_key`;
@@ -148,6 +149,11 @@ function armarTienda(r: Record<string, unknown>, regiones: unknown[] = []) {
     slug,
     /** La propuesta, para que la acepte o la cambie */
     slugSugerido: sugerirSlug(String(r.name ?? "")),
+    logoUrl: r.logo_url ?? null,
+    bannerUrl: r.banner_url ?? null,
+    whatsapp: r.whatsapp ?? null,
+    aclaracionHorario: r.opening_hours ?? null,
+    envioGratisDesde: r.free_delivery_over === null ? null : Number(r.free_delivery_over),
     direccion: slug ? `https://${slug}.nexotienda.app` : null,
     regiones,
     pagos: {
@@ -366,6 +372,167 @@ settingsRouter.put("/regiones/:slug", async (req, res, next) => {
     await audit(req.auth.commerceId, "settings.region", "commerces", req.auth.commerceId,
       { region: req.params.slug, aparece });
     res.json({ regiones: await regionesDe(req.auth.commerceId) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Lo que la tienda necesita y NexoB2B no tiene ────────────────────────────
+
+const perfilSchema = z.object({
+  /** Identifica al comercio en una lista. Cuadrado. */
+  logoUrl: z.string().nullable().optional(),
+  /** La cara de su tienda: la foto ancha de arriba. */
+  bannerUrl: z.string().nullable().optional(),
+  /** El número de atención al comprador, que puede no ser el de B2B */
+  whatsapp: z.string().trim().max(40).nullable().optional(),
+  /** "Feriados cerrado" y cosas así. El horario sale de los tramos. */
+  aclaracionHorario: z.string().trim().max(200).nullable().optional(),
+  envioGratisDesde: z.coerce.number().nonnegative().nullable().optional(),
+});
+
+/**
+ * PUT /api/settings/tienda-perfil
+ *
+ * Solo lo que B2B no tiene. La dirección, el teléfono y el rubro se editan
+ * allá y se copian al iniciar sesión: dos lugares donde cambiar la misma
+ * dirección terminan en dos direcciones distintas.
+ */
+settingsRouter.put("/tienda-perfil", async (req, res, next) => {
+  try {
+    const b = perfilSchema.parse(req.body);
+    const commerceId = req.auth.commerceId;
+    const { rows } = await pool.query(
+      `UPDATE commerces SET
+         logo_url = CASE WHEN $2::boolean THEN $3 ELSE logo_url END,
+         banner_url = CASE WHEN $4::boolean THEN $5 ELSE banner_url END,
+         whatsapp = CASE WHEN $6::boolean THEN $7 ELSE whatsapp END,
+         opening_hours = CASE WHEN $8::boolean THEN $9 ELSE opening_hours END,
+         free_delivery_over = CASE WHEN $10::boolean THEN $11 ELSE free_delivery_over END
+       WHERE id = $1 RETURNING ${COLUMNAS}`,
+      [commerceId,
+       b.logoUrl !== undefined, b.logoUrl ?? null,
+       b.bannerUrl !== undefined, b.bannerUrl ?? null,
+       b.whatsapp !== undefined, b.whatsapp || null,
+       b.aclaracionHorario !== undefined, b.aclaracionHorario || null,
+       b.envioGratisDesde !== undefined, b.envioGratisDesde ?? null]
+    );
+    await audit(commerceId, "settings.tienda-perfil", "commerces", commerceId,
+      { logo: b.logoUrl !== undefined, banner: b.bannerUrl !== undefined });
+    res.json(armarTienda(rows[0], await regionesDe(commerceId)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Horario y franjas ───────────────────────────────────────────────────────
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const tramoSchema = z.object({
+  dia: z.coerce.number().int().min(0).max(6),
+  desde: z.string().regex(HHMM, "La hora va como HH:MM"),
+  hasta: z.string().regex(HHMM, "La hora va como HH:MM"),
+});
+
+/**
+ * PUT /api/settings/horario — reemplaza el horario completo.
+ *
+ * Se manda entero y no tramo por tramo: un horario es una sola cosa, y
+ * editarlo de a pedazos deja estados intermedios donde el comercio figura
+ * abierto un rato que ya borró.
+ */
+settingsRouter.put("/horario", async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const tramos = z.array(tramoSchema).max(30).parse(req.body?.tramos ?? []);
+    for (const t of tramos) {
+      if (t.desde >= t.hasta) {
+        throw new HttpError(400, `El tramo ${t.desde}–${t.hasta} termina antes de empezar.`);
+      }
+    }
+    const commerceId = req.auth.commerceId;
+    await client.query("BEGIN");
+    await client.query("DELETE FROM commerce_hours WHERE commerce_id = $1", [commerceId]);
+    for (const t of tramos) {
+      await client.query(
+        "INSERT INTO commerce_hours (commerce_id, dia, desde, hasta) VALUES ($1,$2,$3,$4)",
+        [commerceId, t.dia, t.desde, t.hasta]
+      );
+    }
+    await client.query("COMMIT");
+    await audit(commerceId, "settings.horario", "commerces", commerceId, { tramos: tramos.length });
+    res.json({ tramos });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+/** GET /api/settings/horario */
+settingsRouter.get("/horario", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT dia, desde::text, hasta::text FROM commerce_hours WHERE commerce_id = $1 ORDER BY dia, desde",
+      [req.auth.commerceId]
+    );
+    res.json({ tramos: rows.map((r) => ({
+      dia: Number(r.dia), desde: String(r.desde).slice(0, 5), hasta: String(r.hasta).slice(0, 5),
+    })) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const slotsSchema = z.array(z.object({
+  label: z.string().trim().min(1).max(80),
+  kind: z.enum(["retiro", "reparto"]),
+  fee: z.coerce.number().nonnegative().default(0),
+})).max(20);
+
+/**
+ * PUT /api/settings/franjas
+ *
+ * Las franjas no son una limitación: son lo que hace rentable el reparto
+ * propio, porque permiten salir a las 12 y a las 19 con cinco pedidos de la
+ * misma zona. El reparto inmediato convierte cada pedido en un viaje.
+ */
+settingsRouter.put("/franjas", async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const franjas = slotsSchema.parse(req.body?.franjas ?? []);
+    const commerceId = req.auth.commerceId;
+    await client.query("BEGIN");
+    await client.query("DELETE FROM commerce_slots WHERE commerce_id = $1", [commerceId]);
+    let orden = 0;
+    for (const f of franjas) {
+      await client.query(
+        "INSERT INTO commerce_slots (commerce_id, label, kind, fee, orden) VALUES ($1,$2,$3,$4,$5)",
+        [commerceId, f.label, f.kind, f.fee, orden++]
+      );
+    }
+    await client.query("COMMIT");
+    await audit(commerceId, "settings.franjas", "commerces", commerceId, { franjas: franjas.length });
+    res.json({ franjas });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+/** GET /api/settings/franjas */
+settingsRouter.get("/franjas", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, label, kind, fee FROM commerce_slots WHERE commerce_id = $1 ORDER BY orden, id",
+      [req.auth.commerceId]
+    );
+    res.json({ franjas: rows.map((r) => ({
+      id: Number(r.id), label: r.label, kind: r.kind, fee: Number(r.fee),
+    })) });
   } catch (err) {
     next(err);
   }

@@ -45,11 +45,52 @@ function abiertoAhora(tramos: { dia: number; desde: string; hasta: string }[]): 
   return tramos.some((t) => t.dia === dia && t.desde.slice(0, 5) <= hm && hm < t.hasta.slice(0, 5));
 }
 
+const DIAS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+
+/**
+ * "Lun a Sáb 08:30 a 13:00 y 17:00 a 21:30 | Dom 09:00 a 13:00"
+ *
+ * Los días con el mismo horario se agrupan: siete renglones iguales no los lee
+ * nadie. La aclaración del comerciante —"feriados cerrado"— va al final, que es
+ * lo único que no se puede derivar de los tramos.
+ */
+function textoHorario(
+  tramos: { dia: number; desde: string; hasta: string }[],
+  aclaracion: string | null
+): string | undefined {
+  if (tramos.length === 0) return aclaracion ?? undefined;
+
+  const porDia = new Map<number, string>();
+  for (const t of tramos) {
+    const previo = porDia.get(t.dia);
+    const tramo = `${t.desde} a ${t.hasta}`;
+    porDia.set(t.dia, previo ? `${previo} y ${tramo}` : tramo);
+  }
+
+  // De lunes a domingo, que es como se lee un horario
+  const orden = [1, 2, 3, 4, 5, 6, 0].filter((d) => porDia.has(d));
+  const grupos: { dias: number[]; horario: string }[] = [];
+  for (const d of orden) {
+    const h = porDia.get(d)!;
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo.horario === h) ultimo.dias.push(d);
+    else grupos.push({ dias: [d], horario: h });
+  }
+
+  const partes = grupos.map((g) => {
+    const etiqueta = g.dias.length === 1 ? DIAS[g.dias[0]]
+      : g.dias.length === 2 ? `${DIAS[g.dias[0]]} y ${DIAS[g.dias[1]]}`
+      : `${DIAS[g.dias[0]]} a ${DIAS[g.dias[g.dias.length - 1]]}`;
+    return `${etiqueta} ${g.horario}`;
+  });
+  return [partes.join(" | "), aclaracion].filter(Boolean).join(" · ");
+}
+
 // ── Store ───────────────────────────────────────────────────────────────────
 
 const SELECT_STORE = `
   SELECT c.id, c.slug, c.name, c.category, c.address, c.phone, c.whatsapp,
-         c.logo_url, c.opening_hours, c.verified, c.nexotienda_enabled,
+         c.logo_url, c.banner_url, c.opening_hours, c.verified, c.nexotienda_enabled,
          c.free_delivery_over, c.ciudad, c.provincia,
          c.pay_on_delivery_enabled, c.transfer_enabled, c.clubpay_pay_enabled,
          c.online_credit_enabled, c.clubpay_api_key
@@ -87,7 +128,17 @@ async function armarStore(fila: Record<string, unknown>) {
     phone: fila.phone ?? undefined,
     whatsapp: fila.whatsapp ?? undefined,
     logoUrl: fila.logo_url ?? undefined,
-    openingHours: fila.opening_hours ?? undefined,
+    /** La foto ancha de la tienda. El logo identifica; el banner es su cara. */
+    bannerUrl: fila.banner_url ?? undefined,
+    /**
+     * El texto del horario se arma de los tramos en vez de pedírselo escrito.
+     * Si fueran dos campos, tarde o temprano dicen cosas distintas y el que se
+     * come el viaje al local es el cliente.
+     */
+    openingHours: textoHorario(
+      horas.rows.map((h) => ({ dia: Number(h.dia), desde: String(h.desde).slice(0, 5), hasta: String(h.hasta).slice(0, 5) })),
+      (fila.opening_hours as string | null) ?? null
+    ),
     /** Los tramos, para que la tienda pueda mostrar el horario y calcular sola */
     hours: horas.rows.map((h) => ({
       dia: Number(h.dia), desde: String(h.desde).slice(0, 5), hasta: String(h.hasta).slice(0, 5),

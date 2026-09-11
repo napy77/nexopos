@@ -7,6 +7,7 @@ import {
   DEFAULT_PRINT_SETTINGS, type PrintSettings,
 } from "@/lib/print";
 import { leerCodigoBalanza, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
+import { prepararImagen, prepararBanner } from "@/lib/imagen";
 
 interface Commerce {
   id: number; nexob2b_id: string | null; name: string; email: string;
@@ -18,9 +19,17 @@ interface Sale { id: number; ticket_number: number }
 
 interface Region { slug: string; nombre: string; label: string; aparece: boolean }
 
+interface Tramo { dia: number; desde: string; hasta: string }
+interface Franja { id?: number; label: string; kind: "retiro" | "reparto"; fee: number }
+
 interface Tienda {
   habilitada: boolean;
   slug: string | null;
+  logoUrl: string | null;
+  bannerUrl: string | null;
+  whatsapp: string | null;
+  aclaracionHorario: string | null;
+  envioGratisDesde: number | null;
   slugSugerido: string;
   direccion: string | null;
   regiones: Region[];
@@ -56,6 +65,8 @@ export default function ConfiguracionPage() {
   const [alias, setAlias] = useState("");
   const [titular, setTitular] = useState("");
   const [slug, setSlug] = useState("");
+  const [tramos, setTramos] = useState<Tramo[]>([]);
+  const [franjas, setFranjas] = useState<Franja[]>([]);
 
   useEffect(() => {
     setSettings(loadPrintSettings());
@@ -76,6 +87,8 @@ export default function ConfiguracionPage() {
         setSlug(t.slug ?? t.slugSugerido);
       })
       .catch(console.error);
+    api<{ tramos: Tramo[] }>("/api/settings/horario").then((d) => setTramos(d.tramos)).catch(console.error);
+    api<{ franjas: Franja[] }>("/api/settings/franjas").then((d) => setFranjas(d.franjas)).catch(console.error);
     api<Sale[]>("/api/sales")
       .then((ventas) => setUltimaVenta(ventas[0] ?? null))
       .catch(console.error);
@@ -98,6 +111,57 @@ export default function ConfiguracionPage() {
       setError(err instanceof Error ? err.message : "No se pudo guardar");
       const actual = await api<Tienda>("/api/settings/nexotienda").catch(() => null);
       if (actual) setTienda(actual);
+    }
+  }
+
+  async function guardarPerfil(cambio: Record<string, unknown>) {
+    setError(""); setMsg("");
+    try {
+      setTienda(await api<Tienda>("/api/settings/tienda-perfil", {
+        method: "PUT", body: JSON.stringify(cambio),
+      }));
+      setMsg("Guardado");
+      setTimeout(() => setMsg(""), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    }
+  }
+
+  async function subirFoto(file: File | undefined, cual: "logoUrl" | "bannerUrl") {
+    if (!file) return;
+    setError("");
+    try {
+      const dataUrl = cual === "bannerUrl" ? await prepararBanner(file) : await prepararImagen(file, 300);
+      await guardarPerfil({ [cual]: dataUrl });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo procesar la imagen");
+    }
+  }
+
+  /** El horario se manda entero: editarlo de a pedazos deja estados raros. */
+  async function guardarHorario(nuevos: Tramo[]) {
+    setError("");
+    const limpios = nuevos.filter((t) => t.desde && t.hasta);
+    try {
+      await api("/api/settings/horario", { method: "PUT", body: JSON.stringify({ tramos: limpios }) });
+      setTramos(limpios);
+      setMsg("Horario guardado"); setTimeout(() => setMsg(""), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar el horario");
+    }
+  }
+
+  async function guardarFranjas(nuevas: Franja[]) {
+    setError("");
+    try {
+      await api("/api/settings/franjas", {
+        method: "PUT",
+        body: JSON.stringify({ franjas: nuevas.map(({ label, kind, fee }) => ({ label, kind, fee })) }),
+      });
+      setFranjas(nuevas);
+      setMsg("Franjas guardadas"); setTimeout(() => setMsg(""), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron guardar");
     }
   }
 
@@ -390,6 +454,35 @@ export default function ConfiguracionPage() {
                   : "Mientras esté apagada, en NexoTienda aparecen tus datos pero no tu catálogo."}
               </p>
 
+              <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>Cómo se ve tu tienda</h3>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
+                <label style={{ cursor: "pointer", textAlign: "center" }}>
+                  <div style={{
+                    width: 64, height: 64, borderRadius: 8, border: "1px dashed var(--border)",
+                    backgroundImage: tienda.logoUrl ? `url(${tienda.logoUrl})` : undefined,
+                    backgroundSize: "cover", backgroundPosition: "center",
+                    display: "grid", placeItems: "center", fontSize: 11, color: "var(--muted)",
+                  }}>{tienda.logoUrl ? "" : "Logo"}</div>
+                  <input type="file" accept="image/*" hidden
+                    onChange={(ev) => subirFoto(ev.target.files?.[0], "logoUrl")} />
+                  <span className="muted" style={{ fontSize: 10 }}>Cambiar</span>
+                </label>
+                <label style={{ cursor: "pointer", flex: 1, textAlign: "center" }}>
+                  <div style={{
+                    height: 64, borderRadius: 8, border: "1px dashed var(--border)",
+                    backgroundImage: tienda.bannerUrl ? `url(${tienda.bannerUrl})` : undefined,
+                    backgroundSize: "cover", backgroundPosition: "center",
+                    display: "grid", placeItems: "center", fontSize: 11, color: "var(--muted)",
+                  }}>{tienda.bannerUrl ? "" : "Banner — la foto ancha de arriba"}</div>
+                  <input type="file" accept="image/*" hidden
+                    onChange={(ev) => subirFoto(ev.target.files?.[0], "bannerUrl")} />
+                  <span className="muted" style={{ fontSize: 10 }}>Cambiar</span>
+                </label>
+              </div>
+              <p className="muted" style={{ fontSize: 11, marginTop: 0 }}>
+                El logo te identifica en la lista del pueblo; el banner es la cara de tu tienda.
+              </p>
+
               <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>La dirección de tu tienda</h3>
               <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
                 <input value={slug} onChange={(ev) => setSlug(ev.target.value.toLowerCase())}
@@ -425,10 +518,40 @@ export default function ConfiguracionPage() {
                 </>
               )}
 
+              <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>Horario de atención</h3>
+              <Horario tramos={tramos} onGuardar={guardarHorario} />
+              <input defaultValue={tienda.aclaracionHorario ?? ""} placeholder="Aclaración: feriados cerrado…"
+                style={{ width: "100%", marginTop: 6 }}
+                onBlur={(ev) => {
+                  if (ev.target.value !== (tienda.aclaracionHorario ?? "")) {
+                    guardarPerfil({ aclaracionHorario: ev.target.value });
+                  }
+                }} />
+
+              <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>Franjas de retiro y reparto</h3>
+              <Franjas franjas={franjas} onGuardar={guardarFranjas} />
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+                <span className="muted" style={{ fontSize: 12 }}>Envío sin cargo desde $</span>
+                <input type="number" min="0" defaultValue={tienda.envioGratisDesde ?? ""}
+                  placeholder="sin mínimo" style={{ width: 100 }}
+                  onBlur={(ev) => {
+                    const v = ev.target.value === "" ? null : Number(ev.target.value);
+                    if (v !== tienda.envioGratisDesde) guardarPerfil({ envioGratisDesde: v });
+                  }} />
+              </div>
+
               <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>Cómo te pagan</h3>
               <Switch label="Pago contra entrega" ayuda="Paga cuando recibe el pedido o cuando pasa a retirarlo"
                 on={tienda.pagos.contraEntrega}
                 set={(v) => guardarTienda({ pagos: { contraEntrega: v } })} />
+
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 10 }}>
+                <span className="muted" style={{ fontSize: 12 }}>WhatsApp de atención</span>
+                <input defaultValue={tienda.whatsapp ?? ""} placeholder="3515630140" style={{ width: 130 }}
+                  onBlur={(ev) => {
+                    if (ev.target.value !== (tienda.whatsapp ?? "")) guardarPerfil({ whatsapp: ev.target.value });
+                  }} />
+              </div>
 
               <Switch label="Transferencia" ayuda="El cliente transfiere y sube el comprobante"
                 on={tienda.pagos.transferencia}
@@ -533,5 +656,130 @@ function Switch({ label, ayuda, on, set, disabled }: {
         <span className="muted" style={{ fontSize: 11, marginLeft: 24, display: "block" }}>{ayuda}</span>
       )}
     </label>
+  );
+}
+
+const NOMBRE_DIA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+/** De lunes a domingo, que es como se lee un horario */
+const ORDEN_DIAS = [1, 2, 3, 4, 5, 6, 0];
+
+/**
+ * El horario, con dos tramos por día.
+ *
+ * Dos y no uno porque el almacén cierra al mediodía, que es el caso normal.
+ * Y con "copiar al resto de la semana" porque cargar siete días a mano es
+ * exactamente la fricción que hace que el comerciante lo deje sin completar —y
+ * sin horario la tienda no puede decir si está abierta.
+ */
+function Horario({ tramos, onGuardar }: { tramos: Tramo[]; onGuardar: (t: Tramo[]) => void }) {
+  const porDia = (dia: number, n: number) =>
+    tramos.filter((t) => t.dia === dia).sort((a, b) => a.desde.localeCompare(b.desde))[n];
+
+  const [borrador, setBorrador] = useState<Record<string, string>>({});
+  const valor = (dia: number, n: number, campo: "desde" | "hasta") =>
+    borrador[`${dia}-${n}-${campo}`] ?? porDia(dia, n)?.[campo] ?? "";
+
+  function armar(cambios: Record<string, string>): Tramo[] {
+    const out: Tramo[] = [];
+    for (const dia of ORDEN_DIAS) {
+      for (const n of [0, 1]) {
+        const d = cambios[`${dia}-${n}-desde`] ?? porDia(dia, n)?.desde ?? "";
+        const h = cambios[`${dia}-${n}-hasta`] ?? porDia(dia, n)?.hasta ?? "";
+        if (d && h) out.push({ dia, desde: d, hasta: h });
+      }
+    }
+    return out;
+  }
+
+  const set = (dia: number, n: number, campo: string, v: string) =>
+    setBorrador((b) => ({ ...b, [`${dia}-${n}-${campo}`]: v }));
+
+  /** Lo que tiene el lunes, para todos los días hábiles */
+  function copiarSemana() {
+    const base = [0, 1].map((n) => ({
+      desde: valor(1, n, "desde"), hasta: valor(1, n, "hasta"),
+    })).filter((t) => t.desde && t.hasta);
+    const out: Tramo[] = [];
+    for (const dia of [1, 2, 3, 4, 5, 6]) for (const t of base) out.push({ dia, ...t });
+    const domingo = tramos.filter((t) => t.dia === 0);
+    setBorrador({});
+    onGuardar([...out, ...domingo]);
+  }
+
+  const hay = Object.keys(borrador).length > 0;
+
+  return (
+    <div>
+      <table style={{ fontSize: 12 }}>
+        <tbody>
+          {ORDEN_DIAS.map((dia) => (
+            <tr key={dia}>
+              <td style={{ width: 80 }}>{NOMBRE_DIA[dia]}</td>
+              {[0, 1].map((n) => (
+                <td key={n}>
+                  <input type="time" value={valor(dia, n, "desde")} style={{ width: 92 }}
+                    onChange={(ev) => set(dia, n, "desde", ev.target.value)} />
+                  <span className="muted"> a </span>
+                  <input type="time" value={valor(dia, n, "hasta")} style={{ width: 92 }}
+                    onChange={(ev) => set(dia, n, "hasta", ev.target.value)} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+        <button type="button" onClick={() => { onGuardar(armar(borrador)); setBorrador({}); }} disabled={!hay}>
+          Guardar horario
+        </button>
+        <button type="button" className="ghost" onClick={copiarSemana}>
+          Copiar el lunes al resto de la semana
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Las franjas de retiro y reparto.
+ *
+ * No son una limitación: son lo que hace rentable el reparto propio, porque
+ * permiten salir a las 12 y a las 19 con cinco pedidos de la misma zona. El
+ * reparto inmediato convierte cada pedido en un viaje que pierde plata.
+ */
+function Franjas({ franjas, onGuardar }: { franjas: Franja[]; onGuardar: (f: Franja[]) => void }) {
+  const [lista, setLista] = useState<Franja[]>(franjas);
+  useEffect(() => setLista(franjas), [franjas]);
+
+  const cambiar = (i: number, cambio: Partial<Franja>) =>
+    setLista((l) => l.map((f, n) => (n === i ? { ...f, ...cambio } : f)));
+
+  const sucio = JSON.stringify(lista) !== JSON.stringify(franjas);
+
+  return (
+    <div>
+      {lista.map((f, i) => (
+        <div key={i} style={{ display: "flex", gap: 4, marginBottom: 4, alignItems: "center" }}>
+          <select value={f.kind} onChange={(ev) => cambiar(i, { kind: ev.target.value as Franja["kind"] })}>
+            <option value="retiro">Retiro</option>
+            <option value="reparto">Reparto</option>
+          </select>
+          <input value={f.label} placeholder="12:30 a 14:00" style={{ flex: 1, minWidth: 120 }}
+            onChange={(ev) => cambiar(i, { label: ev.target.value })} />
+          <input type="number" min="0" value={f.fee} style={{ width: 80 }}
+            title="Costo del envío" disabled={f.kind === "retiro"}
+            onChange={(ev) => cambiar(i, { fee: Number(ev.target.value) })} />
+          <button type="button" className="ghost" title="Quitar"
+            onClick={() => setLista((l) => l.filter((_, n) => n !== i))}>✕</button>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 6 }}>
+        <button type="button" className="ghost"
+          onClick={() => setLista((l) => [...l, { label: "", kind: "reparto", fee: 0 }])}>
+          + Agregar franja
+        </button>
+        {sucio && <button type="button" onClick={() => onGuardar(lista)}>Guardar franjas</button>}
+      </div>
+    </div>
   );
 }

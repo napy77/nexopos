@@ -36,3 +36,42 @@ export async function prepararImagen(file: File, lado = 400): Promise<string> {
   }
   throw new Error("La imagen es demasiado pesada, probá con otra");
 }
+
+/**
+ * El banner de la tienda: la foto ancha de arriba de todo.
+ *
+ * Se recorta apaisado y no cuadrado porque es lo que se ve: una foto de la
+ * verdulería metida en un cuadradito no se entiende, y un logo estirado a lo
+ * ancho queda deformado. Son dos imágenes distintas por eso, no por capricho.
+ *
+ * Va a 1200px de ancho: entra bien en una pantalla de escritorio y pesa poco
+ * en el teléfono, que es donde la mayoría va a abrir la tienda.
+ */
+export const MAX_BANNER_BYTES = 500 * 1024;
+
+export async function prepararBanner(file: File, ancho = 1200, alto = 400): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error("El archivo no es una imagen");
+
+  const bitmap = await createImageBitmap(file);
+  // Recorte centrado al alto que corresponde: se queda con la franja del medio
+  const ratio = ancho / alto;
+  let cw = bitmap.width;
+  let ch = cw / ratio;
+  if (ch > bitmap.height) { ch = bitmap.height; cw = ch * ratio; }
+  const sx = (bitmap.width - cw) / 2;
+  const sy = (bitmap.height - ch) / 2;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = ancho;
+  canvas.height = alto;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("No se pudo procesar la imagen");
+  ctx.drawImage(bitmap, sx, sy, cw, ch, 0, 0, ancho, alto);
+  bitmap.close();
+
+  for (const calidad of [0.82, 0.7, 0.55, 0.4]) {
+    const dataUrl = canvas.toDataURL("image/jpeg", calidad);
+    if (dataUrl.length * 0.75 <= MAX_BANNER_BYTES) return dataUrl;
+  }
+  throw new Error("La imagen es demasiado pesada, probá con otra");
+}
