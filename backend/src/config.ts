@@ -29,6 +29,22 @@ export const config = {
    */
   platformKey: process.env.NEXOPOS_PLATFORM_KEY || "",
 
+  /**
+   * Las claves de la API pública, una por capacidad.
+   *
+   * No van por comercio: NexoTienda es un solo servidor que renderiza la tienda
+   * de cualquiera, no es cliente de un comercio. Lo que separa bien acá no es
+   * *de qué comercio* sino *qué puede hacer*, y la sensible —cuentas— va sola.
+   *
+   * Y la de cuentas no alcanza por sí sola: esos endpoints piden además la
+   * sesión del comprador. La clave dice qué endpoint, la sesión dice de quién.
+   */
+  apiKeys: {
+    catalogo: process.env.NEXOTIENDA_KEY_CATALOGO || "",
+    pedidos: process.env.NEXOTIENDA_KEY_PEDIDOS || "",
+    cuentas: process.env.NEXOTIENDA_KEY_CUENTAS || "",
+  },
+
   clubpay: {
     // Vacío → modo mock, con socios de prueba para el mostrador
     apiUrl: process.env.CLUBPAY_API_URL || "",
