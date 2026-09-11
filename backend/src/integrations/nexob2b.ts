@@ -15,6 +15,14 @@ import { HttpError } from "../middleware/error.js";
 
 // ── Tipos (espejo de la API) ──────────────────────────────────────────────────
 
+export interface B2BRegion {
+  id: string;
+  slug: string;
+  name: string;
+  province: string;
+  label: string;
+}
+
 export interface B2BComercio {
   id: string;
   nombre: string;
@@ -22,6 +30,18 @@ export interface B2BComercio {
   estado: string;
   ciudad?: string | null;
   provincia?: string | null;
+  /**
+   * La ficha vive en B2B y el comerciante la edita allá. Acá se copia para
+   * servirla en la tienda, no para editarla: dos lugares donde cambiar la
+   * misma dirección terminan en dos direcciones distintas.
+   */
+  telefono?: string | null;
+  direccion?: string | null;
+  rubros?: unknown;
+  lat?: number | null;
+  lng?: number | null;
+  /** Los pueblos donde reparte. Lo decide Nexo, en el admin de B2B. */
+  regiones?: B2BRegion[];
 }
 
 export interface B2BPresentacion {
@@ -608,4 +628,34 @@ export async function cancelarOrden(token: string, ordenId: string): Promise<B2B
   }
   const data = await api<{ orden: B2BOrden }>(`/store/ordenes/${ordenId}/cancelar`, { token, method: "PUT" });
   return data.orden;
+}
+
+/**
+ * La ficha completa del comercio, con los pueblos donde reparte.
+ *
+ * NexoTienda necesita la dirección, el teléfono y el rubro, y todo eso ya lo
+ * tiene B2B: el alta del comerciante es allá. Pedírselo de nuevo sería hacerlo
+ * escribir dos veces la misma dirección y quedarnos con dos que se van a
+ * separar el día que se mude.
+ */
+export async function fichaComercio(token: string): Promise<B2BComercio | null> {
+  if (isMockMode()) {
+    return {
+      id: "com_mock", nombre: "Jure Hnos", email: "jure@test.com", estado: "aprobado",
+      ciudad: "Morrison", provincia: "Córdoba",
+      telefono: "3515630140", direccion: "San Martín 450",
+      rubros: ["Almacén"],
+      regiones: [{ id: "reg_mock", slug: "morrison", name: "Morrison",
+                   province: "Córdoba", label: "Morrison, Córdoba" }],
+    };
+  }
+  try {
+    const r = await api<{ comercio: B2BComercio }>("/store/comercios/me", { token });
+    return r.comercio ?? null;
+  } catch (err) {
+    // No poder leer la ficha no puede romper el login: el comercio entra igual
+    // y los datos quedan como estaban.
+    console.error("[nexob2b] no se pudo leer la ficha:", err instanceof Error ? err.message : err);
+    return null;
+  }
 }

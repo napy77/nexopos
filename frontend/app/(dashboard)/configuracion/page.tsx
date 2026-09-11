@@ -12,6 +12,7 @@ interface Commerce {
   id: number; nexob2b_id: string | null; name: string; email: string;
   tax_id: string | null; estado: string | null;
   ciudad: string | null; provincia: string | null; created_at: string;
+  address: string | null; phone: string | null; category: string | null;
 }
 interface Sale { id: number; ticket_number: number }
 
@@ -470,9 +471,12 @@ export default function ConfiguracionPage() {
         <div className="card" style={{ minWidth: 300 }}>
           <h2>Datos del comercio</h2>
           <p className="muted">
-            Vienen de tu cuenta de NexoB2B. Para modificarlos, entrá a{" "}
+            Vienen de tu cuenta de NexoB2B y son los que ve tu cliente en la tienda. Para
+            modificarlos entrá a{" "}
             <a href="https://nexob2b.app" target="_blank" rel="noreferrer">nexob2b.app</a> →
-            Perfil; los cambios se reflejan acá la próxima vez que inicies sesión.
+            Perfil; se reflejan acá la próxima vez que inicies sesión. Se editan en un solo
+            lugar a propósito: dos direcciones distintas terminan mostrándole al cliente la
+            que está mal.
           </p>
           {commerce ? (
             <table>
@@ -480,6 +484,9 @@ export default function ConfiguracionPage() {
                 <tr><td className="muted">Nombre</td><td><strong>{commerce.name}</strong></td></tr>
                 <tr><td className="muted">Email</td><td>{commerce.email}</td></tr>
                 {commerce.tax_id && <tr><td className="muted">CUIT</td><td>{commerce.tax_id}</td></tr>}
+                <tr><td className="muted">Rubro</td><td>{commerce.category ?? "—"}</td></tr>
+                <tr><td className="muted">Dirección</td><td>{commerce.address ?? "—"}</td></tr>
+                <tr><td className="muted">Teléfono</td><td>{commerce.phone ?? "—"}</td></tr>
                 <tr>
                   <td className="muted">Ubicación</td>
                   <td>{[commerce.ciudad, commerce.provincia].filter(Boolean).join(", ") || "—"}</td>

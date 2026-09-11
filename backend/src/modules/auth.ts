@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Request } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
+import { sincronizarFicha } from "./perfil-b2b.js";
 import { signToken, requireAuth } from "../middleware/auth.js";
 import { login as b2bLogin, isMockMode } from "../integrations/nexob2b.js";
 import { HttpError } from "../middleware/error.js";
@@ -35,6 +36,12 @@ authRouter.post("/login", async (req, res, next) => {
     );
     const commerce = rows[0];
     const token = signToken({ commerceId: commerce.id, email: commerce.email, name: commerce.name });
+    // La ficha de B2B se copia acá para poder servirla en la tienda. Va
+    // después de responder el login en lo que importa: si B2B tarda, el
+    // comerciante no espera. Los datos quedan como estaban hasta la próxima.
+    sincronizarFicha(Number(rows[0].id), b2bToken).catch((err) =>
+      console.error("[nexob2b] no se pudo sincronizar la ficha:", err));
+
     await audit(commerce.id, "auth.login");
     res.json({ token, commerce, mockMode: isMockMode() });
   } catch (err) {
@@ -50,7 +57,8 @@ authRouter.post("/login", async (req, res, next) => {
 authRouter.get("/me", requireAuth, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, nexob2b_id, name, email, tax_id, estado, ciudad, provincia, created_at
+      `SELECT id, nexob2b_id, name, email, tax_id, estado, ciudad, provincia, created_at,
+              address, phone, category
        FROM commerces WHERE id = $1`,
       [req.auth.commerceId]
     );
