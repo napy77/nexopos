@@ -492,9 +492,12 @@ export default function ConfiguracionPage() {
                   disabled={!slug || slug === tienda.slug}>Guardar</button>
               </div>
               {tienda.direccion ? (
-                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                  Tu tienda abre en <strong>{tienda.direccion}</strong>
-                </p>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
+                  <span className="muted" style={{ fontSize: 12 }}>Tu tienda abre en</span>
+                  <a href={tienda.direccion} target="_blank" rel="noreferrer"
+                    style={{ fontSize: 12, fontWeight: 600 }}>{tienda.direccion}</a>
+                  <BotonCopiar texto={tienda.direccion} />
+                </div>
               ) : (
                 <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                   Todavía no elegiste dirección. Sin ella no se puede publicar la tienda.
@@ -801,5 +804,68 @@ function Franjas({ franjas, onGuardar }: { franjas: Franja[]; onGuardar: (f: Fra
         {sucio && <button type="button" onClick={() => onGuardar(lista)}>Guardar franjas</button>}
       </div>
     </div>
+  );
+}
+
+
+/**
+ * Copia la dirección de la tienda, para pegarla en un estado de WhatsApp o en
+ * una publicación.
+ *
+ * Se copia la URL sola y no un texto armado: el comerciante escribe su propio
+ * mensaje, y una frase nuestra metida en su estado suena a otro.
+ *
+ * Confirma que copió. Sin eso el que aprieta no sabe si pasó algo y termina
+ * seleccionando el texto a mano, que es lo que el botón venía a evitar.
+ */
+function BotonCopiar({ texto }: { texto: string }) {
+  const [copiado, setCopiado] = useState(false);
+
+  /** El truco viejo: anda donde la API del portapapeles no está permitida */
+  function copiarALaVieja(): boolean {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = texto;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function copiar() {
+    // La API del portapapeles necesita HTTPS y permiso, y falla más seguido de
+    // lo que uno espera. Se intenta primero porque es la buena, pero si dice
+    // que no todavía queda el truco viejo: recién si fallan las dos se le pide
+    // al comerciante que copie a mano.
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(texto);
+        setCopiado(true);
+        setTimeout(() => setCopiado(false), 2000);
+        return;
+      }
+    } catch {
+      /* sigue abajo */
+    }
+    if (copiarALaVieja()) {
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+      return;
+    }
+    window.prompt("Copiá tu dirección:", texto);
+  }
+
+  return (
+    <button type="button" className="ghost" onClick={copiar}
+      title="Copiar para pegar en WhatsApp o donde publiques"
+      style={{ fontSize: 12, padding: "2px 8px" }}>
+      {copiado ? "✓ Copiado" : "Copiar"}
+    </button>
   );
 }
