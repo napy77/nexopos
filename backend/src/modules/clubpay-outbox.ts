@@ -151,7 +151,16 @@ export function iniciarOutbox(): void {
   if (isMockMode()) {
     console.log("[clubpay] modo mock: los movimientos de cuenta corriente se loguean, no se envían");
   }
-  if (!config.clubpay.enviarResumenes) {
+  if (config.clubpay.enviarResumenes) {
+    // Quien lo enciende meses después no tiene por qué acordarse de por qué
+    // existía el freno. Que lo diga el arranque.
+    console.warn(
+      "[clubpay] resúmenes HABILITADOS. Esto da por hecho que ClubPay adjudica " +
+      "los movimientos a su resumen al recibirlo. Si todavía no lo hace, la misma " +
+      "compra se cuenta dos veces y el cliente ve el doble de lo que debe " +
+      "(docs/RESPUESTA-3-A-CLUBPAY.md)."
+    );
+  } else {
     console.log("[clubpay] resúmenes RETENIDOS (CLUBPAY_STATEMENTS != on): se acumulan sin enviar");
   }
   setInterval(() => {
