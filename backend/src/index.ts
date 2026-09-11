@@ -23,6 +23,8 @@ import { clubpayRouter, clubpayWebhookRouter } from "./modules/clubpay.js";
 import { disponibilidadRouter } from "./modules/disponibilidad.js";
 import { plataformaRouter } from "./modules/plataforma.js";
 import { v1Router } from "./modules/v1-catalogo.js";
+import { pedidosRouter } from "./modules/v1-pedidos.js";
+import { pedidosPosRouter } from "./modules/pedidos.js";
 import { iniciarOutbox } from "./modules/clubpay-outbox.js";
 
 const arranque = new Date().toISOString();
@@ -61,9 +63,13 @@ app.use("/api/export", requireAuth, exportRouter);
 app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/caja", requireAuth, cajaRouter);
 app.use("/api/disponibilidad", requireAuth, disponibilidadRouter);
+app.use("/api/pedidos", requireAuth, pedidosPosRouter);
 // La API pública que consume NexoTienda. Autentica por capacidad, no por
 // comercio: es un servidor que renderiza la tienda de cualquiera.
+// Routers separados a propósito: cada uno pide SU clave. Con un solo router
+// y un `use` al tope, un pedido terminaría exigiendo la clave de catálogo.
 app.use("/v1", v1Router);
+app.use("/v1", pedidosRouter);
 
 // Los consume Nexo B2B servidor a servidor, con la clave de plataforma:
 // no hay ningún comerciante del otro lado, así que no va requireAuth.

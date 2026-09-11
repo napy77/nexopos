@@ -165,6 +165,33 @@ export default function ConfiguracionPage() {
     }
   }
 
+  /**
+   * Publicar la tienda y, la primera vez, preguntar por la página del pueblo.
+   *
+   * El switch de aparecer arranca apagado porque es una decisión del
+   * comerciante —que dos supermercados del mismo pueblo salgan juntos con los
+   * precios a la vista no es lo mismo acá que en Amazon—. Pero un default
+   * apagado que nadie sabe que existe no es "decidió no aparecer": es que nunca
+   * se enteró. Probando Morrison la página salió vacía con tres comercios que
+   * no sabían del switch.
+   *
+   * Así que se pregunta, con el sí sugerido, y sigue decidiendo él.
+   */
+  async function publicar(quiere: boolean) {
+    await guardarTienda({ habilitada: quiere });
+    if (!quiere) return;
+    const t = await api<Tienda>("/api/settings/nexotienda").catch(() => null);
+    for (const r of t?.regiones ?? []) {
+      if (r.aparece) continue;
+      const si = window.confirm(
+        `¿Querés aparecer también en la página de ${r.label}?\n\n` +
+        "Ahí la gente del pueblo busca quién tiene lo que necesita.\n" +
+        "Podés cambiarlo cuando quieras."
+      );
+      if (si) await guardarRegion(r.slug, true);
+    }
+  }
+
   async function guardarSlug() {
     setError(""); setMsg("");
     try {
@@ -445,7 +472,7 @@ export default function ConfiguracionPage() {
             <>
               <label style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
                 <input type="checkbox" checked={tienda.habilitada}
-                  onChange={(ev) => guardarTienda({ habilitada: ev.target.checked })} />
+                  onChange={(ev) => publicar(ev.target.checked)} />
                 <strong>Publicar mi tienda en NexoTienda</strong>
               </label>
               <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>

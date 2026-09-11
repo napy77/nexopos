@@ -201,7 +201,17 @@ async function comercioPublicado(por: "slug" | "id", valor: string) {
 
 // ── Endpoints ───────────────────────────────────────────────────────────────
 
-v1Router.use(requiereClave("catalogo"));
+/*
+ * El guard va por ruta y no con un `use` al tope del router.
+ *
+ * Un `v1Router.use(requiereClave("catalogo"))` alcanza a todo lo que se
+ * registre después, así que el día que alguien agregue pedidos en este archivo
+ * quedarían pidiendo la clave de catálogo —justo lo que separamos—. Y peor: un
+ * llamado con la clave correcta a una ruta que todavía no existe contesta 401
+ * en vez de 404, y el que está del otro lado pierde la tarde creyendo que su
+ * clave está mal. Ya le pasó al equipo de NexoTienda.
+ */
+const catalogo = requiereClave("catalogo");
 
 /**
  * GET /v1/hosts/:sub — ¿qué es este subdominio?
@@ -212,7 +222,7 @@ v1Router.use(requiereClave("catalogo"));
  * Resuelve también los slugs que un comercio dejó atrás, para que los links que
  * ya circularon por WhatsApp no mueran; la tienda redirige al actual.
  */
-v1Router.get("/hosts/:sub", async (req, res, next) => {
+v1Router.get("/hosts/:sub", catalogo, async (req, res, next) => {
   try {
     const sub = String(req.params.sub).trim().toLowerCase();
 
@@ -245,7 +255,7 @@ v1Router.get("/hosts/:sub", async (req, res, next) => {
 });
 
 /** GET /v1/stores/:slug */
-v1Router.get("/stores/:slug", async (req, res, next) => {
+v1Router.get("/stores/:slug", catalogo, async (req, res, next) => {
   try {
     const fila = await comercioPublicado("slug", String(req.params.slug).toLowerCase());
     if (!fila) throw new HttpError(404, "No existe ese comercio");
@@ -256,7 +266,7 @@ v1Router.get("/stores/:slug", async (req, res, next) => {
 });
 
 /** GET /v1/stores/:storeId/pasillos */
-v1Router.get("/stores/:storeId/pasillos", async (req, res, next) => {
+v1Router.get("/stores/:storeId/pasillos", catalogo, async (req, res, next) => {
   try {
     const storeId = Number(req.params.storeId);
     const { rows } = await pool.query(
@@ -279,7 +289,7 @@ v1Router.get("/stores/:storeId/pasillos", async (req, res, next) => {
 });
 
 /** GET /v1/stores/:storeId/products */
-v1Router.get("/stores/:storeId/products", async (req, res, next) => {
+v1Router.get("/stores/:storeId/products", catalogo, async (req, res, next) => {
   try {
     const storeId = String(Number(req.params.storeId));
     const { rows } = await pool.query(`${SELECT_PRODUCTOS} ORDER BY p.name`, [Number(storeId)]);
@@ -290,7 +300,7 @@ v1Router.get("/stores/:storeId/products", async (req, res, next) => {
 });
 
 /** GET /v1/stores/:storeId/products/:id */
-v1Router.get("/stores/:storeId/products/:id", async (req, res, next) => {
+v1Router.get("/stores/:storeId/products/:id", catalogo, async (req, res, next) => {
   try {
     const storeId = String(Number(req.params.storeId));
     const { rows } = await pool.query(`${SELECT_PRODUCTOS} AND p.id = $2`,
@@ -303,7 +313,7 @@ v1Router.get("/stores/:storeId/products/:id", async (req, res, next) => {
 });
 
 /** GET /v1/towns/:townSlug/stores — los que eligieron aparecer */
-v1Router.get("/towns/:townSlug/stores", async (req, res, next) => {
+v1Router.get("/towns/:townSlug/stores", catalogo, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `${SELECT_STORE}
@@ -325,7 +335,7 @@ v1Router.get("/towns/:townSlug/stores", async (req, res, next) => {
  * nadie tiene algo.** La respuesta vacía es "no lo encontramos cargado", no
  * "nadie lo tiene" — puede haber un comercio que lo tenga y no lo haya subido.
  */
-v1Router.get("/towns/:townSlug/search", async (req, res, next) => {
+v1Router.get("/towns/:townSlug/search", catalogo, async (req, res, next) => {
   try {
     const town = String(req.params.townSlug).toLowerCase();
     const q = String(req.query.q ?? "").trim();
