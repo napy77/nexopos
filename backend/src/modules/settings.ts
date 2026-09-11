@@ -250,6 +250,32 @@ settingsRouter.put("/nexotienda", async (req, res, next) => {
       if (!nuevo.retiro && !nuevo.envioPropio) {
         throw new HttpError(400, "Elegí al menos una forma de entrega: retiro en el local o envío propio.");
       }
+
+      /*
+       * El switch de entrega no alcanza: lo que el comprador elige en la
+       * tienda es una FRANJA, y sin ninguna cargada todo pedido se rechaza.
+       * La tienda queda publicada, linda, y no puede recibir un pedido —que es
+       * peor que no estar publicada, porque el que se entera es el cliente.
+       *
+       * Si dijo que se retira del local, se le crea la franja obvia en vez de
+       * mandarlo a configurarla: "retiro en el local" no necesita que nadie
+       * elija un horario. El reparto sí, porque tiene su costo y su ventana.
+       */
+      const { rows: franjas } = await pool.query(
+        "SELECT count(*)::int AS n FROM commerce_slots WHERE commerce_id = $1", [commerceId]
+      );
+      if (franjas[0].n === 0) {
+        if (nuevo.retiro) {
+          await pool.query(
+            `INSERT INTO commerce_slots (commerce_id, label, kind, fee, orden)
+             VALUES ($1, 'Retiro en el local', 'retiro', 0, 0)`,
+            [commerceId]
+          );
+        } else {
+          throw new HttpError(400,
+            "Cargá al menos una franja de reparto: es lo que el cliente elige al hacer el pedido.");
+        }
+      }
     }
 
     const { rows } = await pool.query(
