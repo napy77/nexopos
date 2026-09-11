@@ -6,6 +6,8 @@ import { sesionAbierta } from "./caja.js";
 import { descontarCupo } from "./disponibilidad.js";
 import { periodoAbierto } from "./cuenta-corriente.js";
 import { encolarMovimiento } from "./clubpay-outbox.js";
+import { encolarEvento, type EventoPedido } from "./webhooks.js";
+import { armarOrder } from "./v1-pedidos.js";
 
 /**
  * Los pedidos, desde el mostrador.
@@ -112,6 +114,7 @@ pedidosPosRouter.post("/:id/aceptar", async (req, res, next) => {
       "UPDATE orders SET status = 'aceptado', ready_estimate = $2, updated_at = now() WHERE id = $1",
       [id, readyEstimate]
     );
+    await encolarEvento(client, commerceId, id, "order.aceptado", await armarOrder(id, client));
     await client.query("COMMIT");
     await audit(commerceId, "pedido.aceptado", "orders", id, { readyEstimate });
     res.json({ ok: true, status: "aceptado", readyEstimate });
@@ -157,6 +160,8 @@ function avanzar(paso: "listo" | "en_camino" | "entregado") {
      */
     if (paso === "entregado") await emitirNotaDeVenta(client, commerceId, pedido);
 
+    await encolarEvento(client, commerceId, id, `order.${paso}` as EventoPedido,
+      await armarOrder(id, client));
     await client.query("COMMIT");
     await audit(commerceId, `pedido.${paso}`, "orders", id);
     res.json({ ok: true, status: paso });
@@ -215,6 +220,7 @@ pedidosPosRouter.post("/:id/cancelar", async (req, res, next) => {
               cancelled_by = 'comercio', updated_at = now() WHERE id = $1`,
       [id, motivo]
     );
+    await encolarEvento(client, commerceId, id, "order.cancelado", await armarOrder(id, client));
     await client.query("COMMIT");
     await audit(commerceId, "pedido.cancelado", "orders", id, { motivo });
     res.json({ ok: true, status: "cancelado" });

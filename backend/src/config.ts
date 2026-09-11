@@ -45,6 +45,18 @@ export const config = {
     cuentas: process.env.NEXOTIENDA_KEY_CUENTAS || "",
   },
 
+  /**
+   * Dónde avisarle a NexoTienda que un pedido cambió de estado.
+   *
+   * Vacía deja los avisos acumulándose en la cola: no se pierden, salen todos
+   * juntos cuando se configure. Es preferible a descartarlos, porque el que se
+   * queda sin saber es el comprador.
+   */
+  nexotiendaWebhook: {
+    url: process.env.NEXOTIENDA_WEBHOOK_URL || "",
+    secret: process.env.NEXOTIENDA_WEBHOOK_SECRET || "",
+  },
+
   clubpay: {
     // Vacío → modo mock, con socios de prueba para el mostrador
     apiUrl: process.env.CLUBPAY_API_URL || "",

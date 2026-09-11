@@ -26,6 +26,7 @@ import { v1Router } from "./modules/v1-catalogo.js";
 import { pedidosRouter } from "./modules/v1-pedidos.js";
 import { pedidosPosRouter } from "./modules/pedidos.js";
 import { iniciarOutbox } from "./modules/clubpay-outbox.js";
+import { iniciarWebhooks } from "./modules/webhooks.js";
 
 const arranque = new Date().toISOString();
 const app = express();
@@ -95,6 +96,7 @@ async function main() {
 
   // Avisos de cuenta corriente pendientes de entregar a ClubPay
   iniciarOutbox();
+  iniciarWebhooks();
 
   app.listen(config.port, () => {
     console.log(`NexoPOS backend escuchando en http://localhost:${config.port}`);

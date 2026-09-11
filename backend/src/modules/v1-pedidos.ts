@@ -52,14 +52,21 @@ const nuevoPedidoSchema = z.object({
   }).optional(),
 });
 
-async function armarOrder(orderId: number) {
-  const { rows } = await pool.query(
+/**
+ * El Order tal como lo ve NexoTienda.
+ *
+ * Recibe un `db` opcional para poder armarse DENTRO de la transacción que
+ * cambió el estado: si leyera del pool, vería el pedido como estaba antes del
+ * commit y el webhook contaría lo que no pasó.
+ */
+export async function armarOrder(orderId: number, db: { query: typeof pool.query } = pool) {
+  const { rows } = await db.query(
     `SELECT o.*, c.name AS store_name, c.slug AS store_slug, c.phone AS store_phone
        FROM orders o JOIN commerces c ON c.id = o.commerce_id WHERE o.id = $1`,
     [orderId]
   );
   const o = rows[0];
-  const { rows: lineas } = await pool.query(
+  const { rows: lineas } = await db.query(
     "SELECT product_id, name, unit, quantity, unit_price FROM order_lines WHERE order_id = $1 ORDER BY id",
     [orderId]
   );
