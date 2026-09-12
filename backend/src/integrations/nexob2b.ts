@@ -80,6 +80,8 @@ export interface B2BProducto {
   unidad_base: string | null;
   alicuota_iva: number | null;
   imagen_url: string | null;
+  /** Las que no son la portada, ya ordenadas. Nunca null: llega [] */
+  imagenes?: B2BImagen[];
   pasillo_id: string | null;
   pasillo_nombre: string | null;
   rubro_id: string | null;
@@ -97,6 +99,20 @@ export interface B2BPresentacionMaestra {
   ean_propio: string | null;
 }
 
+/**
+ * Una foto además de la portada. Viene del producto maestro, así que es la
+ * misma para todos los mayoristas que venden ese producto.
+ *
+ * `tipo` hoy es siempre "imagen". NexoB2B dejó "video" en el modelo porque el
+ * pedido original hablaba de multimedia; todavía no se carga ninguno, pero si
+ * algún día llega, una galería que asume imágenes mostraría un recuadro roto.
+ */
+export interface B2BImagen {
+  url: string;
+  tipo: "imagen" | "video";
+  descripcion: string | null;
+}
+
 /** Producto del catálogo maestro (independiente de qué mayoristas lo listen) */
 export interface B2BProductoMaestro {
   id: string;
@@ -107,6 +123,8 @@ export interface B2BProductoMaestro {
   unidad_base: string | null;
   alicuota_iva: number | string | null;
   imagen_url: string | null;
+  /** Las que no son la portada, ya ordenadas. Nunca null: llega [] */
+  imagenes?: B2BImagen[];
   pasillo_id: string | null;
   pasillo_nombre: string | null;
   rubro_id: string | null;
@@ -198,6 +216,13 @@ export const isMockMode = (): boolean => config.nexob2b.apiUrl === null;
  * en nexopos.app y aparecen rotas: hay que anteponerles el dominio del
  * marketplace. Las que ya vienen absolutas o como data URI quedan igual.
  */
+/** La galería con las URLs ya absolutas, y sin las que vinieron vacías */
+export function absolutas(imgs: B2BImagen[] | null | undefined): B2BImagen[] {
+  return (imgs ?? [])
+    .map((i) => ({ ...i, url: urlPublica(i.url) ?? "" }))
+    .filter((i) => i.url);
+}
+
 function urlPublica(u: string | null | undefined): string | null {
   if (!u) return null;
   if (/^(https?:|data:|blob:)/i.test(u)) return u;
@@ -447,6 +472,9 @@ export async function getProductos(
   return data.productos.map((p) => ({
     ...p,
     imagen_url: urlPublica(p.imagen_url),
+    // Igual que la portada y los logos: NexoB2B guarda rutas relativas, y
+    // servidas tal cual el navegador del comercio las busca en nexopos.app.
+    imagenes: absolutas(p.imagenes),
     mayoristas: (p.mayoristas ?? []).map((m) => ({ ...m, mayorista_logo: urlPublica(m.mayorista_logo) })),
   }));
 }

@@ -165,6 +165,7 @@ const SELECT_PRODUCTOS = `
   SELECT p.id, p.name, p.brand, p.descripcion, p.ean, p.unit, p.origen, s.commerce_id,
          p.pasillo_id, p.pasillo_nombre, p.subrubro_nombre,
          COALESCE(s.image_url, p.image_url) AS image_url,
+         p.imagenes,
          s.sale_price, s.quantity, s.availability_policy, s.declared_state,
          s.quota_total, s.quota_remaining, s.quota_day
     FROM stock_items s JOIN products p ON p.id = s.product_id
@@ -181,6 +182,24 @@ function armarProduct(r: Record<string, unknown>, storeId: string) {
     brand: r.brand ?? undefined,
     description: r.descripcion ?? undefined,
     imageUrl: r.image_url ?? undefined,
+    /*
+     * La galería completa, con la portada primero.
+     *
+     * NexoB2B manda `imagenes` SIN la portada adentro, para que no haya dos
+     * fuentes de verdad sobre cuál es la principal. Acá se arma la lista que
+     * la tienda muestra, y la portada es la del comercio si subió una propia:
+     * si la cambió es porque la del catálogo no le servía.
+     *
+     * Se filtran los videos: hoy no hay ninguno cargado, pero el tipo existe
+     * en el modelo de NexoB2B y el día que llegue uno, una galería que asume
+     * imágenes mostraría un recuadro roto.
+     */
+    images: [
+      ...(r.image_url ? [String(r.image_url)] : []),
+      ...((r.imagenes as { url: string; tipo?: string }[] | null) ?? [])
+        .filter((i) => (i.tipo ?? "imagen") === "imagen" && i.url)
+        .map((i) => i.url),
+    ],
     priceCents: centavos(r.sale_price),
     unit: r.unit ?? "unidad",
     pasilloId: r.pasillo_id ?? "sin-pasillo",

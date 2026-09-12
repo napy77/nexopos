@@ -139,6 +139,12 @@ const addFromCatalogSchema = z.object({
     subrubroId: z.string().nullable().optional(),
     subrubroNombre: z.string().nullable().optional(),
     imagenUrl: z.string().nullable().optional(),
+    /** Las fotos que no son la portada. Vienen del catálogo, ya absolutas. */
+    imagenes: z.array(z.object({
+      url: z.string(),
+      tipo: z.enum(["imagen", "video"]).default("imagen"),
+      descripcion: z.string().nullable().default(null),
+    })).optional(),
     alicuotaIva: z.coerce.number().nullable().optional(),
     factor: z.coerce.number().optional(),
   }),
@@ -164,13 +170,17 @@ stockRouter.post("/add-from-catalog", async (req, res, next) => {
     } = await client.query(
       `INSERT INTO products (nexob2b_id, ean, name, brand, category, unit, image_url, alicuota_iva, factor,
                              pasillo_id, pasillo_nombre, rubro_id, rubro_nombre, subrubro_id, subrubro_nombre,
-                             descripcion, synced_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
+                             descripcion, imagenes, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now())
        ON CONFLICT (nexob2b_id) DO UPDATE SET
          ean = COALESCE(EXCLUDED.ean, products.ean), name = EXCLUDED.name,
          brand = COALESCE(EXCLUDED.brand, products.brand),
          category = COALESCE(EXCLUDED.category, products.category),
          image_url = COALESCE(EXCLUDED.image_url, products.image_url),
+         -- La galería se pisa entera y no se fusiona: es del producto maestro,
+         -- así que lo que manda NexoB2B es la lista completa. Fusionar dejaría
+         -- fotos que el mayorista borró.
+         imagenes = EXCLUDED.imagenes,
          alicuota_iva = COALESCE(EXCLUDED.alicuota_iva, products.alicuota_iva),
          pasillo_id = COALESCE(EXCLUDED.pasillo_id, products.pasillo_id),
          pasillo_nombre = COALESCE(EXCLUDED.pasillo_nombre, products.pasillo_nombre),
@@ -198,6 +208,7 @@ stockRouter.post("/add-from-catalog", async (req, res, next) => {
         body.meta.subrubroId ?? null,
         body.meta.subrubroNombre ?? null,
         body.meta.descripcion ?? null,
+        JSON.stringify(body.meta.imagenes ?? []),
       ]
     );
     await client.query(
