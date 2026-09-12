@@ -75,3 +75,37 @@ export async function prepararBanner(file: File, ancho = 1200, alto = 400): Prom
   }
   throw new Error("La imagen es demasiado pesada, probá con otra");
 }
+
+/**
+ * Las fotos de la galería de un producto propio.
+ *
+ * Más grandes que la miniatura del POS —en la tienda se ven a pantalla casi
+ * completa— y más livianas que una portada suelta, porque van hasta seis
+ * juntas en el mismo request.
+ *
+ * Cuadradas como el resto: la tira de miniaturas y la ficha de la tienda las
+ * muestran así, y recortarlas acá evita que una foto vertical del teléfono
+ * aparezca con franjas a los costados.
+ */
+export const MAX_FOTO_GALERIA_BYTES = 200 * 1024;
+
+export async function prepararFotoGaleria(file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error("El archivo no es una imagen");
+
+  const bitmap = await createImageBitmap(file);
+  const corte = Math.min(bitmap.width, bitmap.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = 900;
+  canvas.height = 900;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("No se pudo procesar la imagen");
+  ctx.drawImage(bitmap, (bitmap.width - corte) / 2, (bitmap.height - corte) / 2,
+    corte, corte, 0, 0, 900, 900);
+  bitmap.close();
+
+  for (const calidad of [0.8, 0.68, 0.55, 0.42, 0.3]) {
+    const dataUrl = canvas.toDataURL("image/jpeg", calidad);
+    if (dataUrl.length * 0.75 <= MAX_FOTO_GALERIA_BYTES) return dataUrl;
+  }
+  throw new Error("La foto es demasiado pesada, probá con otra");
+}

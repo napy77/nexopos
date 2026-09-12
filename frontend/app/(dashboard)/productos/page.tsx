@@ -9,6 +9,7 @@ interface StockItem {
   min_stock: string; low_stock: boolean;
   origen: string; plu: string | null; venta_por_peso: boolean;
   image_url: string | null; imagen_propia: boolean;
+  imagenes?: { url: string; tipo?: string }[] | null;
   brand: string | null; descripcion: string | null;
   pasillo_id: string | null; rubro_id: string | null; subrubro_id: string | null;
   pasillo_nombre: string | null; rubro_nombre: string | null; subrubro_nombre: string | null;
@@ -18,7 +19,7 @@ interface Movement {
 }
 import type { B2BProductoMaestro, B2BPresentacionMaestra, B2BTaxonomia, B2BProducto, B2BListing, B2BPresentacion } from "@/lib/b2b-types";
 import { addToCart } from "@/lib/cart";
-import { prepararImagen } from "@/lib/imagen";
+import { prepararFotoGaleria, prepararImagen } from "@/lib/imagen";
 import { Foto } from "@/lib/foto";
 
 interface AltaEnCurso { producto: B2BProductoMaestro; opciones: B2BPresentacionMaestra[]; presIdx: number }
@@ -749,6 +750,8 @@ export default function ProductosPage() {
             Es un producto tuyo, así que podés cambiarle todos los datos. Los precios y el
             stock se editan desde la tabla.
           </p>
+          <Galeria item={editandoPropio} onError={setError}
+            onGuardado={() => { load(); setOkMsg("Fotos guardadas."); setTimeout(() => setOkMsg(""), 3000); }} />
           <form action={guardarEdicionPropio}>
             <div className="toolbar" style={{ alignItems: "flex-start" }}>
               <label className="foto-slot" title="Foto para el punto de venta">
@@ -1029,6 +1032,113 @@ function ModalCompra({
           <button className="secondary" onClick={onCerrar}>Cerrar</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * Las fotos del producto propio: la pizza, las empanadas, la torta.
+ *
+ * Es donde la foto hace la venta. Un paquete de fideos con cuatro fotos de
+ * estudio no vende más fideos —el que lo busca ya sabe qué es—, pero nadie
+ * compra una milanesa que no vio, y justo ahí es donde hoy hay una sola o
+ * ninguna. Las del catálogo se las regalamos a la marca; estas faltaban.
+ *
+ * Con `capture="environment"` el botón abre la cámara directo en el teléfono,
+ * que es como se saca la foto de una pizza: parado al lado del horno, no
+ * buscando un archivo.
+ */
+function Galeria({ item, onGuardado, onError }: {
+  item: StockItem;
+  onGuardado: () => void;
+  onError: (m: string) => void;
+}) {
+  const iniciales = [
+    ...(item.image_url ? [item.image_url] : []),
+    ...((item.imagenes ?? []).filter((i) => (i.tipo ?? "imagen") === "imagen").map((i) => i.url)),
+  ];
+  const [fotos, setFotos] = useState<string[]>(iniciales);
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => { setFotos(iniciales); /* eslint-disable-next-line */ }, [item.product_id]);
+
+  const sucio = JSON.stringify(fotos) !== JSON.stringify(iniciales);
+
+  async function agregar(files: FileList | null) {
+    if (!files?.length) return;
+    onError("");
+    try {
+      const nuevas: string[] = [];
+      for (const f of Array.from(files).slice(0, 6 - fotos.length)) {
+        nuevas.push(await prepararFotoGaleria(f));
+      }
+      setFotos((f) => [...f, ...nuevas].slice(0, 6));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo procesar la foto");
+    }
+  }
+
+  async function guardar() {
+    setGuardando(true);
+    onError("");
+    try {
+      await api(`/api/stock/producto-propio/${item.product_id}/fotos`, {
+        method: "PUT", body: JSON.stringify({ imagenes: fotos }),
+      });
+      onGuardado();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudieron guardar las fotos");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div style={{ margin: "8px 0 12px" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 14 }}>Fotos</strong>
+        <span className="muted" style={{ fontSize: 12 }}>
+          La primera es la que se ve en el punto de venta y en la tienda. Hasta seis.
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+        {fotos.map((src, i) => (
+          <div key={i} style={{ position: "relative" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt="" style={{
+              width: 78, height: 78, objectFit: "cover", borderRadius: 6,
+              border: i === 0 ? "2px solid var(--primary)" : "1px solid var(--border)",
+            }} />
+            {i === 0 && (
+              <span style={{ position: "absolute", bottom: 2, left: 2, fontSize: 9,
+                             background: "var(--primary)", color: "#fff",
+                             padding: "1px 4px", borderRadius: 3 }}>Portada</span>
+            )}
+            <button type="button" title="Quitar" onClick={() => setFotos((f) => f.filter((_, n) => n !== i))}
+              style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20,
+                       borderRadius: "50%", padding: 0, lineHeight: "18px", fontSize: 12 }}>✕</button>
+            {i > 0 && (
+              <button type="button" title="Poner de portada"
+                onClick={() => setFotos((f) => [f[i], ...f.filter((_, n) => n !== i)])}
+                style={{ position: "absolute", bottom: 2, right: 2, fontSize: 9,
+                         padding: "1px 4px" }}>▲</button>
+            )}
+          </div>
+        ))}
+        {fotos.length < 6 && (
+          <label className="foto-slot" style={{ width: 78, height: 78, cursor: "pointer" }}
+            title="Sacar o elegir una foto">
+            <span>📷<br /><span style={{ fontSize: 10 }}>Agregar</span></span>
+            <input type="file" accept="image/*" capture="environment" multiple hidden
+              onChange={(e) => agregar(e.target.files)} />
+          </label>
+        )}
+      </div>
+      {sucio && (
+        <button type="button" onClick={guardar} disabled={guardando} style={{ marginTop: 6 }}>
+          {guardando ? "Guardando…" : "Guardar fotos"}
+        </button>
+      )}
     </div>
   );
 }

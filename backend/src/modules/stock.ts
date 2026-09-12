@@ -21,6 +21,7 @@ stockRouter.get("/", async (req, res, next) => {
       `SELECT s.id, s.product_id, p.name, p.ean, p.category, p.unit,
               COALESCE(s.image_url, p.image_url) AS image_url,
               (s.image_url IS NOT NULL) AS imagen_propia,
+              p.imagenes,
               p.brand, p.descripcion,
               p.pasillo_id, p.pasillo_nombre, p.rubro_id, p.rubro_nombre,
               p.subrubro_id, p.subrubro_nombre,
@@ -490,6 +491,67 @@ stockRouter.get("/alerts", async (req, res, next) => {
       [req.auth.commerceId]
     );
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Las fotos de un producto propio.
+ *
+ * La galería del catálogo viene de NexoB2B y está justo donde menos hace falta:
+ * un paquete de fideos con cuatro fotos de estudio no vende más fideos, porque
+ * el que lo busca ya sabe qué es. La pizza, las empanadas, la torta por encargo
+ * —eso ES la foto—, y es exactamente el producto donde hoy hay una sola o
+ * ninguna.
+ *
+ * Se manda la lista entera y no de a una: sacar tres fotos y ordenarlas es un
+ * solo gesto, y guardar de a una deja estados intermedios donde la portada es
+ * la que el comerciante ya descartó.
+ */
+/*
+ * Cada foto de la galería entra más chica que la portada suelta: seis a 400 KB
+ * no pasarían el límite del cuerpo del request, y en una galería de tienda
+ * 900px a ~200 KB se ve perfecto. El navegador ya las achica antes de subirlas.
+ */
+const MAX_FOTO_GALERIA = 250 * 1024;
+const fotoGaleriaSchema = z
+  .string()
+  .regex(/^data:image\/(jpeg|png|webp);base64,/, "Formato de imagen no soportado")
+  .refine((v) => v.length * 0.75 <= MAX_FOTO_GALERIA, "Una de las fotos es demasiado pesada");
+
+const galeriaSchema = z.object({
+  /** La primera es la portada. Máximo seis: más no las mira nadie. */
+  imagenes: z.array(fotoGaleriaSchema).max(6),
+});
+
+stockRouter.put("/producto-propio/:productId/fotos", async (req, res, next) => {
+  try {
+    const { imagenes } = galeriaSchema.parse(req.body);
+    const commerceId = req.auth.commerceId;
+    const productId = Number(req.params.productId);
+
+    const { rows: actual } = await pool.query(
+      "SELECT id, origen, commerce_id FROM products WHERE id = $1", [productId]
+    );
+    if (!actual[0]) throw new HttpError(404, "Producto no encontrado");
+    if (actual[0].origen !== "propio") {
+      throw new HttpError(400, "Las fotos del catálogo de NexoB2B no se editan desde el POS");
+    }
+    if (actual[0].commerce_id !== commerceId) {
+      throw new HttpError(403, "Ese producto es de otro comercio");
+    }
+
+    // La primera es la portada y el resto la galería, igual que con las del
+    // catálogo: una sola fuente de verdad sobre cuál es la principal.
+    const [portada, ...resto] = imagenes;
+    await pool.query(
+      "UPDATE products SET image_url = $2, imagenes = $3 WHERE id = $1",
+      [productId, portada ?? null,
+       JSON.stringify(resto.map((url) => ({ url, tipo: "imagen", descripcion: null })))]
+    );
+    await audit(commerceId, "producto.fotos", "products", productId, { cuantas: imagenes.length });
+    res.json({ ok: true, imagenes });
   } catch (err) {
     next(err);
   }
