@@ -51,16 +51,19 @@ plataformaRouter.get("/slugs/:slug", requierePlataforma, async (req, res, next) 
     }
 
     const { rows } = await pool.query(
-      `SELECT 'Ya lo usa un comercio' AS motivo FROM commerces WHERE slug = $1
-       UNION ALL
-       SELECT 'Lo usaba un comercio antes y queda tomado' FROM commerce_previous_slugs WHERE slug = $1
-       UNION ALL
-       SELECT 'Ya es una región' FROM regions WHERE slug = $1
-       LIMIT 1`,
+      `SELECT tipo, (ref_id IS NOT NULL AND tipo = 'comercio'
+                     AND NOT EXISTS (SELECT 1 FROM commerces c WHERE c.slug = s.slug)) AS anterior
+         FROM slugs s WHERE slug = $1`,
       [slug]
     );
-
-    res.json(rows[0] ? { libre: false, motivo: rows[0].motivo } : { libre: true });
+    if (!rows[0]) {
+      res.json({ libre: true });
+      return;
+    }
+    const motivo = rows[0].tipo === "region" ? "Ya es una región"
+      : rows[0].anterior ? "Lo usaba un comercio antes y queda tomado"
+      : "Ya lo usa un comercio";
+    res.json({ libre: false, motivo });
   } catch (err) {
     next(err);
   }
@@ -82,13 +85,23 @@ plataformaRouter.put("/regiones/:slug", requierePlataforma, async (req, res, nex
     const forma = formaDelSlug(slug);
     if (!forma.ok) throw new HttpError(400, forma.motivo!);
 
-    // Que no pise un comercio vivo: si el slug ya es de alguien, no se crea.
-    const { rows: tomados } = await pool.query(
-      `SELECT 1 FROM commerces WHERE slug = $1
-       UNION ALL SELECT 1 FROM commerce_previous_slugs WHERE slug = $1 LIMIT 1`,
+    /*
+     * Esta llamada ES la reserva, y por eso no hace falta consultar antes.
+     *
+     * El INSERT en `slugs` con la clave primaria es lo que decide: si el slug
+     * ya es de un comercio o de otra región, no entra, y no hay ventana entre
+     * preguntar y guardar. Preguntar sirve para mostrarle al admin si está
+     * libre mientras escribe; guardar es esto.
+     */
+    const { rows: reserva } = await pool.query(
+      `INSERT INTO slugs (slug, tipo) VALUES ($1, 'region')
+       ON CONFLICT (slug) DO UPDATE SET slug = slugs.slug
+       RETURNING tipo`,
       [slug]
     );
-    if (tomados[0]) throw new HttpError(409, "Ese slug ya lo usa un comercio.");
+    if (reserva[0].tipo !== "region") {
+      throw new HttpError(409, "Ese slug ya lo usa un comercio.");
+    }
 
     const { rows } = await pool.query(
       `INSERT INTO regions (slug, name, province, label)

@@ -352,19 +352,28 @@ settingsRouter.put("/tienda-slug", async (req, res, next) => {
       return;
     }
 
-    // Contra los tres conjuntos. El propio anterior sí se puede retomar: es
-    // suyo, nadie más pudo haberlo agarrado.
-    const { rows: choques } = await client.query(
-      `SELECT 'Ya lo usa otro comercio' AS motivo FROM commerces WHERE slug = $1 AND id <> $2
-       UNION ALL
-       SELECT 'Lo usaba otro comercio antes' FROM commerce_previous_slugs
-        WHERE slug = $1 AND commerce_id <> $2
-       UNION ALL
-       SELECT 'Es la página de un pueblo' FROM regions WHERE slug = $1
-       LIMIT 1`,
+    /*
+     * La reserva y la validación son el mismo INSERT: la clave primaria de
+     * `slugs` es lo que impide que dos comercios tomen el mismo a la vez.
+     * Consultar antes y guardar después dejaba una ventana entre las dos.
+     *
+     * El propio anterior sí se puede retomar —es suyo y nadie más pudo
+     * haberlo agarrado—, y por eso el conflicto se resuelve mirando de quién
+     * es, no rechazando de entrada.
+     */
+    const { rows: reserva } = await client.query(
+      `INSERT INTO slugs (slug, tipo, ref_id) VALUES ($1, 'comercio', $2)
+       ON CONFLICT (slug) DO UPDATE SET slug = slugs.slug
+       RETURNING tipo, ref_id`,
       [slug, commerceId]
     );
-    if (choques[0]) throw new HttpError(409, `No se puede usar "${slug}": ${choques[0].motivo}.`);
+    const duenio = reserva[0];
+    if (duenio.tipo === "region") {
+      throw new HttpError(409, `No se puede usar "${slug}": es la página de un pueblo.`);
+    }
+    if (Number(duenio.ref_id) !== commerceId) {
+      throw new HttpError(409, `No se puede usar "${slug}": ya lo usa otro comercio.`);
+    }
 
     if (anterior) {
       await client.query(
