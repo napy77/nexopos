@@ -161,15 +161,38 @@ async function armarStore(fila: Record<string, unknown>) {
 
 // ── Product ─────────────────────────────────────────────────────────────────
 
-const SELECT_PRODUCTOS = `
-  SELECT p.id, p.name, p.brand, p.descripcion, p.ean, p.unit, p.origen, s.commerce_id,
-         p.pasillo_id, p.pasillo_nombre, p.subrubro_nombre,
-         COALESCE(s.image_url, p.image_url) AS image_url,
-         p.imagenes,
-         s.sale_price, s.quantity, s.availability_policy, s.declared_state,
-         s.quota_total, s.quota_remaining, s.quota_day
-    FROM stock_items s JOIN products p ON p.id = s.product_id
-   WHERE s.commerce_id = $1
+/**
+ * Con qué agrupa la tienda sus categorías.
+ *
+ * No alcanza con `pasillo_id`. La importación de catálogo propio guarda los
+ * nombres de la taxonomía pero no los ids —el endpoint de NexoB2B que la
+ * alimenta manda sólo nombres—, así que un comercio que entró por ahí tiene
+ * todo su catálogo con el id en NULL. Agrupando por el id, esos miles de
+ * productos caían en un único grupo 'sin-pasillo' y la tienda mostraba UNA
+ * sola categoría, con el nombre de cualquiera de ellos: Rivera Hogar tenía
+ * todo el local adentro de "Muebles y Colchones".
+ *
+ * Por eso el nombre sirve de clave cuando no hay id, y el rubro entra si
+ * tampoco hay pasillo: un access point clasificado en Informática tiene dónde
+ * ir, y es mejor chapa que "Otros".
+ *
+ * Va acá y no duplicada en cada consulta a propósito: el id que devuelve cada
+ * producto y el id de la solapa TIENEN que ser el mismo string, o el cliente
+ * toca una categoría y no encuentra nada.
+ */
+const PASILLO_KEY = `COALESCE(
+  p.pasillo_id, 'n:' || p.pasillo_nombre,
+  p.rubro_id,   'n:' || p.rubro_nombre,
+  'sin-pasillo')`;
+
+const PASILLO_NOMBRE = `COALESCE(p.pasillo_nombre, p.rubro_nombre, 'Otros')`;
+
+/**
+ * Qué llega a ver el comprador. Lo usan la lista de productos y la de
+ * categorías, y tiene que ser la misma condición en las dos: una solapa que
+ * cuenta productos que después no aparecen es una solapa que se abre vacía.
+ */
+const VISIBLE_EN_TIENDA = `
      -- El insumo no se vende en ningún lado; published_in_store es el que el
      -- comercio vende en el mostrador pero no quiere publicar. Son distintos.
      AND NOT s.es_insumo AND s.published_in_store
@@ -185,6 +208,17 @@ const SELECT_PRODUCTOS = `
       * venderse a cero, no.
       */
      AND s.sale_price IS NOT NULL AND s.sale_price > 0`;
+
+const SELECT_PRODUCTOS = `
+  SELECT p.id, p.name, p.brand, p.descripcion, p.ean, p.unit, p.origen, s.commerce_id,
+         ${PASILLO_KEY} AS pasillo_key, p.subrubro_nombre,
+         COALESCE(s.image_url, p.image_url) AS image_url,
+         p.imagenes,
+         s.sale_price, s.quantity, s.availability_policy, s.declared_state,
+         s.quota_total, s.quota_remaining, s.quota_day
+    FROM stock_items s JOIN products p ON p.id = s.product_id
+   WHERE s.commerce_id = $1
+     ${VISIBLE_EN_TIENDA}`;
 
 function armarProduct(r: Record<string, unknown>, storeId: string) {
   return {
@@ -214,7 +248,7 @@ function armarProduct(r: Record<string, unknown>, storeId: string) {
     ],
     priceCents: centavos(r.sale_price),
     unit: r.unit ?? "unidad",
-    pasilloId: r.pasillo_id ?? "sin-pasillo",
+    pasilloId: r.pasillo_key,
     subCategory: r.subrubro_nombre ?? undefined,
     origin: r.origen === "propio" ? "propio" : "canonico",
     ean: r.ean ?? undefined,
@@ -301,13 +335,14 @@ v1Router.get("/stores/:storeId/pasillos", catalogo, async (req, res, next) => {
   try {
     const storeId = Number(req.params.storeId);
     const { rows } = await pool.query(
-      `SELECT COALESCE(p.pasillo_id, 'sin-pasillo') AS id,
-              COALESCE(MAX(p.pasillo_nombre), 'Otros') AS name,
+      `SELECT ${PASILLO_KEY} AS id,
+              MAX(${PASILLO_NOMBRE}) AS name,
               COUNT(*)::int AS product_count,
               ARRAY_REMOVE(ARRAY_AGG(DISTINCT p.subrubro_nombre), NULL) AS subs
          FROM stock_items s JOIN products p ON p.id = s.product_id
-        WHERE s.commerce_id = $1 AND NOT s.es_insumo AND s.published_in_store
-        GROUP BY COALESCE(p.pasillo_id, 'sin-pasillo')
+        WHERE s.commerce_id = $1
+          ${VISIBLE_EN_TIENDA}
+        GROUP BY ${PASILLO_KEY}
         ORDER BY name`,
       [storeId]
     );

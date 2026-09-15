@@ -132,6 +132,13 @@ stockRouter.post("/importar-propios", async (req, res, next) => {
            brand = COALESCE(EXCLUDED.brand, products.brand),
            image_url = COALESCE(EXCLUDED.image_url, products.image_url),
            imagenes = EXCLUDED.imagenes,
+           -- La clasificación también se refresca: si el producto entró sin
+           -- pasillo y en NexoB2B lo clasificaron después, reimportar tiene
+           -- que arreglarlo. Antes quedaba congelada la del primer día y la
+           -- tienda lo mostraba mal para siempre.
+           pasillo_nombre = COALESCE(EXCLUDED.pasillo_nombre, products.pasillo_nombre),
+           rubro_nombre = COALESCE(EXCLUDED.rubro_nombre, products.rubro_nombre),
+           subrubro_nombre = COALESCE(EXCLUDED.subrubro_nombre, products.subrubro_nombre),
            synced_at = now()
          RETURNING id`,
         [l.presentacionId, l.ean, `${l.nombre} — ${l.presentacionNombre}`, l.marca,
