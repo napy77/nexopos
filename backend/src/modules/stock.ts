@@ -17,6 +17,18 @@ stockRouter.get("/", async (req, res, next) => {
       where += ` AND (p.name ILIKE $${params.length - 1} OR p.ean = $${params.length})`;
     }
     if (lowOnly) where += " AND s.quantity <= s.min_stock";
+    /*
+     * Los que todavía no tienen precio de mostrador.
+     *
+     * Hace falta un filtro propio porque pueden entrar de a miles: un comercio
+     * que también es mayorista importa su catálogo y ninguno de esos productos
+     * trae precio de venta —el de NexoB2B es el que le cobra a los almacenes,
+     * no el del mostrador—. Sin una forma de encontrarlos, el comerciante los
+     * descubre de a uno cuando un cliente pregunta.
+     */
+    if (req.query.sinPrecio === "true") {
+      where += " AND (s.sale_price IS NULL OR s.sale_price = 0)";
+    }
     const { rows } = await pool.query(
       `SELECT s.id, s.product_id, p.name, p.ean, p.category, p.unit,
               COALESCE(s.image_url, p.image_url) AS image_url,
@@ -34,6 +46,28 @@ stockRouter.get("/", async (req, res, next) => {
       params
     );
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/stock/sin-precio — cuántos productos no se pueden vender todavía.
+ *
+ * Va aparte de la lista porque el aviso tiene que aparecer aunque el filtro
+ * esté apagado: el comerciante no sabe que tiene productos invisibles hasta
+ * que alguien se los pide, y con una importación de catálogo propio pueden ser
+ * miles de una vez.
+ */
+stockRouter.get("/sin-precio", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM stock_items
+        WHERE commerce_id = $1 AND NOT es_insumo
+          AND (sale_price IS NULL OR sale_price = 0)`,
+      [req.auth.commerceId]
+    );
+    res.json({ sinPrecio: rows[0].n });
   } catch (err) {
     next(err);
   }

@@ -172,7 +172,19 @@ const SELECT_PRODUCTOS = `
    WHERE s.commerce_id = $1
      -- El insumo no se vende en ningún lado; published_in_store es el que el
      -- comercio vende en el mostrador pero no quiere publicar. Son distintos.
-     AND NOT s.es_insumo AND s.published_in_store`;
+     AND NOT s.es_insumo AND s.published_in_store
+     /*
+      * Sin precio de venta no sale a la tienda.
+      *
+      * Un producto sin precio se mostraría en $0 y alguien lo compraría: el
+      * comercio se entera cuando cierra la caja. Es el mismo riesgo que NexoB2B
+      * nos marcó al abrir la importación de catálogo propio, donde entran miles
+      * de productos sin precio de mostrador de una sola vez.
+      *
+      * No aparecer es un problema visible —el comerciante lo busca y no está—;
+      * venderse a cero, no.
+      */
+     AND s.sale_price IS NOT NULL AND s.sale_price > 0`;
 
 function armarProduct(r: Record<string, unknown>, storeId: string) {
   return {

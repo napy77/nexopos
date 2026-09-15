@@ -48,6 +48,8 @@ const MOVE_LABEL: Record<string, string> = {
 
 export default function ProductosPage() {
   const [q, setQ] = useState("");
+  const [sinPrecio, setSinPrecio] = useState(0);
+  const [soloSinPrecio, setSoloSinPrecio] = useState(false);
   const [lowOnly, setLowOnly] = useState(false);
   const [items, setItems] = useState<StockItem[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
@@ -73,8 +75,12 @@ export default function ProductosPage() {
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ q, lowOnly: String(lowOnly) });
+    if (soloSinPrecio) params.set("sinPrecio", "true");
     setItems(await api<StockItem[]>(`/api/stock?${params}`));
-  }, [q, lowOnly]);
+    api<{ sinPrecio: number }>("/api/stock/sin-precio")
+      .then((d) => setSinPrecio(d.sinPrecio))
+      .catch(() => {});
+  }, [q, lowOnly, soloSinPrecio]);
 
   useEffect(() => { load().catch(console.error); }, [load]);
   useEffect(() => {
@@ -382,6 +388,21 @@ export default function ProductosPage() {
         </button>
       </div>
       {error && <p className="error">{error}</p>}
+
+      {sinPrecio > 0 && (
+        <div className="card" style={{ borderLeft: "4px solid var(--warn, #d97706)", padding: "10px 14px" }}>
+          <strong>{sinPrecio} {sinPrecio === 1 ? "producto" : "productos"} sin precio de venta.</strong>{" "}
+          <span className="muted">
+            No se muestran en tu tienda online hasta que les pongas uno, y en el mostrador no se
+            pueden cobrar. El precio de NexoB2B es el mayorista: no es el tuyo.
+          </span>{" "}
+          <button type="button" className={soloSinPrecio ? "" : "ghost"}
+            style={{ fontSize: 12, marginLeft: 4 }}
+            onClick={() => setSoloSinPrecio(!soloSinPrecio)}>
+            {soloSinPrecio ? "Ver todos" : "Ver solo esos"}
+          </button>
+        </div>
+      )}
       {okMsg && !showAdd && <p className="badge ok" style={{ fontSize: 14 }}>{okMsg}</p>}
 
       {showPropio && (
