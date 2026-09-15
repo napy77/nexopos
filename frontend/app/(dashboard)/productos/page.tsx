@@ -44,6 +44,8 @@ const MOVE_LABEL: Record<string, string> = {
   sale: "Venta",
   manual_adjustment: "Ajuste manual",
   return: "Devolución",
+  erp: "Escrito por tu sistema",
+  import: "Importación de catálogo propio",
 };
 
 export default function ProductosPage() {
@@ -233,9 +235,9 @@ export default function ProductosPage() {
       );
       await load();
       setOkMsg(r.mensaje ?? (r.importados === 0
-        ? `Ya estaban los ${r.yaEstaban}. No se tocó ningún precio ni stock.`
-        : `${r.importados} productos importados, sin precio de venta. ` +
-          "Ponéles el tuyo: el de NexoB2B es el mayorista."));
+        ? `Ya estaban los ${r.yaEstaban}. Se actualizaron los costos; el precio de venta y el stock quedaron como los tenías.`
+        : `${r.importados} productos importados con su costo y el stock que tenían en NexoB2B. ` +
+          "Falta el precio de venta: el de NexoB2B es el costo, el de mostrador lo ponés vos."));
       setTimeout(() => setOkMsg(""), 8000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo importar");
@@ -818,6 +820,13 @@ export default function ProductosPage() {
                 </label>
                 <label style={{ fontSize: 13 }}>
                   Precio de venta
+                  {/* El costo al lado del campo y no en una columna lejana:
+                      quien está poniendo el precio necesita ver sobre qué. */}
+                  {editing.cost !== null && (
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {" "}— te cuesta {money(Number(editing.cost))}
+                    </span>
+                  )}
                   <input name="salePrice" type="number" step="0.01" min="0"
                     defaultValue={editing.sale_price ?? ""} placeholder="sin precio"
                     style={{ width: "100%" }} />

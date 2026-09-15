@@ -81,18 +81,24 @@ stockRouter.get("/sin-precio", async (req, res, next) => {
  * comercio a la vez. Sin esto tendrían que hacerse una orden de compra a sí
  * mismos o cargar los mismos miles de productos de nuevo a mano.
  *
- * Entran **sin precio de venta y sin stock**, y las dos cosas son a propósito:
+ * Entran **con costo y con stock, y sin precio de venta**:
  *
- * - El precio de NexoB2B es el mayorista —lo que ese negocio le cobra a los
- *   almacenes—. Tomarlo como precio de mostrador haría que venda a costo con
- *   miles de productos a la vez, y se entere cuando cierre la caja. Sin precio
- *   no se puede cobrar ni sale a la tienda: es un problema visible.
- * - El stock de allá es el que ve el mayorista. Hasta saber si el ERP del
- *   cliente le escribe a los dos sistemas, darlo por bueno sería vender en el
- *   mostrador lo que ya se despachó por mayor.
+ * - El costo viene de NexoB2B con la lista del comercio ya aplicada: el
+ *   híbrido se asigna una lista a sí mismo y pasa su precio tal cual. Es lo
+ *   que cuesta reponer, y sin él no hay margen que calcular.
+ * - El stock es el que tiene contado del otro lado. Es el mismo depósito: son
+ *   la misma empresa. Entra como punto de partida —mejor que arrancar todo en
+ *   cero y contar miles de productos a mano—, pero es una foto del momento de
+ *   importar, no un espejo: de ahí en más cada sistema lleva el suyo.
+ * - El precio de venta no, y esto no cambió: el de NexoB2B es el costo. Usarlo
+ *   de precio de mostrador haría que venda a costo con miles de productos a la
+ *   vez y se entere cuando cierre la caja. Sin precio no se puede cobrar ni
+ *   sale a la tienda: es un problema visible.
  *
- * Lo que ya está en el stock no se pisa: si el comerciante le puso precio o
- * contó las unidades, eso es suyo y vale más que lo que diga el catálogo.
+ * Lo que el comerciante ya tocó no se pisa: si le puso precio o contó las
+ * unidades, eso es suyo y vale más que lo que diga el catálogo. La excepción
+ * es el costo, que se refresca en cada importación: para sus propios productos
+ * el número de NexoB2B no es una opinión, es el que él mismo cargó allá.
  */
 stockRouter.post("/importar-propios", async (req, res, next) => {
   const client = await pool.connect();
@@ -133,14 +139,30 @@ stockRouter.post("/importar-propios", async (req, res, next) => {
          l.pasillo, l.rubro, l.subrubro, JSON.stringify(l.imagenes)]
       );
 
-      // DO NOTHING y no UPDATE: lo que el comerciante ya tocó no se pisa.
-      const { rowCount } = await client.query(
-        `INSERT INTO stock_items (commerce_id, product_id, quantity, sale_price, updated_at)
-         VALUES ($1, $2, 0, NULL, now())
-         ON CONFLICT (commerce_id, product_id) DO NOTHING`,
-        [commerceId, prod.id]
+      // La cantidad y el precio de venta solo se escriben al dar de alta la
+      // línea: en una reimportación son del comerciante y no se tocan. El
+      // costo sí se refresca, porque es suyo de los dos lados.
+      const { rows: [fila] } = await client.query(
+        `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price, updated_at)
+         VALUES ($1, $2, $3, $4, NULL, now())
+         ON CONFLICT (commerce_id, product_id) DO UPDATE SET
+           cost = COALESCE(EXCLUDED.cost, stock_items.cost),
+           updated_at = now()
+         RETURNING (xmax = 0) AS nueva`,
+        [commerceId, prod.id, l.stock ?? 0, l.costo]
       );
-      if (rowCount === 1) importados++; else yaEstaban++;
+      if (fila.nueva) {
+        importados++;
+        // Que quede el asiento: dentro de un mes, cuando el número no cuadre,
+        // la pregunta va a ser de dónde salieron esas unidades.
+        if (l.stock) {
+          await client.query(
+            `INSERT INTO stock_movements (commerce_id, product_id, type, quantity, reference)
+             VALUES ($1, $2, 'import', $3, 'Importación de catálogo propio (NexoB2B)')`,
+            [commerceId, prod.id, l.stock]
+          );
+        }
+      } else yaEstaban++;
     }
     await client.query("COMMIT");
     await audit(commerceId, "stock.importar-propios", undefined, undefined, { importados, yaEstaban });

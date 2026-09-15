@@ -727,7 +727,14 @@ export interface B2BProductoPropio {
       presentacion_id?: string;
       nombre: string;
       factor: number;
+      /**
+       * El precio que ESTE comercio tiene acordado, con su lista ya aplicada.
+       * Antes venía el precio de lista del mayorista y el que tenía un 30%
+       * acordado veía un costo de reposición más alto que el real.
+       */
       precio: number;
+      /** El precio antes del ajuste. Solo viene si hubo ajuste. */
+      precio_sin_ajuste?: number | null;
       stock: number | null;
       ean_propio: string | null;
     }[] | null;
@@ -743,9 +750,12 @@ export interface B2BProductoPropio {
  * inconsistencia conocida de ese endpoint, que NexoB2B va a unificar cuando
  * migremos—.
  *
- * **El `precio` no se toma.** Es el mayorista: lo que ese negocio le cobra a
- * los almacenes, no lo que cobra en el mostrador. Usarlo como precio de venta
- * haría que venda a costo y se entere cuando cierra la caja.
+ * **El `precio` es el costo, nunca el precio de venta.** Desde que NexoB2B
+ * aplica las listas, ese número es el que este comercio tiene acordado —el
+ * híbrido se asigna una lista a sí mismo, típicamente al 0%, y pasa su precio
+ * tal cual—. Sirve para saber cuánto cuesta reponer y calcular el margen.
+ * Tomarlo como precio de mostrador haría que venda a costo miles de productos
+ * a la vez y se entere cuando cierra la caja.
  */
 export async function catalogoPropio(token: string): Promise<{
   presentacionId: string;
@@ -761,6 +771,10 @@ export async function catalogoPropio(token: string): Promise<{
   pasillo: string | null;
   rubro: string | null;
   subrubro: string | null;
+  /** Costo de reposición, con la lista del comercio aplicada. */
+  costo: number | null;
+  /** Lo que el mayorista —o sea él mismo— tiene contado. null = no gestiona. */
+  stock: number | null;
 }[]> {
   if (isMockMode()) {
     return [{
@@ -768,6 +782,7 @@ export async function catalogoPropio(token: string): Promise<{
       presentacionNombre: "unidad", ean: "7798042240180", marca: "VOSS",
       unidad: "unidad", factor: 1, alicuotaIva: 21,
       imagenUrl: null, imagenes: [], pasillo: "Bazar", rubro: null, subrubro: null,
+      costo: 21629.3, stock: 5,
     }];
   }
 
@@ -800,6 +815,10 @@ export async function catalogoPropio(token: string): Promise<{
             imagenUrl: urlPublica(p.imagen_url),
             imagenes: absolutas(p.imagenes),
             pasillo: p.pasillo, rubro: p.rubro, subrubro: p.subrubro,
+            // Un precio en cero no es un precio: es el mayorista que todavía
+            // no lo cargó. Guardarlo como costo daría un margen del 100%.
+            costo: Number(pres.precio) > 0 ? Number(pres.precio) : null,
+            stock: pres.stock === null || pres.stock === undefined ? null : Number(pres.stock),
           });
         }
       }
