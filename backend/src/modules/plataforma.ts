@@ -117,3 +117,60 @@ plataformaRouter.put("/regiones/:slug", requierePlataforma, async (req, res, nex
     next(err);
   }
 });
+
+/**
+ * DELETE /api/regiones/:slug — soltar una región y su slug.
+ *
+ * Existe por un caso concreto que planteó NexoB2B: reservan el slug, les falla
+ * el guardado de su lado, y queda una reserva sin región detrás. Sin esto, ese
+ * slug queda tomado para siempre por algo que no existe.
+ *
+ * **No borra una región que tenga comercios.** Si hay aunque sea uno asignado,
+ * la región estuvo en uso: borrarla se llevaría puestas esas asignaciones —el
+ * FK es ON DELETE CASCADE— y dejaría comercios sin pueblo sin que nadie lo
+ * pida. Ahí contesta 409 y dice cuántos son, para que la decisión la tome una
+ * persona con el dato.
+ *
+ * El slug se libera junto con la región. Conviene usarlo solo para reservas que
+ * fallaron: si la región llegó a estar publicada, sus links ya circularon, y
+ * liberar el slug deja que un comercio herede el tráfico del pueblo. Es la
+ * misma razón por la que el slug anterior de un comercio no se libera nunca.
+ */
+plataformaRouter.delete("/regiones/:slug", requierePlataforma, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const slug = String(req.params.slug || "").trim().toLowerCase();
+
+    await client.query("BEGIN");
+    const { rows: existe } = await client.query(
+      "SELECT slug FROM regions WHERE slug = $1 FOR UPDATE", [slug]
+    );
+    if (!existe[0]) {
+      // Idempotente: que ya no esté es el resultado que buscaban.
+      await client.query("DELETE FROM slugs WHERE slug = $1 AND tipo = 'region'", [slug]);
+      await client.query("COMMIT");
+      res.json({ ok: true, liberado: slug, yaNoEstaba: true });
+      return;
+    }
+
+    const { rows: [uso] } = await client.query(
+      "SELECT COUNT(*)::int AS n FROM commerce_regions WHERE region_slug = $1", [slug]
+    );
+    if (uso.n > 0) {
+      throw new HttpError(409,
+        `No se borra: ${uso.n} ${uso.n === 1 ? "comercio reparte" : "comercios reparten"} en esa región. ` +
+        "Sacálos primero, o dejala como está.");
+    }
+
+    await client.query("DELETE FROM regions WHERE slug = $1", [slug]);
+    await client.query("DELETE FROM slugs WHERE slug = $1 AND tipo = 'region'", [slug]);
+    await client.query("COMMIT");
+    console.log(`[plataforma] región ${slug} borrada y su slug liberado`);
+    res.json({ ok: true, liberado: slug });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
+  }
+});
