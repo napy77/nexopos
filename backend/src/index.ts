@@ -25,6 +25,7 @@ import { plataformaRouter } from "./modules/plataforma.js";
 import { v1Router } from "./modules/v1-catalogo.js";
 import { pedidosRouter } from "./modules/v1-pedidos.js";
 import { pedidosPosRouter } from "./modules/pedidos.js";
+import { erpRouter } from "./modules/erp.js";
 import { iniciarOutbox } from "./modules/clubpay-outbox.js";
 import { iniciarWebhooks } from "./modules/webhooks.js";
 
@@ -66,6 +67,10 @@ app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/caja", requireAuth, cajaRouter);
 app.use("/api/disponibilidad", requireAuth, disponibilidadRouter);
 app.use("/api/pedidos", requireAuth, pedidosPosRouter);
+// La API del sistema del comercio —su ERP, Odoo, lo que use—. Autentica con
+// una clave que el comerciante genera desde el POS, propia de su comercio.
+app.use("/api/erp/v1", erpRouter);
+
 // La API pública que consume NexoTienda. Autentica por capacidad, no por
 // comercio: es un servidor que renderiza la tienda de cualquiera.
 // Routers separados a propósito: cada uno pide SU clave. Con un solo router

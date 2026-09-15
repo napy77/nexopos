@@ -572,3 +572,84 @@ settingsRouter.get("/franjas", async (req, res, next) => {
     next(err);
   }
 });
+
+// ── Claves de API para el sistema del comercio ──────────────────────────────
+
+import { randomBytes } from "node:crypto";
+import { hashClave } from "../middleware/erp-key.js";
+
+/** GET /api/settings/api-keys — las claves del comercio, sin revelarlas */
+settingsRouter.get("/api-keys", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nombre, prefijo, usada_at, revocada_at, created_at
+         FROM api_keys WHERE commerce_id = $1 ORDER BY created_at DESC`,
+      [req.auth.commerceId]
+    );
+    res.json(rows.map((r) => ({
+      id: Number(r.id),
+      nombre: r.nombre,
+      // Solo el principio: alcanza para reconocerla en la lista y no sirve
+      // para usarla.
+      preview: `${r.prefijo}…`,
+      usadaAt: r.usada_at ? new Date(r.usada_at).toISOString() : null,
+      revocada: Boolean(r.revocada_at),
+      creadaAt: new Date(r.created_at).toISOString(),
+    })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/settings/api-keys — crea una y la muestra UNA vez.
+ *
+ * De la clave se guarda el hash. No se puede volver a ver: si se pierde, se
+ * crea otra y se revoca esta. Es incómodo a propósito —una clave que se puede
+ * recuperar es una clave que alguien puede ir a buscar a la base, al backup o
+ * a una consulta de soporte—.
+ */
+settingsRouter.post("/api-keys", async (req, res, next) => {
+  try {
+    const nombre = String(req.body?.nombre ?? "").trim().slice(0, 80);
+    if (!nombre) throw new HttpError(400, "Poné un nombre para saber cuál es: \"ERP\", \"Odoo\"…");
+
+    // `npos_` adelante para que se reconozca de un vistazo si aparece pegada
+    // en un archivo de configuración o en un mensaje.
+    const clave = `npos_${randomBytes(24).toString("hex")}`;
+    const { rows } = await pool.query(
+      `INSERT INTO api_keys (commerce_id, nombre, hash, prefijo)
+       VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+      [req.auth.commerceId, nombre, hashClave(clave), clave.slice(0, 12)]
+    );
+    await audit(req.auth.commerceId, "settings.api-key.crear", "api_keys", rows[0].id, { nombre });
+    res.status(201).json({
+      id: Number(rows[0].id), nombre, clave,
+      aviso: "Guardala ahora: no se puede volver a ver.",
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/settings/api-keys/:id — revoca.
+ *
+ * No se borra la fila: queda el rastro de que existió y cuándo se usó por
+ * última vez. Si algo dejó de andar, poder ver qué clave se apagó y cuándo es
+ * la mitad de la respuesta.
+ */
+settingsRouter.delete("/api-keys/:id", async (req, res, next) => {
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE api_keys SET revocada_at = now()
+        WHERE id = $1 AND commerce_id = $2 AND revocada_at IS NULL`,
+      [Number(req.params.id), req.auth.commerceId]
+    );
+    if (rowCount === 0) throw new HttpError(404, "Esa clave no existe o ya estaba revocada");
+    await audit(req.auth.commerceId, "settings.api-key.revocar", "api_keys", Number(req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
