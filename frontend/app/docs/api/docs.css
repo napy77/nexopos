@@ -1,0 +1,135 @@
+/* Documentación de la API. Estilos propios y no los del POS: el que la lee
+   está en otra pantalla, en otro contexto, y casi siempre en otra empresa. */
+
+.doc { min-height: 100vh; background: var(--bg); color: var(--text); }
+
+.doc header {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 14px 28px; display: flex; align-items: baseline; gap: 12px;
+}
+.doc .marca { font-size: 19px; font-weight: 800; letter-spacing: -0.4px; }
+.doc .marca span { color: var(--primary); }
+.doc .sub { color: var(--muted); font-size: 13px; }
+
+.doc .cuerpo { display: flex; gap: 40px; max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+
+/* El índice se queda a la vista: quien vuelve a buscar algo suelto no tiene
+   que rebobinar hasta arriba. */
+.doc nav {
+  position: sticky; top: 64px; align-self: flex-start;
+  width: 200px; flex: none; padding: 28px 0; font-size: 13px;
+}
+.doc nav a {
+  display: block; padding: 5px 10px; color: var(--muted);
+  text-decoration: none; border-left: 2px solid transparent; border-radius: 0 4px 4px 0;
+}
+.doc nav a:hover { color: var(--text); background: rgba(0,0,0,.03); }
+.doc nav a.activa { color: var(--primary); border-left-color: var(--primary); font-weight: 600; }
+.doc nav .nota {
+  margin-top: 18px; padding: 10px; font-size: 12px; color: var(--muted);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+}
+
+.doc main { flex: 1; min-width: 0; padding: 28px 0 80px; }
+.doc h1 { font-size: 30px; letter-spacing: -0.6px; margin: 0 0 8px; }
+.doc .entrada { font-size: 16px; color: var(--muted); max-width: 62ch; margin: 0 0 8px; }
+.doc section { scroll-margin-top: 78px; padding-top: 26px; }
+.doc h2 {
+  font-size: 21px; margin: 0 0 12px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.doc h3 { font-size: 15px; margin: 22px 0 6px; }
+.doc p, .doc li { line-height: 1.62; max-width: 66ch; }
+.doc .muted { color: var(--muted); font-size: 13px; }
+.doc a { color: var(--primary); }
+
+/* Una nota al margen del argumento principal: por qué algo es como es. */
+.doc .aparte {
+  border-left: 3px solid var(--border); padding-left: 14px;
+  color: var(--muted); font-size: 14px;
+}
+
+.doc .firma {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 12px; display: inline-block;
+}
+.doc .verbo {
+  font-weight: 700; margin-right: 8px; padding: 1px 7px;
+  border-radius: 4px; font-size: 12px; color: #fff;
+}
+.doc .verbo.get { background: var(--success); }
+.doc .verbo.put { background: var(--warning); }
+
+.doc .bloque { position: relative; margin: 12px 0; }
+.doc .bloque pre {
+  background: #0f1729; color: #e6edf7; border-radius: 8px;
+  padding: 14px 16px; overflow-x: auto; margin: 0;
+  font-size: 12.5px; line-height: 1.6;
+}
+.doc .bloque pre::before {
+  content: attr(data-lang); position: absolute; top: 10px; right: 76px;
+  font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: .5px;
+}
+.doc .copiar {
+  position: absolute; top: 8px; right: 8px; z-index: 1;
+  background: #1e293b; color: #cbd5e1; border: 1px solid #334155;
+  border-radius: 5px; padding: 3px 9px; font-size: 11px; cursor: pointer;
+}
+.doc .copiar:hover { background: #334155; color: #fff; }
+
+.doc table { border-collapse: collapse; margin: 10px 0; font-size: 14px; }
+.doc th, .doc td {
+  border-bottom: 1px solid var(--border); padding: 7px 14px 7px 0; text-align: left;
+  vertical-align: top;
+}
+.doc th { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.doc code {
+  background: rgba(29,78,216,.07); color: var(--primary-dark);
+  padding: 1px 5px; border-radius: 4px; font-size: 12.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.doc .bloque code { background: none; color: inherit; padding: 0; font-size: inherit; }
+.doc .chip {
+  font-size: 10px; background: var(--border); color: var(--muted);
+  padding: 1px 5px; border-radius: 3px; text-transform: uppercase;
+}
+
+.doc .pasos { padding-left: 20px; }
+.doc .pasos li { margin-bottom: 8px; }
+
+/* La única parte donde equivocarse cuesta plata. Si se viera como el resto,
+   se leería como el resto. */
+.doc .alerta {
+  background: #fffbeb; border: 1px solid #fcd9a4; border-left: 4px solid var(--warning);
+  border-radius: 8px; padding: 16px 18px; margin: 18px 0;
+}
+.doc .alerta h3 { margin-top: 0; color: #92400e; font-size: 16px; }
+.doc .comparacion td { border: none; padding: 5px 16px 5px 0; }
+.doc .comparacion .mal { color: var(--danger); font-weight: 600; }
+.doc .comparacion .bien { color: var(--success); font-weight: 600; }
+
+.doc footer {
+  margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--border);
+  color: var(--muted); font-size: 13px;
+}
+
+/* En el teléfono el índice estorba más de lo que ayuda */
+@media (max-width: 860px) {
+  .doc .cuerpo { flex-direction: column; gap: 0; padding: 0 18px; }
+  .doc nav { position: static; width: auto; padding: 16px 0 0;
+             display: flex; flex-wrap: wrap; gap: 4px; }
+  .doc nav a { border-left: none; border-radius: 999px; padding: 4px 10px;
+               background: var(--surface); border: 1px solid var(--border); }
+  .doc nav a.activa { border-color: var(--primary); }
+  .doc nav .nota { width: 100%; margin-top: 10px; }
+  .doc h1 { font-size: 24px; }
+}
+
+@media (max-width: 860px) {
+  /* La etiqueta del lenguaje pisaba el botón de copiar. En una pantalla
+     angosta el botón importa y la etiqueta no dice nada que no se vea. */
+  .doc .bloque pre::before { display: none; }
+}

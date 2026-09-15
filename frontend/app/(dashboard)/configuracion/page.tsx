@@ -1006,9 +1006,13 @@ function ClavesApi({ onError }: { onError: (m: string) => void }) {
           </tbody>
         </table>
       )}
-      <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-        La documentación para quien la programe está en{" "}
-        <strong>nexopos.app/docs/api</strong>.
+      <a href="/docs/api" target="_blank" rel="noreferrer"
+        style={{ display: "inline-block", marginTop: 10, fontSize: 13, fontWeight: 600 }}>
+        Ver la documentación ↗
+      </a>
+      <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+        Pasásela a quien programe tu sistema: está en{" "}
+        <code style={{ fontSize: 11 }}>nexopos.app/docs/api</code> y se lee sin cuenta.
       </p>
     </div>
   );
