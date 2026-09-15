@@ -297,6 +297,12 @@ export default function ProductosPage() {
           productId: editing.product_id,
           quantityDelta: Number(form.get("delta") ?? 0),
           reason: String(form.get("reason") || "Ajuste manual"),
+          // El formulario los pedía y no los mandaba: se tipeaban y se
+          // perdían. Con un catálogo importado, el precio es justo lo que el
+          // comerciante viene a completar acá.
+          salePrice: form.get("salePrice") ? Number(form.get("salePrice")) : undefined,
+          minStock: form.get("minStock") !== "" && form.get("minStock") !== null
+            ? Number(form.get("minStock")) : undefined,
         }),
       });
       setEditing(null);
@@ -787,17 +793,52 @@ export default function ProductosPage() {
         </table>
       </div>
 
+      {/*
+        * Va como modal y no como panel debajo de la tabla.
+        *
+        * Antes se dibujaba al final de la página: con veinte productos se veía
+        * al tocar el botón, con tres mil quedaba a miles de píxeles abajo y
+        * parecía que el botón no hacía nada. Un comercio que importa su
+        * catálogo entero llega a esa lista el primer día.
+        */}
       {editing && (
-        <div className="card" style={{ border: "2px solid var(--primary)" }}>
-          <h2>Ajustar: {editing.name}</h2>
-          <form action={saveAdjust} className="toolbar">
-            <input name="delta" type="number" step="any" placeholder="Δ cantidad (+/-)" style={{ width: 140 }} />
-            <input name="salePrice" type="number" step="0.01" placeholder="Precio venta" defaultValue={editing.sale_price ?? ""} style={{ width: 130 }} />
-            <input name="minStock" type="number" step="any" placeholder="Stock mínimo" defaultValue={Number(editing.min_stock) || ""} style={{ width: 130 }} />
-            <input name="reason" type="text" placeholder="Motivo del ajuste" required />
-            <button type="submit">Guardar</button>
-            <button type="button" className="secondary" onClick={() => setEditing(null)}>Cancelar</button>
-          </form>
+        <div className="modal-backdrop" onClick={() => setEditing(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h2 style={{ marginTop: 0 }}>Ajustar: {editing.name}</h2>
+            <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+              En góndola hay <strong>{Number(editing.quantity)}</strong>
+              {editing.sale_price === null && " · este producto todavía no tiene precio de venta"}
+            </p>
+            <form action={saveAdjust}>
+              <div style={{ display: "grid", gap: 8 }}>
+                <label style={{ fontSize: 13 }}>
+                  Cuánto entra o sale
+                  <input name="delta" type="number" step="any" autoFocus
+                    placeholder="+10 entran · -3 salen" style={{ width: "100%" }} />
+                </label>
+                <label style={{ fontSize: 13 }}>
+                  Precio de venta
+                  <input name="salePrice" type="number" step="0.01" min="0"
+                    defaultValue={editing.sale_price ?? ""} placeholder="sin precio"
+                    style={{ width: "100%" }} />
+                </label>
+                <label style={{ fontSize: 13 }}>
+                  Stock mínimo para avisarte
+                  <input name="minStock" type="number" step="any" min="0"
+                    defaultValue={Number(editing.min_stock) || ""} style={{ width: "100%" }} />
+                </label>
+                <label style={{ fontSize: 13 }}>
+                  Motivo
+                  <input name="reason" type="text" required
+                    placeholder="Conteo, rotura, faltante…" style={{ width: "100%" }} />
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button type="submit">Guardar</button>
+                <button type="button" className="secondary" onClick={() => setEditing(null)}>Cancelar</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
