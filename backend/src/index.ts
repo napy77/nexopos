@@ -28,6 +28,7 @@ import { pedidosPosRouter } from "./modules/pedidos.js";
 import { erpRouter } from "./modules/erp.js";
 import { iniciarOutbox } from "./modules/clubpay-outbox.js";
 import { iniciarWebhooks } from "./modules/webhooks.js";
+import { b2bStockRouter, b2bStockWebhookRouter, iniciarStockB2B } from "./modules/b2b-stock.js";
 
 const arranque = new Date().toISOString();
 const app = express();
@@ -82,6 +83,11 @@ app.use("/v1", pedidosRouter);
 // no hay ningún comerciante del otro lado, así que no va requireAuth.
 app.use("/api", plataformaRouter);
 
+// Igual que el de ClubPay: lo llama NexoB2B cuando el mayorista despacha, no
+// un cajero. Se autentica con el token que lleva la URL.
+app.use("/api/nexob2b/stock", b2bStockWebhookRouter);
+app.use("/api/b2b-stock", requireAuth, b2bStockRouter);
+
 // El webhook lo llama ClubPay, no un cajero: se autentica con la clave del
 // comercio y por eso va antes y sin requireAuth.
 app.use("/api/clubpay/webhook", clubpayWebhookRouter);
@@ -103,6 +109,7 @@ async function main() {
   // Avisos de cuenta corriente pendientes de entregar a ClubPay
   iniciarOutbox();
   iniciarWebhooks();
+  iniciarStockB2B();
 
   app.listen(config.port, () => {
     console.log(`NexoPOS backend escuchando en http://localhost:${config.port}`);

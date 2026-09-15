@@ -10,6 +10,7 @@ import { clubpayKey } from "./clubpay.js";
 import { encolarMovimiento } from "./clubpay-outbox.js";
 import { descontarCupo } from "./disponibilidad.js";
 import { periodoAbierto, estadoCredito } from "./cuenta-corriente.js";
+import { encolarStockB2B } from "./b2b-stock.js";
 
 export const salesRouter = Router();
 
@@ -274,6 +275,15 @@ salesRouter.post("/", async (req, res, next) => {
       });
     }
 
+    // El mostrador es el que se entera primero de que la unidad se fue. Sólo
+    // pesa sobre las líneas del catálogo propio, y sólo si el comercio prendió
+    // la sincronización: lo decide encolarStockB2B, no esta llamada.
+    await encolarStockB2B(
+      client, commerceId,
+      lines.map((l) => ({ productId: l.productId, quantity: -l.quantity })),
+      `TICKET-${sale.ticket_number}`
+    );
+
     await client.query("COMMIT");
     await audit(commerceId, "sale.create", "sales", sale.id, { total, paymentMethod: body.paymentMethod });
     const vuelto =
@@ -414,6 +424,13 @@ salesRouter.post("/:id/refund", async (req, res, next) => {
         description: `Reembolso ticket #${original.ticket_number}`,
       });
     }
+    // La mercadería que volvió al mostrador vuelve también allá.
+    await encolarStockB2B(
+      client, commerceId,
+      items.map((i) => ({ productId: Number(i.product_id), quantity: Number(i.quantity) })),
+      `REEMBOLSO-${refund.ticket_number}`
+    );
+
     await client.query("COMMIT");
     await audit(commerceId, "sale.refund", "sales", refund.id, { originalId: original.id });
     res.status(201).json({ id: refund.id, ticketNumber: Number(refund.ticket_number), total: -original.total });

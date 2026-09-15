@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import {
   loadPrintSettings, savePrintSettings, printTicket,
@@ -623,6 +623,8 @@ export default function ConfiguracionPage() {
 
         <ClavesApi onError={setError} />
 
+        <StockB2B onError={setError} />
+
         <div className="card" style={{ minWidth: 300 }}>
           <h2>Datos del comercio</h2>
           <p className="muted">
@@ -1014,6 +1016,97 @@ function ClavesApi({ onError }: { onError: (m: string) => void }) {
         Pasásela a quien programe tu sistema: está en{" "}
         <code style={{ fontSize: 11 }}>nexopos.app/docs/api</code> y se lee sin cuenta.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Stock compartido con NexoB2B, para el negocio que es mayorista y comercio a
+ * la vez.
+ *
+ * La tarjeta no aparece si no hay catálogo propio importado: ofrecer un
+ * interruptor que no puede hacer nada es peor que no ofrecerlo.
+ */
+function StockB2B({ onError }: { onError: (m: string) => void }) {
+  const [estado, setEstado] = useState<{
+    activo: boolean; productosPropios: number; webhookUrl: string | null;
+    pendientes: number; ultimoError: string | null; modoMock: boolean;
+  } | null>(null);
+  const [guardando, setGuardando] = useState(false);
+
+  const cargar = useCallback(() => {
+    api<NonNullable<typeof estado>>("/api/b2b-stock")
+      .then(setEstado)
+      .catch(() => setEstado(null));
+  }, []);
+  useEffect(cargar, [cargar]);
+
+  async function cambiar(activo: boolean) {
+    setGuardando(true);
+    onError("");
+    try {
+      await api("/api/b2b-stock", { method: "PUT", body: JSON.stringify({ activo }) });
+      cargar();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  if (!estado || estado.productosPropios === 0) return null;
+
+  return (
+    <div className="card" style={{ minWidth: 340 }}>
+      <h2>Stock compartido con NexoB2B</h2>
+      <p className="muted" style={{ fontSize: 12 }}>
+        Tenés {estado.productosPropios} productos de tu propio catálogo. Si los vendés
+        por mayor y por mostrador, es el mismo depósito: prendiendo esto, lo que sale
+        por caja baja también en NexoB2B, y lo que despachás por mayor baja acá.
+      </p>
+
+      <Switch label="Mantener los dos en el mismo número"
+        on={estado.activo} disabled={guardando}
+        set={(v) => cambiar(v)} />
+
+      {!estado.activo && (
+        <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+          Antes de prenderlo: si tu ERP escribe el stock en NexoB2B, tiene que dejar de
+          reescribir el total de estos productos. Si no, te devuelve las unidades que el
+          mostrador acaba de descontar.
+        </p>
+      )}
+
+      {estado.activo && estado.webhookUrl && (
+        <div style={{ marginTop: 10 }}>
+          <strong style={{ fontSize: 13 }}>Falta un paso, en NexoB2B</strong>
+          <p className="muted" style={{ fontSize: 12, margin: "4px 0" }}>
+            Pegá esta dirección en tu cuenta de NexoB2B, en la clave de API de tu
+            comercio. Sin eso te avisamos nosotros a ellos, pero ellos no a vos.
+          </p>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <code style={{ fontSize: 11, wordBreak: "break-all", flex: 1 }}>
+              {estado.webhookUrl}
+            </code>
+            <BotonCopiar texto={estado.webhookUrl} />
+          </div>
+          <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+            Es una dirección secreta: quien la tenga puede cambiarte el stock.
+          </p>
+        </div>
+      )}
+
+      {estado.pendientes > 0 && (
+        <p className="badge warn" style={{ marginTop: 8 }}>
+          {estado.pendientes} avisos esperando salir
+          {estado.ultimoError ? `: ${estado.ultimoError}` : ""}
+        </p>
+      )}
+      {estado.modoMock && (
+        <p className="badge warn" style={{ marginTop: 8 }}>
+          Modo demo: los avisos no salen de verdad
+        </p>
+      )}
     </div>
   );
 }

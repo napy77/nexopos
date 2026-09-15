@@ -150,10 +150,15 @@ stockRouter.post("/importar-propios", async (req, res, next) => {
       // línea: en una reimportación son del comerciante y no se tocan. El
       // costo sí se refresca, porque es suyo de los dos lados.
       const { rows: [fila] } = await client.query(
-        `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price, updated_at)
-         VALUES ($1, $2, $3, $4, NULL, now())
+        `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price,
+                                 b2b_propio, updated_at)
+         VALUES ($1, $2, $3, $4, NULL, true, now())
          ON CONFLICT (commerce_id, product_id) DO UPDATE SET
            cost = COALESCE(EXCLUDED.cost, stock_items.cost),
+           -- Marca que esta línea es del catálogo propio: es la que habilita a
+           -- avisarle a NexoB2B cuando se vende. Se pone también en la
+           -- reimportación, porque puede haber entrado antes por una compra.
+           b2b_propio = true,
            updated_at = now()
          RETURNING (xmax = 0) AS nueva`,
         [commerceId, prod.id, l.stock ?? 0, l.costo]

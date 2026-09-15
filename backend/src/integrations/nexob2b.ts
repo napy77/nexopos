@@ -827,3 +827,26 @@ export async function catalogoPropio(token: string): Promise<{
   }
   return salida;
 }
+
+/**
+ * Descuenta —o devuelve— stock en NexoB2B por lo que pasó en el mostrador.
+ *
+ * Sólo tiene sentido para el negocio que es mayorista y comercio a la vez: es
+ * el único caso donde una venta del mostrador y el stock de B2B hablan del
+ * mismo depósito. NexoB2B lo exige: si el comercio no tiene una cuenta
+ * mayorista vinculada contesta 403 `sin_vinculo`, y si el EAN no es de su
+ * propio catálogo devuelve ese ítem con `ok: false`.
+ *
+ * La cantidad es un delta: negativa cuando se vendió. Un total pisaría lo que
+ * haya pasado del otro lado mientras el aviso viajaba.
+ */
+export async function ajustarStockB2B(
+  token: string,
+  items: { ean: string; cantidad: number }[]
+): Promise<{ ean: string; ok: boolean; error?: string }[]> {
+  if (isMockMode()) return items.map((i) => ({ ean: i.ean, ok: true }));
+  const data = await api<{ resultados?: { ean: string; ok: boolean; error?: string }[] }>(
+    "/api/v1/pos/stock", { token, method: "PUT", body: { items } }
+  );
+  return data.resultados ?? [];
+}
