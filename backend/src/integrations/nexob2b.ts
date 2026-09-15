@@ -687,3 +687,124 @@ export async function fichaComercio(token: string): Promise<B2BComercio | null> 
     return null;
   }
 }
+
+// ── Catálogo propio: el negocio que es mayorista y comercio a la vez ────────
+
+/**
+ * Hay negocios que le venden por mayor a los almacenes y al público por
+ * mostrador —un distribuidor de bazar, un supermercado—. Se dan de alta dos
+ * veces en NexoB2B, como mayorista y como comercio, y eso está bien: son dos
+ * roles con estados y aprobaciones distintas.
+ *
+ * El problema aparece después: para vender por el POS necesitan sus productos
+ * ahí, y un producto entra al POS cuando se recibe una compra. Un negocio que
+ * se abastece a sí mismo tendría que hacerse una orden a sí mismo, o cargar los
+ * mismos miles de productos de nuevo a mano.
+ *
+ * `es_propio` marca las líneas donde el mayorista y el comercio son la misma
+ * empresa. No es mercadería que puede comprar: es mercadería que tiene.
+ */
+export interface B2BProductoPropio {
+  id: string;
+  ean: string | null;
+  nombre: string;
+  marca: string | null;
+  unidad_base: string | null;
+  alicuota_iva: number | string | null;
+  imagen_url: string | null;
+  imagenes?: B2BImagen[];
+  pasillo: string | null;
+  rubro: string | null;
+  subrubro: string | null;
+  mayoristas: {
+    mayorista_id: string;
+    mayorista_nombre: string;
+    es_propio?: boolean;
+    presentaciones: {
+      /** listing del mayorista */
+      id: string;
+      /** presentación maestra: es la identidad del stock local */
+      presentacion_id?: string;
+      nombre: string;
+      factor: number;
+      precio: number;
+      stock: number | null;
+      ean_propio: string | null;
+    }[] | null;
+  }[] | null;
+}
+
+/**
+ * Trae el catálogo propio del comercio, ya aplanado a una línea por
+ * presentación.
+ *
+ * Se llama a `/api/v1/pos/productos` y no a `/store/productos` porque es el
+ * único que trae `es_propio`. Autentica con el mismo JWT del comercio —una
+ * inconsistencia conocida de ese endpoint, que NexoB2B va a unificar cuando
+ * migremos—.
+ *
+ * **El `precio` no se toma.** Es el mayorista: lo que ese negocio le cobra a
+ * los almacenes, no lo que cobra en el mostrador. Usarlo como precio de venta
+ * haría que venda a costo y se entere cuando cierra la caja.
+ */
+export async function catalogoPropio(token: string): Promise<{
+  presentacionId: string;
+  nombre: string;
+  presentacionNombre: string;
+  ean: string | null;
+  marca: string | null;
+  unidad: string;
+  factor: number;
+  alicuotaIva: number | null;
+  imagenUrl: string | null;
+  imagenes: B2BImagen[];
+  pasillo: string | null;
+  rubro: string | null;
+  subrubro: string | null;
+}[]> {
+  if (isMockMode()) {
+    return [{
+      presentacionId: "pp_mock_1", nombre: "Silla Plástica Voss 2000",
+      presentacionNombre: "unidad", ean: "7798042240180", marca: "VOSS",
+      unidad: "unidad", factor: 1, alicuotaIva: 21,
+      imagenUrl: null, imagenes: [], pasillo: "Bazar", rubro: null, subrubro: null,
+    }];
+  }
+
+  const salida: Awaited<ReturnType<typeof catalogoPropio>> = [];
+  // Se pagina hasta el final: un distribuidor puede tener miles y quedarse con
+  // la primera página sería importar un pedazo sin que nadie lo note.
+  for (let page = 1; page <= 200; page++) {
+    const data = await api<{ productos: B2BProductoPropio[]; total?: number }>(
+      `/api/v1/pos/productos?page=${page}&pageSize=200`, { token }
+    );
+    const productos = data.productos ?? [];
+    if (productos.length === 0) break;
+
+    for (const p of productos) {
+      for (const m of p.mayoristas ?? []) {
+        if (!m.es_propio) continue;
+        for (const pres of m.presentaciones ?? []) {
+          // Sin el id maestro no se puede deduplicar contra lo que ya está en
+          // el stock, y entraría dos veces el mismo artículo. Se saltea.
+          if (!pres.presentacion_id) continue;
+          salida.push({
+            presentacionId: pres.presentacion_id,
+            nombre: p.nombre,
+            presentacionNombre: pres.nombre,
+            ean: pres.ean_propio ?? p.ean,
+            marca: p.marca,
+            unidad: p.unidad_base ?? "unidad",
+            factor: Number(pres.factor) || 1,
+            alicuotaIva: p.alicuota_iva === null ? null : Number(p.alicuota_iva),
+            imagenUrl: urlPublica(p.imagen_url),
+            imagenes: absolutas(p.imagenes),
+            pasillo: p.pasillo, rubro: p.rubro, subrubro: p.subrubro,
+          });
+        }
+      }
+    }
+    if (productos.length < 200) break;
+  }
+  return salida;
+}

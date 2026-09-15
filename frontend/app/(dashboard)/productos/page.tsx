@@ -50,6 +50,7 @@ export default function ProductosPage() {
   const [q, setQ] = useState("");
   const [sinPrecio, setSinPrecio] = useState(0);
   const [soloSinPrecio, setSoloSinPrecio] = useState(false);
+  const [importando, setImportando] = useState(false);
   const [lowOnly, setLowOnly] = useState(false);
   const [items, setItems] = useState<StockItem[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
@@ -210,6 +211,36 @@ export default function ProductosPage() {
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al crear el producto");
+    }
+  }
+
+  /**
+   * Para los negocios que son mayorista y comercio a la vez.
+   *
+   * Sin esto tendrían que hacerse una orden de compra a sí mismos, o cargar los
+   * mismos miles de productos de nuevo a mano.
+   *
+   * Entran sin precio de venta a propósito: el de NexoB2B es el que ese negocio
+   * le cobra a los almacenes, no el del mostrador. Se avisa acá y no solo en el
+   * banner, porque es el momento en que el comerciante puede entender por qué
+   * le aparecieron mil productos sin precio.
+   */
+  async function importarPropios() {
+    setError(""); setImportando(true);
+    try {
+      const r = await api<{ importados: number; yaEstaban: number; mensaje?: string }>(
+        "/api/stock/importar-propios", { method: "POST" }
+      );
+      await load();
+      setOkMsg(r.mensaje ?? (r.importados === 0
+        ? `Ya estaban los ${r.yaEstaban}. No se tocó ningún precio ni stock.`
+        : `${r.importados} productos importados, sin precio de venta. ` +
+          "Ponéles el tuyo: el de NexoB2B es el mayorista."));
+      setTimeout(() => setOkMsg(""), 8000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo importar");
+    } finally {
+      setImportando(false);
     }
   }
 
@@ -385,6 +416,12 @@ export default function ProductosPage() {
         </button>
         <button onClick={() => { setShowAdd(!showAdd); setAdding(null); setShowPropio(false); }}>
           + Agregar producto del catálogo
+        </button>
+        {/* Solo le sirve al negocio que además es mayorista en NexoB2B. Al
+            resto no le trae nada y lo dice, en vez de esconderse. */}
+        <button className="secondary" onClick={importarPropios} disabled={importando}
+          title="Si tu negocio también es mayorista en NexoB2B, trae tu propio catálogo">
+          {importando ? "Importando…" : "Importar mi catálogo"}
         </button>
       </div>
       {error && <p className="error">{error}</p>}

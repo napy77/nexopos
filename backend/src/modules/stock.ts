@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
+import { catalogoPropio, isMockMode } from "../integrations/nexob2b.js";
 
 export const stockRouter = Router();
 
@@ -70,6 +71,85 @@ stockRouter.get("/sin-precio", async (req, res, next) => {
     res.json({ sinPrecio: rows[0].n });
   } catch (err) {
     next(err);
+  }
+});
+
+/**
+ * POST /api/stock/importar-propios
+ *
+ * Trae al POS el catálogo del propio negocio, para los que son mayorista y
+ * comercio a la vez. Sin esto tendrían que hacerse una orden de compra a sí
+ * mismos o cargar los mismos miles de productos de nuevo a mano.
+ *
+ * Entran **sin precio de venta y sin stock**, y las dos cosas son a propósito:
+ *
+ * - El precio de NexoB2B es el mayorista —lo que ese negocio le cobra a los
+ *   almacenes—. Tomarlo como precio de mostrador haría que venda a costo con
+ *   miles de productos a la vez, y se entere cuando cierre la caja. Sin precio
+ *   no se puede cobrar ni sale a la tienda: es un problema visible.
+ * - El stock de allá es el que ve el mayorista. Hasta saber si el ERP del
+ *   cliente le escribe a los dos sistemas, darlo por bueno sería vender en el
+ *   mostrador lo que ya se despachó por mayor.
+ *
+ * Lo que ya está en el stock no se pisa: si el comerciante le puso precio o
+ * contó las unidades, eso es suyo y vale más que lo que diga el catálogo.
+ */
+stockRouter.post("/importar-propios", async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const commerceId = req.auth.commerceId;
+    const { rows: [com] } = await pool.query(
+      "SELECT nexob2b_token FROM commerces WHERE id = $1", [commerceId]
+    );
+    if (!com?.nexob2b_token && !isMockMode()) {
+      throw new HttpError(400, "Volvé a iniciar sesión para poder leer tu catálogo de NexoB2B.");
+    }
+
+    const lineas = await catalogoPropio(com?.nexob2b_token ?? "");
+    if (lineas.length === 0) {
+      res.json({ importados: 0, yaEstaban: 0, mensaje: "No encontramos productos propios en NexoB2B." });
+      return;
+    }
+
+    await client.query("BEGIN");
+    let importados = 0;
+    let yaEstaban = 0;
+    for (const l of lineas) {
+      const { rows: [prod] } = await client.query(
+        `INSERT INTO products (nexob2b_id, ean, name, brand, category, unit, image_url,
+                               alicuota_iva, factor, pasillo_nombre, rubro_nombre,
+                               subrubro_nombre, imagenes, synced_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now())
+         ON CONFLICT (nexob2b_id) DO UPDATE SET
+           name = EXCLUDED.name,
+           ean = COALESCE(EXCLUDED.ean, products.ean),
+           brand = COALESCE(EXCLUDED.brand, products.brand),
+           image_url = COALESCE(EXCLUDED.image_url, products.image_url),
+           imagenes = EXCLUDED.imagenes,
+           synced_at = now()
+         RETURNING id`,
+        [l.presentacionId, l.ean, `${l.nombre} — ${l.presentacionNombre}`, l.marca,
+         l.rubro, l.presentacionNombre, l.imagenUrl, l.alicuotaIva, l.factor,
+         l.pasillo, l.rubro, l.subrubro, JSON.stringify(l.imagenes)]
+      );
+
+      // DO NOTHING y no UPDATE: lo que el comerciante ya tocó no se pisa.
+      const { rowCount } = await client.query(
+        `INSERT INTO stock_items (commerce_id, product_id, quantity, sale_price, updated_at)
+         VALUES ($1, $2, 0, NULL, now())
+         ON CONFLICT (commerce_id, product_id) DO NOTHING`,
+        [commerceId, prod.id]
+      );
+      if (rowCount === 1) importados++; else yaEstaban++;
+    }
+    await client.query("COMMIT");
+    await audit(commerceId, "stock.importar-propios", undefined, undefined, { importados, yaEstaban });
+    res.json({ importados, yaEstaban });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
   }
 });
 
