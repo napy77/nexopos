@@ -14,6 +14,7 @@ const NAV = [
   { href: "/mayoristas", label: "Mayoristas" },
   { href: "/compras", label: "Compras" },
   { href: "/productos", label: "Productos" },
+  { href: "/margenes", label: "Márgenes" },
   { href: "/clientes", label: "Clientes" },
 ];
 

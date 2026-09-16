@@ -115,7 +115,9 @@ erpRouter.put("/precios", async (req, res, next) => {
       const productId = await resolver(commerceId, l);
       if (!productId) { noEncontrados.push({ id: l.id, ean: l.ean, sku: l.sku }); continue; }
       await client.query(
-        `UPDATE stock_items SET sale_price = $3,
+        // Marcado como manual: el ERP es la autoridad sobre ese precio y una
+        // corrida de márgenes no tiene por qué discutirle.
+        `UPDATE stock_items SET sale_price = $3, precio_manual = true,
                 cost = COALESCE($4, cost), updated_at = now()
           WHERE commerce_id = $1 AND product_id = $2`,
         [commerceId, productId, l.precio_centavos / 100,
