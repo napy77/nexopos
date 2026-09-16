@@ -4,6 +4,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { pool } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { ajustarStockB2B, isMockMode, type ResultadoStockB2B } from "../integrations/nexob2b.js";
+import { requierePlataforma } from "./plataforma.js";
 
 /**
  * El stock compartido con NexoB2B, para el negocio que es mayorista y comercio
@@ -279,8 +280,121 @@ export const b2bStockWebhookRouter = Router();
  * sin reintentos; un 4xx no le haría reintentar y sí llenaría sus logs de un
  * error que no es suyo —que el comercio todavía no importó ese producto—.
  */
-b2bStockWebhookRouter.post("/:token", async (req, res, next) => {
+/**
+ * Aplica lo que NexoB2B dice que quedó. `stock` es el total resultante, no un
+ * delta: es el número a escribir. El movimiento guarda la diferencia contra lo
+ * que teníamos, que es lo que el comerciante necesita leer en el historial.
+ */
+async function aplicarStockDeB2B(
+  commerceId: number,
+  items: unknown[],
+  origen: string
+): Promise<{ aplicados: number; noEncontrados: number }> {
   const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    let aplicados = 0;
+    const desconocidos: string[] = [];
+    for (const raw of items) {
+      const item = raw as { presentacion_id?: unknown; stock?: unknown };
+      const presentacionId = String(item?.presentacion_id ?? "");
+      const stock = Number(item?.stock);
+      if (!presentacionId || !Number.isFinite(stock)) continue;
+
+      const { rows: [linea] } = await client.query(
+        `SELECT s.product_id, s.quantity
+           FROM stock_items s JOIN products p ON p.id = s.product_id
+          WHERE s.commerce_id = $1 AND p.nexob2b_id = $2 AND s.b2b_propio
+          FOR UPDATE OF s`,
+        [commerceId, presentacionId]
+      );
+      if (!linea) { desconocidos.push(presentacionId); continue; }
+
+      const delta = stock - Number(linea.quantity);
+      if (delta === 0) continue;
+
+      await client.query(
+        "UPDATE stock_items SET quantity = $3, updated_at = now() WHERE commerce_id = $1 AND product_id = $2",
+        [commerceId, linea.product_id, stock]
+      );
+      await client.query(
+        `INSERT INTO stock_movements (commerce_id, product_id, type, quantity, reference)
+         VALUES ($1, $2, 'b2b', $3, $4)`,
+        [commerceId, linea.product_id, delta, `NexoB2B (${origen})`]
+      );
+      aplicados++;
+    }
+    await client.query("COMMIT");
+
+    if (desconocidos.length > 0) {
+      console.warn(`[b2b-stock] ${desconocidos.length} presentaciones no están en el stock del comercio ${commerceId}`);
+    }
+    return { aplicados, noEncontrados: desconocidos.length };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+const itemsDe = (body: unknown): unknown[] => {
+  const b = body as { items?: unknown };
+  return Array.isArray(b?.items) ? b.items : [];
+};
+const origenDe = (body: unknown): string => {
+  const b = body as { origen?: unknown };
+  return typeof b?.origen === "string" ? b.origen : "b2b";
+};
+
+/**
+ * POST /api/nexob2b/stock — la puerta de plataforma, sin nada por comercio.
+ *
+ * Es la que debería usarse. La de abajo, con un token y un secreto por
+ * comercio, obliga a que alguien copie dos valores de una pantalla a otra por
+ * cada negocio que quiera esto. Con uno funciona; con veinte es un trabajo, y
+ * uno donde equivocarse no avisa.
+ *
+ * Acá no hay nada que generar ni que pegar: NexoB2B ya tiene la clave de
+ * plataforma —la misma con la que verifica los slugs— y nos dice de qué
+ * comercio habla con el id que él mismo le asignó. Un comercio nuevo prende su
+ * interruptor y anda, sin que nadie configure nada en el medio.
+ */
+b2bStockWebhookRouter.post("/", requierePlataforma, async (req, res, next) => {
+  try {
+    const nexob2bId = String(req.body?.comercio_id ?? "").trim();
+    if (!nexob2bId) throw new HttpError(400, "Falta `comercio_id`: el id del comercio en NexoB2B.");
+
+    const { rows: [comercio] } = await pool.query(
+      "SELECT id, b2b_stock_sync FROM commerces WHERE nexob2b_id = $1",
+      [nexob2bId]
+    );
+    // 404 y no 200: acá no es "todavía no importó ese producto", es un comercio
+    // que no existe de este lado. Si NexoB2B avisa de uno que no conocemos, los
+    // dos queremos saberlo.
+    if (!comercio) throw new HttpError(404, `No tenemos ningún comercio con el id ${nexob2bId} de NexoB2B.`);
+    if (!comercio.b2b_stock_sync) {
+      res.json({ ok: true, aplicados: 0, motivo: "sincronización apagada" });
+      return;
+    }
+
+    const { aplicados, noEncontrados } = await aplicarStockDeB2B(
+      comercio.id, itemsDe(req.body), origenDe(req.body)
+    );
+    res.json({ ok: true, aplicados, no_encontrados: noEncontrados });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/nexob2b/stock/:token — la puerta por comercio.
+ *
+ * Queda mientras NexoB2B siga mandando por acá. No se saca todavía porque
+ * sacarla antes de que migren corta los avisos de los comercios que ya la
+ * tienen cargada, y eso no se nota hasta que un stock deja de moverse.
+ */
+b2bStockWebhookRouter.post("/:token", async (req, res, next) => {
   try {
     const { rows: [comercio] } = await pool.query(
       `SELECT id, b2b_stock_sync, b2b_webhook_secret, b2b_webhook_secret_ok_at
@@ -315,51 +429,12 @@ b2bStockWebhookRouter.post("/:token", async (req, res, next) => {
       return;
     }
 
-    const items = Array.isArray(req.body?.items) ? req.body.items : [];
-    const origen = typeof req.body?.origen === "string" ? req.body.origen : "b2b";
-
-    await client.query("BEGIN");
-    let aplicados = 0;
-    const desconocidos: string[] = [];
-    for (const item of items) {
-      const presentacionId = String(item?.presentacion_id ?? "");
-      const stock = Number(item?.stock);
-      if (!presentacionId || !Number.isFinite(stock)) continue;
-
-      const { rows: [linea] } = await client.query(
-        `SELECT s.product_id, s.quantity
-           FROM stock_items s JOIN products p ON p.id = s.product_id
-          WHERE s.commerce_id = $1 AND p.nexob2b_id = $2 AND s.b2b_propio
-          FOR UPDATE OF s`,
-        [comercio.id, presentacionId]
-      );
-      if (!linea) { desconocidos.push(presentacionId); continue; }
-
-      const delta = stock - Number(linea.quantity);
-      if (delta === 0) continue;
-
-      await client.query(
-        "UPDATE stock_items SET quantity = $3, updated_at = now() WHERE commerce_id = $1 AND product_id = $2",
-        [comercio.id, linea.product_id, stock]
-      );
-      await client.query(
-        `INSERT INTO stock_movements (commerce_id, product_id, type, quantity, reference)
-         VALUES ($1, $2, 'b2b', $3, $4)`,
-        [comercio.id, linea.product_id, delta, `NexoB2B (${origen})`]
-      );
-      aplicados++;
-    }
-    await client.query("COMMIT");
-
-    if (desconocidos.length > 0) {
-      console.warn(`[b2b-stock] ${desconocidos.length} presentaciones no están en el stock del comercio ${comercio.id}`);
-    }
-    res.json({ ok: true, aplicados, no_encontrados: desconocidos.length });
+    const { aplicados, noEncontrados } = await aplicarStockDeB2B(
+      comercio.id, itemsDe(req.body), origenDe(req.body)
+    );
+    res.json({ ok: true, aplicados, no_encontrados: noEncontrados });
   } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
     next(err);
-  } finally {
-    client.release();
   }
 });
 

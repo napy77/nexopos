@@ -13,7 +13,7 @@ import { formaDelSlug } from "../lib/slug.js";
  */
 export const plataformaRouter = Router();
 
-function requierePlataforma(req: Request, _res: Response, next: NextFunction): void {
+export function requierePlataforma(req: Request, _res: Response, next: NextFunction): void {
   const enviada = (req.header("Authorization") ?? "").replace(/^Bearer\s+/i, "");
   // Sin clave configurada no se abre igual: se cierra. Un endpoint de
   // plataforma sin credencial es un endpoint público.
