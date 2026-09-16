@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { PoolClient } from "pg";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { pool } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { ajustarStockB2B, isMockMode } from "../integrations/nexob2b.js";
@@ -44,67 +44,120 @@ export async function encolarStockB2B(
   if (lineas.length === 0) return;
 
   const { rows } = await client.query(
-    `SELECT s.product_id, p.ean
+    /*
+     * Se manda `presentacion_id`, no el EAN: con el EAN, una "unidad" y una
+     * "caja x12" que comparten el código del producto se descontaban las dos.
+     *
+     * nexob2b_id guarda la presentación maestra (pp_) para lo que entró por la
+     * importación de catálogo propio. Las filas viejas que llegaron por una
+     * compra pueden tener el listing del mayorista (pmp_), que no sirve acá:
+     * para ésas queda el EAN. Una línea sin ninguno de los dos no se puede
+     * nombrar y no se encola.
+     */
+    `SELECT s.product_id,
+            CASE WHEN p.nexob2b_id LIKE 'pp\\_%' THEN p.nexob2b_id END AS presentacion_id,
+            NULLIF(p.ean, '') AS ean
        FROM stock_items s
        JOIN products p ON p.id = s.product_id
        JOIN commerces c ON c.id = s.commerce_id
       WHERE s.commerce_id = $1 AND s.product_id = ANY($2::bigint[])
         AND s.b2b_propio AND c.b2b_stock_sync
-        AND p.ean IS NOT NULL AND p.ean <> ''`,
+        AND (p.nexob2b_id LIKE 'pp\\_%' OR NULLIF(p.ean, '') IS NOT NULL)`,
     [commerceId, lineas.map((l) => l.productId)]
   );
   if (rows.length === 0) return;
 
-  const eanDe = new Map<number, string>(rows.map((r) => [Number(r.product_id), String(r.ean)]));
+  const idDe = new Map(rows.map((r) => [Number(r.product_id), r]));
   for (const l of lineas) {
-    const ean = eanDe.get(l.productId);
-    if (!ean) continue;
+    const ids = idDe.get(l.productId);
+    if (!ids) continue;
     await client.query(
-      `INSERT INTO b2b_stock_outbox (commerce_id, product_id, ean, cantidad, referencia)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [commerceId, l.productId, ean, l.quantity, referencia]
+      `INSERT INTO b2b_stock_outbox (commerce_id, product_id, presentacion_id, ean, cantidad, referencia)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [commerceId, l.productId, ids.presentacion_id ?? null, ids.ean ?? null, l.quantity, referencia]
+    );
+  }
+}
+
+/**
+ * Arma los lotes que todavía no salieron nunca.
+ *
+ * El lote es la clave de idempotencia, así que tiene que quedar fijo antes de
+ * la primera llamada. Si se armara en cada vuelta con lo que esté pendiente, un
+ * reintento después de una venta nueva mandaría un conjunto distinto con clave
+ * distinta, y NexoB2B volvería a sumar lo que ya había sumado.
+ */
+async function armarLotes(): Promise<void> {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT o.commerce_id
+       FROM b2b_stock_outbox o JOIN commerces c ON c.id = o.commerce_id
+      WHERE o.enviado_at IS NULL AND o.lote IS NULL AND c.b2b_stock_sync`
+  );
+  for (const { commerce_id } of rows) {
+    await pool.query(
+      `UPDATE b2b_stock_outbox SET lote = $2
+        WHERE id IN (SELECT id FROM b2b_stock_outbox
+                      WHERE commerce_id = $1 AND enviado_at IS NULL AND lote IS NULL
+                      ORDER BY id LIMIT 100)`,
+      [commerce_id, randomUUID()]
     );
   }
 }
 
 /** Manda los pendientes. Devuelve cuántos salieron. */
 export async function despacharStockB2B(): Promise<number> {
+  await armarLotes();
+
   const { rows } = await pool.query(
-    `SELECT o.id, o.commerce_id, o.ean, o.cantidad, o.intentos, c.nexob2b_token
+    `SELECT o.id, o.commerce_id, o.lote, o.presentacion_id, o.ean, o.cantidad,
+            o.intentos, c.nexob2b_token
        FROM b2b_stock_outbox o JOIN commerces c ON c.id = o.commerce_id
-      WHERE o.enviado_at IS NULL AND o.intentos < $1 AND o.proximo_intento <= now()
+      WHERE o.enviado_at IS NULL AND o.lote IS NOT NULL
+        AND o.intentos < $1 AND o.proximo_intento <= now()
         AND c.b2b_stock_sync
-      ORDER BY o.id LIMIT 100`,
+      ORDER BY o.id`,
     [MAX_INTENTOS]
   );
   if (rows.length === 0) return 0;
 
-  // Agrupadas por comercio: NexoB2B acepta varios ítems en una llamada y cada
-  // una cuesta un viaje. Una venta de diez renglones sale en una.
-  const porComercio = new Map<number, typeof rows>();
+  // Un viaje por lote: NexoB2B acepta varios ítems en una llamada y cada una
+  // cuesta una ida y vuelta. Una venta de diez renglones sale en una.
+  const porLote = new Map<string, typeof rows>();
   for (const fila of rows) {
-    const clave = Number(fila.commerce_id);
-    porComercio.set(clave, [...(porComercio.get(clave) ?? []), fila]);
+    const clave = String(fila.lote);
+    porLote.set(clave, [...(porLote.get(clave) ?? []), fila]);
   }
 
   let enviados = 0;
-  for (const [commerceId, filas] of porComercio) {
+  for (const [lote, filas] of porLote) {
     const token = filas[0].nexob2b_token;
     if (!token) {
       await marcarError(filas, "El comercio no tiene sesión de NexoB2B: tiene que volver a entrar.");
       continue;
     }
     try {
-      const resultados = await ajustarStockB2B(
+      const { resultados, repetido } = await ajustarStockB2B(
         token,
-        filas.map((f) => ({ ean: String(f.ean), cantidad: Number(f.cantidad) }))
+        filas.map((f) => ({
+          ...(f.presentacion_id ? { presentacion_id: String(f.presentacion_id) } : { ean: String(f.ean) }),
+          cantidad: Number(f.cantidad),
+        })),
+        lote
       );
-      // El resultado es por ítem: uno puede fallar porque ese EAN no es de su
-      // propio catálogo. Reintentarlo no lo va a arreglar, así que se cierra
-      // con el error escrito en vez de girar doce veces.
-      const falloDe = new Map(resultados.filter((r) => !r.ok).map((r) => [r.ean, r.error ?? "rechazado"]));
+      if (repetido) {
+        console.log(`[b2b-stock] lote ${lote} ya estaba aplicado del otro lado`);
+      }
+
+      // El resultado es por ítem: uno puede fallar porque esa presentación no
+      // es de su propio catálogo. Reintentarlo no lo va a arreglar, así que se
+      // cierra con el error escrito en vez de girar doce veces.
+      const clave = (r: { presentacion_id?: string; ean?: string }) => r.presentacion_id ?? r.ean ?? "";
+      const falloDe = new Map(
+        resultados.filter((r) => !r.ok).map((r) => [clave(r), r.error ?? "rechazado"])
+      );
       for (const fila of filas) {
-        const fallo = falloDe.get(String(fila.ean));
+        const suClave = String(fila.presentacion_id ?? fila.ean ?? "");
+        const fallo = falloDe.get(suClave);
         if (fallo) {
           await pool.query(
             `UPDATE b2b_stock_outbox
@@ -112,7 +165,7 @@ export async function despacharStockB2B(): Promise<number> {
               WHERE id = $3`,
             [MAX_INTENTOS, `NexoB2B lo rechazó: ${fallo}`.slice(0, 400), fila.id]
           );
-          console.error(`[b2b-stock] EAN ${fila.ean} rechazado: ${fallo}`);
+          console.error(`[b2b-stock] ${suClave} rechazado: ${fallo}`);
         } else {
           await pool.query("UPDATE b2b_stock_outbox SET enviado_at = now() WHERE id = $1", [fila.id]);
           enviados++;
@@ -159,8 +212,21 @@ export const b2bStockWebhookRouter = Router();
  * portal. Nunca por una venta del mostrador, que es la que mandamos nosotros:
  * el eco volvería a descontar lo mismo dos veces.
  *
- * Se autentica con un token en la URL porque del otro lado se configura una
- * URL y nada más. Es aleatorio de 32 bytes y el comerciante puede regenerarlo.
+ * Se autentica de dos formas, y las dos conviven a propósito:
+ *
+ * - El token de la URL, que alcanza solo. Fue lo primero que hubo, porque del
+ *   otro lado se configuraba una URL y nada más.
+ * - `X-Nexob2b-Secret`, que NexoB2B agregó después. Es mejor: un secreto en
+ *   una URL termina en los logs del proxy y en el portapapeles del que la
+ *   pegue.
+ *
+ * Mientras el comerciante no cargue el secreto allá, no llega el header y vale
+ * el token. Una vez cargado, se exige: si el secreto existe de este lado, un
+ * pedido sin él —o con otro— no entra, porque a esa altura la única razón para
+ * que falte es que no venga de NexoB2B.
+ *
+ * La comparación es de tiempo constante. Un `===` sobre un secreto contesta
+ * más rápido cuando los primeros caracteres no coinciden, y eso se mide.
  *
  * `stock` es la cantidad RESULTANTE, no un delta: es el número a escribir. Por
  * eso el movimiento guarda la diferencia contra lo que teníamos, que es lo que
@@ -174,10 +240,14 @@ b2bStockWebhookRouter.post("/:token", async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { rows: [comercio] } = await pool.query(
-      "SELECT id, b2b_stock_sync FROM commerces WHERE b2b_webhook_token = $1",
+      "SELECT id, b2b_stock_sync, b2b_webhook_secret FROM commerces WHERE b2b_webhook_token = $1",
       [String(req.params.token)]
     );
     if (!comercio) throw new HttpError(404, "Token desconocido");
+    if (comercio.b2b_webhook_secret &&
+        !mismoSecreto(req.get("x-nexob2b-secret"), String(comercio.b2b_webhook_secret))) {
+      throw new HttpError(401, "Secreto inválido");
+    }
     if (!comercio.b2b_stock_sync) {
       // Apagado no es un error: el comerciante lo apagó a propósito y NexoB2B
       // no tiene por qué enterarse ni reintentar.
@@ -242,7 +312,7 @@ b2bStockRouter.get("/", async (req, res, next) => {
   try {
     const commerceId = req.auth.commerceId;
     const { rows: [c] } = await pool.query(
-      "SELECT b2b_stock_sync, b2b_webhook_token FROM commerces WHERE id = $1",
+      "SELECT b2b_stock_sync, b2b_webhook_token, b2b_webhook_secret FROM commerces WHERE id = $1",
       [commerceId]
     );
     const { rows: [n] } = await pool.query(
@@ -261,6 +331,7 @@ b2bStockRouter.get("/", async (req, res, next) => {
       // interruptor sería ofrecer algo que no va a hacer nada.
       productosPropios: n.propios,
       webhookUrl: c?.b2b_webhook_token ? urlDelWebhook(String(c.b2b_webhook_token)) : null,
+      webhookSecret: c?.b2b_webhook_secret ?? null,
       pendientes: p.pendientes,
       ultimoError: p.ultimo_error ?? null,
       modoMock: isMockMode(),
@@ -284,28 +355,42 @@ b2bStockRouter.put("/", async (req, res, next) => {
     const { rows: [c] } = await pool.query(
       `UPDATE commerces
           SET b2b_stock_sync = $2,
-              b2b_webhook_token = COALESCE(b2b_webhook_token, $3)
+              b2b_webhook_token = COALESCE(b2b_webhook_token, $3),
+              b2b_webhook_secret = COALESCE(b2b_webhook_secret, $4)
         WHERE id = $1
-        RETURNING b2b_stock_sync, b2b_webhook_token`,
-      [commerceId, activo, activo ? randomBytes(32).toString("hex") : null]
+        RETURNING b2b_stock_sync, b2b_webhook_token, b2b_webhook_secret`,
+      [commerceId, activo,
+       activo ? randomBytes(32).toString("hex") : null,
+       activo ? randomBytes(32).toString("hex") : null]
     );
     res.json({
       activo: Boolean(c.b2b_stock_sync),
       webhookUrl: c.b2b_webhook_token ? urlDelWebhook(String(c.b2b_webhook_token)) : null,
+      webhookSecret: c.b2b_webhook_secret ?? null,
     });
   } catch (err) {
     next(err);
   }
 });
 
-/** POST /api/b2b-stock/regenerar — si el token se filtró */
+/**
+ * POST /api/b2b-stock/regenerar — si se filtraron.
+ *
+ * Cambian los dos de una: el que regenera porque perdió el control de uno no
+ * sabe si perdió el otro, y dejarle la mitad vieja es dejarle el problema.
+ * Hasta que los vuelva a cargar en NexoB2B, los avisos de ellos no entran.
+ */
 b2bStockRouter.post("/regenerar", async (req, res, next) => {
   try {
     const { rows: [c] } = await pool.query(
-      "UPDATE commerces SET b2b_webhook_token = $2 WHERE id = $1 RETURNING b2b_webhook_token",
-      [req.auth.commerceId, randomBytes(32).toString("hex")]
+      `UPDATE commerces SET b2b_webhook_token = $2, b2b_webhook_secret = $3
+        WHERE id = $1 RETURNING b2b_webhook_token, b2b_webhook_secret`,
+      [req.auth.commerceId, randomBytes(32).toString("hex"), randomBytes(32).toString("hex")]
     );
-    res.json({ webhookUrl: urlDelWebhook(String(c.b2b_webhook_token)) });
+    res.json({
+      webhookUrl: urlDelWebhook(String(c.b2b_webhook_token)),
+      webhookSecret: c.b2b_webhook_secret,
+    });
   } catch (err) {
     next(err);
   }
@@ -318,6 +403,15 @@ b2bStockRouter.post("/regenerar", async (req, res, next) => {
  * la cual deducirlo cuando la arma el que despacha, y porque detrás de nginx
  * el Host puede ser localhost.
  */
+/** Compara sin filtrar por tiempo dónde dejan de coincidir. */
+function mismoSecreto(recibido: string | undefined, esperado: string): boolean {
+  if (!recibido) return false;
+  const a = Buffer.from(recibido);
+  const b = Buffer.from(esperado);
+  // timingSafeEqual exige el mismo largo; un largo distinto ya es distinto.
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 function urlDelWebhook(token: string): string {
   const base = (process.env.PUBLIC_URL ?? "https://nexopos.app").replace(/\/$/, "");
   return `${base}/api/nexob2b/stock/${token}`;

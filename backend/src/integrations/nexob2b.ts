@@ -834,19 +834,43 @@ export async function catalogoPropio(token: string): Promise<{
  * Sólo tiene sentido para el negocio que es mayorista y comercio a la vez: es
  * el único caso donde una venta del mostrador y el stock de B2B hablan del
  * mismo depósito. NexoB2B lo exige: si el comercio no tiene una cuenta
- * mayorista vinculada contesta 403 `sin_vinculo`, y si el EAN no es de su
- * propio catálogo devuelve ese ítem con `ok: false`.
+ * mayorista vinculada contesta 403 `sin_vinculo`, y si la presentación no es
+ * de su propio catálogo devuelve ese ítem con `ok: false`.
+ *
+ * Se identifica por `presentacion_id` —la presentación maestra— y no por EAN.
+ * Con el EAN, una "unidad" y una "caja x12" que comparten el código del
+ * producto se descontaban las dos.
  *
  * La cantidad es un delta: negativa cuando se vendió. Un total pisaría lo que
- * haya pasado del otro lado mientras el aviso viajaba.
+ * haya pasado del otro lado mientras el aviso viajaba. Y como son deltas, el
+ * reintento necesita `idempotencyKey`: sin ella, un aviso que sí había entrado
+ * descuenta de nuevo.
  */
+export interface ItemStockB2B {
+  presentacion_id?: string;
+  ean?: string;
+  cantidad: number;
+}
+
+export interface ResultadoStockB2B {
+  presentacion_id?: string;
+  ean?: string;
+  ok: boolean;
+  error?: string;
+  stock?: number;
+}
+
 export async function ajustarStockB2B(
   token: string,
-  items: { ean: string; cantidad: number }[]
-): Promise<{ ean: string; ok: boolean; error?: string }[]> {
-  if (isMockMode()) return items.map((i) => ({ ean: i.ean, ok: true }));
-  const data = await api<{ resultados?: { ean: string; ok: boolean; error?: string }[] }>(
-    "/api/v1/pos/stock", { token, method: "PUT", body: { items } }
+  items: ItemStockB2B[],
+  idempotencyKey: string
+): Promise<{ resultados: ResultadoStockB2B[]; repetido: boolean }> {
+  if (isMockMode()) {
+    return { resultados: items.map((i) => ({ ...i, ok: true })), repetido: false };
+  }
+  const data = await api<{ resultados?: ResultadoStockB2B[]; repetido?: boolean }>(
+    "/api/v1/pos/stock",
+    { token, method: "PUT", body: { idempotency_key: idempotencyKey, items } }
   );
-  return data.resultados ?? [];
+  return { resultados: data.resultados ?? [], repetido: Boolean(data.repetido) };
 }

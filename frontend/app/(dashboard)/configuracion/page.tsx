@@ -1029,7 +1029,8 @@ function ClavesApi({ onError }: { onError: (m: string) => void }) {
  */
 function StockB2B({ onError }: { onError: (m: string) => void }) {
   const [estado, setEstado] = useState<{
-    activo: boolean; productosPropios: number; webhookUrl: string | null;
+    activo: boolean; productosPropios: number;
+    webhookUrl: string | null; webhookSecret: string | null;
     pendientes: number; ultimoError: string | null; modoMock: boolean;
   } | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -1084,14 +1085,32 @@ function StockB2B({ onError }: { onError: (m: string) => void }) {
             Pegá esta dirección en tu cuenta de NexoB2B, en la clave de API de tu
             comercio. Sin eso te avisamos nosotros a ellos, pero ellos no a vos.
           </p>
+          <label style={{ fontSize: 12, fontWeight: 600 }}>Dirección</label>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <code style={{ fontSize: 11, wordBreak: "break-all", flex: 1 }}>
               {estado.webhookUrl}
             </code>
             <BotonCopiar texto={estado.webhookUrl} />
           </div>
-          <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-            Es una dirección secreta: quien la tenga puede cambiarte el stock.
+
+          {estado.webhookSecret && (
+            <>
+              <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginTop: 8 }}>
+                Secreto
+              </label>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <code style={{ fontSize: 11, wordBreak: "break-all", flex: 1 }}>
+                  {estado.webhookSecret}
+                </code>
+                <BotonCopiar texto={estado.webhookSecret} />
+              </div>
+            </>
+          )}
+
+          <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+            Los dos son secretos: quien los tenga puede cambiarte el stock. Van en la
+            misma clave de API, en el campo de dirección y en el de secreto. Si cargás
+            sólo la dirección igual funciona, pero con el secreto es más seguro.
           </p>
         </div>
       )}
