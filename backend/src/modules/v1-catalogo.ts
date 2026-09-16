@@ -214,15 +214,25 @@ const VISIBLE_EN_TIENDA = `
       * No aparecer es un problema visible —el comerciante lo busca y no está—;
       * venderse a cero, no.
       */
-     AND s.sale_price IS NOT NULL AND s.sale_price > 0
-     /*
-      * Y lo que no hay, si el comerciante eligió no mostrarlo.
-      *
-      * Tiene que ser la MISMA cuenta que hace disponibilidadDe() del otro lado,
-      * o la tienda escondería cosas que dice tener: por stock, que quede alguna;
-      * por disponibilidad declarada, que no esté marcado agotado y que le quede
-      * cupo —y el cupo de ayer no cuenta, vuelve al total al cambiar el día—.
-      */
+     AND s.sale_price IS NOT NULL AND s.sale_price > 0`;
+
+/**
+ * Y además, que haya.
+ *
+ * Va SEPARADO de lo anterior porque no es lo mismo: sin precio el producto no
+ * se vende en ningún caso, pero sin stock sólo se esconde de las listas, y
+ * sólo si el comerciante lo pidió. El enlace directo lo sigue encontrando: uno
+ * que alguien compartió por WhatsApp la semana pasada no tiene por qué
+ * romperse, y "no disponible" dice más que un 404.
+ *
+ * Tiene que ser la MISMA cuenta que hace disponibilidadDe() del otro lado, o la
+ * tienda escondería cosas que dice tener: por stock, que quede alguna; por
+ * disponibilidad declarada, que no esté marcado agotado y que le quede cupo —y
+ * el cupo de ayer no cuenta, vuelve al total al cambiar el día—.
+ *
+ * `unknown` nunca se esconde: no saber no es lo mismo que no tener.
+ */
+const HAY_EXISTENCIA = `
      AND (
        (SELECT tienda_muestra_sin_stock FROM commerces WHERE id = s.commerce_id)
        OR (s.availability_policy = 'stock' AND s.quantity > 0)
@@ -366,6 +376,7 @@ v1Router.get("/stores/:storeId/pasillos", catalogo, async (req, res, next) => {
          FROM stock_items s JOIN products p ON p.id = s.product_id
         WHERE s.commerce_id = $1
           ${VISIBLE_EN_TIENDA}
+          ${HAY_EXISTENCIA}
         GROUP BY ${PASILLO_KEY}
         ORDER BY name`,
       [storeId]
@@ -382,7 +393,7 @@ v1Router.get("/stores/:storeId/pasillos", catalogo, async (req, res, next) => {
 v1Router.get("/stores/:storeId/products", catalogo, async (req, res, next) => {
   try {
     const storeId = String(Number(req.params.storeId));
-    const { rows } = await pool.query(`${SELECT_PRODUCTOS} ORDER BY p.name`, [Number(storeId)]);
+    const { rows } = await pool.query(`${SELECT_PRODUCTOS} ${HAY_EXISTENCIA} ORDER BY p.name`, [Number(storeId)]);
     res.json(rows.map((r) => armarProduct(r, storeId)));
   } catch (err) {
     next(err);
