@@ -93,7 +93,7 @@ const SELECT_STORE = `
          c.logo_url, c.banner_url, c.opening_hours, c.verified, c.nexotienda_enabled,
          c.free_delivery_over, c.ciudad, c.provincia,
          c.pay_on_delivery_enabled, c.transfer_enabled, c.clubpay_pay_enabled,
-         c.online_credit_enabled, c.clubpay_api_key
+         c.online_credit_enabled, c.clubpay_api_key, c.tienda_muestra_sin_stock
     FROM commerces c`;
 
 async function armarStore(fila: Record<string, unknown>) {
@@ -156,6 +156,13 @@ async function armarStore(fila: Record<string, unknown>) {
       ? { freeDeliveryOverCents: centavos(fila.free_delivery_over) } : {}),
     acceptsOnlinePayment: online,
     allowsCredit: Boolean(fila.online_credit_enabled),
+    /*
+     * Si false, los productos sin stock NO vienen en la lista: los filtramos
+     * acá. Va igual en la respuesta para que la tienda sepa por qué no están,
+     * y no ofrezca un filtro de "ver también los agotados" que no puede
+     * cumplir. Es la diferencia entre un catálogo corto y un catálogo roto.
+     */
+    showsOutOfStock: Boolean(fila.tienda_muestra_sin_stock),
   };
 }
 
@@ -207,7 +214,24 @@ const VISIBLE_EN_TIENDA = `
       * No aparecer es un problema visible —el comerciante lo busca y no está—;
       * venderse a cero, no.
       */
-     AND s.sale_price IS NOT NULL AND s.sale_price > 0`;
+     AND s.sale_price IS NOT NULL AND s.sale_price > 0
+     /*
+      * Y lo que no hay, si el comerciante eligió no mostrarlo.
+      *
+      * Tiene que ser la MISMA cuenta que hace disponibilidadDe() del otro lado,
+      * o la tienda escondería cosas que dice tener: por stock, que quede alguna;
+      * por disponibilidad declarada, que no esté marcado agotado y que le quede
+      * cupo —y el cupo de ayer no cuenta, vuelve al total al cambiar el día—.
+      */
+     AND (
+       (SELECT tienda_muestra_sin_stock FROM commerces WHERE id = s.commerce_id)
+       OR (s.availability_policy = 'stock' AND s.quantity > 0)
+       OR (s.availability_policy = 'declared'
+           AND s.declared_state <> 'out'
+           AND (s.quota_total IS NULL
+                OR (CASE WHEN s.quota_day = (now() AT TIME ZONE '${ZONA}')::date
+                         THEN COALESCE(s.quota_remaining, 0) ELSE s.quota_total END) > 0))
+     )`;
 
 const SELECT_PRODUCTOS = `
   SELECT p.id, p.name, p.brand, p.descripcion, p.ean, p.unit, p.origen, s.commerce_id,

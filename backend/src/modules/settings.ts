@@ -133,13 +133,15 @@ const tiendaSchema = z.object({
     retiroEnLocal: z.boolean().optional(),
     envioPropio: z.boolean().optional(),
   }).optional(),
+  /** Si los productos sin stock se publican igual o se esconden */
+  muestraSinStock: z.boolean().optional(),
 });
 
 const COLUMNAS = `slug, name, logo_url, banner_url, whatsapp, opening_hours,
                   free_delivery_over, nexotienda_enabled, pay_on_delivery_enabled, transfer_enabled,
                   transfer_alias, transfer_holder, clubpay_pay_enabled,
                   online_credit_enabled, pickup_enabled, own_delivery_enabled,
-                  clubpay_api_key`;
+                  clubpay_api_key, tienda_muestra_sin_stock`;
 
 function armarTienda(r: Record<string, unknown>, regiones: unknown[] = []) {
   const clubpayListo = Boolean(r.clubpay_api_key) || isMockMode();
@@ -155,6 +157,7 @@ function armarTienda(r: Record<string, unknown>, regiones: unknown[] = []) {
     aclaracionHorario: r.opening_hours ?? null,
     envioGratisDesde: r.free_delivery_over === null ? null : Number(r.free_delivery_over),
     direccion: slug ? `https://${slug}.nexotienda.app` : null,
+    muestraSinStock: r.tienda_muestra_sin_stock,
     regiones,
     pagos: {
       contraEntrega: r.pay_on_delivery_enabled,
@@ -222,6 +225,7 @@ settingsRouter.put("/nexotienda", async (req, res, next) => {
       titular: p.transferenciaTitular !== undefined ? (p.transferenciaTitular || null) : antes.transfer_holder,
       clubpay: p.clubpay ?? antes.clubpay_pay_enabled,
       cuentaCorriente: p.cuentaCorriente ?? antes.online_credit_enabled,
+      muestraSinStock: body.muestraSinStock ?? antes.tienda_muestra_sin_stock,
       retiro: e.retiroEnLocal ?? antes.pickup_enabled,
       envioPropio: e.envioPropio ?? antes.own_delivery_enabled,
     };
@@ -283,11 +287,12 @@ settingsRouter.put("/nexotienda", async (req, res, next) => {
          nexotienda_enabled = $2, pay_on_delivery_enabled = $3,
          transfer_enabled = $4, transfer_alias = $5, transfer_holder = $6,
          clubpay_pay_enabled = $7, online_credit_enabled = $8,
-         pickup_enabled = $9, own_delivery_enabled = $10
+         pickup_enabled = $9, own_delivery_enabled = $10,
+         tienda_muestra_sin_stock = $11
        WHERE id = $1 RETURNING ${COLUMNAS}`,
       [commerceId, nuevo.habilitada, nuevo.contraEntrega, nuevo.transferencia,
        nuevo.alias, nuevo.titular, nuevo.clubpay, nuevo.cuentaCorriente,
-       nuevo.retiro, nuevo.envioPropio]
+       nuevo.retiro, nuevo.envioPropio, nuevo.muestraSinStock]
     );
     await audit(commerceId, "settings.nexotienda", "commerces", commerceId, nuevo);
     res.json(armarTienda(rows[0], await regionesDe(commerceId)));

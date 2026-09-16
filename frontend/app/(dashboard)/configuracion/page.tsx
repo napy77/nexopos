@@ -30,6 +30,7 @@ interface Tienda {
   whatsapp: string | null;
   aclaracionHorario: string | null;
   envioGratisDesde: number | null;
+  muestraSinStock: boolean;
   slugSugerido: string;
   direccion: string | null;
   regiones: Region[];
@@ -557,6 +558,18 @@ export default function ConfiguracionPage() {
                     guardarPerfil({ aclaracionHorario: ev.target.value });
                   }
                 }} />
+
+              <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>Qué se ve</h3>
+              {/*
+                El almacén de barrio quiere mostrar todo: el cliente ve que el
+                producto existe y vuelve mañana. El que importó tres mil
+                artículos quiere lo contrario, porque una tienda que abre con
+                veinte "No disponible" seguidos parece cerrada.
+              */}
+              <Switch label="Mostrar los productos sin stock"
+                ayuda="Aparecen como 'No disponible'. Apagalo y la tienda sólo muestra lo que tenés."
+                on={tienda.muestraSinStock}
+                set={(v) => guardarTienda({ muestraSinStock: v })} />
 
               <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>Franjas de retiro y reparto</h3>
               <Franjas franjas={franjas} onGuardar={guardarFranjas} />
