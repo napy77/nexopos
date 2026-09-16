@@ -1062,20 +1062,37 @@ function StockB2B({ onError }: { onError: (m: string) => void }) {
     <div className="card" style={{ minWidth: 340 }}>
       <h2>Stock compartido con NexoB2B</h2>
       <p className="muted" style={{ fontSize: 12 }}>
-        Tenés {estado.productosPropios} productos de tu propio catálogo. Si los vendés
-        por mayor y por mostrador, es el mismo depósito: prendiendo esto, lo que sale
-        por caja baja también en NexoB2B, y lo que despachás por mayor baja acá.
+        Tenés {estado.productosPropios}{" "}
+        {estado.productosPropios === 1 ? "producto" : "productos"} de tu propio catálogo.
+        Si los vendés por mayor y por mostrador, es el mismo depósito: prendiendo esto,
+        lo que sale por caja baja también en NexoB2B, y lo que despachás por mayor baja acá.
       </p>
 
       <Switch label="Mantener los dos en el mismo número"
         on={estado.activo} disabled={guardando}
         set={(v) => cambiar(v)} />
 
+      {/*
+        La pregunta no es si el ERP escribe el stock, sino si se entera de lo
+        que vendiste. El que factura las ventas del mostrador ya las descuenta
+        y su total viene bien, aunque llegue tarde. El que no, te devuelve las
+        unidades cada vez que sincroniza, y eso no se corrige solo.
+      */}
       {!estado.activo && (
         <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-          Antes de prenderlo: si tu ERP escribe el stock en NexoB2B, tiene que dejar de
-          reescribir el total de estos productos. Si no, te devuelve las unidades que el
-          mostrador acaba de descontar.
+          Antes de prenderlo, una sola pregunta: si tu ERP escribe el stock en NexoB2B,
+          ¿se entera de las ventas del mostrador? Si las factura, sí, y podés prenderlo.
+          Si no se entera, te va a devolver las unidades que acabás de vender cada vez
+          que sincronice.
+        </p>
+      )}
+
+      {estado.activo && (
+        <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+          Si alguna vez ves que el stock de estos productos sube sin que nadie haya
+          cargado mercadería, es tu ERP sincronizando entre la venta y su factura. Se
+          acomoda en la siguiente sincronización, después de facturar. En el historial
+          del producto figura como &ldquo;NexoB2B&rdquo;.
         </p>
       )}
 
