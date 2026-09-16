@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { pool } from "../db.js";
 import { HttpError } from "../middleware/error.js";
-import { ajustarStockB2B, isMockMode } from "../integrations/nexob2b.js";
+import { ajustarStockB2B, isMockMode, type ResultadoStockB2B } from "../integrations/nexob2b.js";
 
 /**
  * El stock compartido con NexoB2B, para el negocio que es mayorista y comercio
@@ -87,9 +87,8 @@ export async function encolarStockB2B(
 }
 
 /**
- * Con qué nombre viaja un ítem, y con cuál se lo reconoce en la respuesta.
- * NexoB2B contesta con `pmp_id` siempre, haya recibido lo que haya recibido,
- * así que para cruzar el resultado hay que usar lo que mandamos nosotros.
+ * Con qué nombre viaja un ítem. Sirve para armar el pedido y para nombrarlo en
+ * el log; el resultado NO se cruza por acá sino por `indice`.
  */
 function comoSeLlama(f: { pmp_id?: unknown; presentacion_id?: unknown; ean?: unknown }):
   { campo: "pmp_id" | "presentacion_id" | "ean"; valor: string } {
@@ -172,32 +171,33 @@ export async function despacharStockB2B(): Promise<number> {
        * es de su propio catálogo. Reintentarlo no lo va a arreglar, así que se
        * cierra con el error escrito en vez de girar doce veces.
        *
-       * Para cruzarlo con la fila no alcanza con mirar un campo: NexoB2B
-       * devuelve `pmp_id` siempre, hayamos mandado lo que hayamos mandado, así
-       * que el que vuelve puede no ser el que mandamos. Se indexa por todos
-       * los identificadores que traiga, y si aun así alguno queda sin ubicar,
-       * se cae al orden —que es el mismo— en vez de dar por buena una línea
-       * que en realidad fue rechazada.
+       * Se cruza por `indice`, que es la posición del ítem que mandamos. El
+       * orden también está garantizado, pero NexoB2B lo estaba cumpliendo por
+       * cómo había quedado escrito su bucle y no por contrato: el que mañana
+       * agrupe o filtre ahí adentro lo rompe sin enterarse. `indice` es el
+       * contrato; el orden queda de respaldo para una versión vieja de ellos.
+       *
+       * Si no se puede cruzar —vinieron menos resultados que ítems y sin
+       * índice— no se da nada por bueno: falla el lote entero y se reintenta
+       * con la misma clave, que es idempotente. Marcar una línea como enviada
+       * sin saber si entró es la forma de perder un descuento en silencio.
        */
-      const falloDe = new Map<string, string>();
-      for (const r of resultados) {
-        if (r.ok) continue;
-        const motivo = r.error ?? "rechazado";
-        for (const id of [r.pmp_id, r.presentacion_id, r.ean]) {
-          if (id) falloDe.set(String(id), motivo);
-        }
+      const porIndice = new Map<number, ResultadoStockB2B>();
+      for (const [i, r] of resultados.entries()) {
+        porIndice.set(typeof r.indice === "number" ? r.indice : i, r);
       }
-      const porOrden = resultados.length === filas.length ? resultados : null;
+      if (porIndice.size < filas.length) {
+        await marcarError(
+          filas,
+          `NexoB2B contestó ${resultados.length} resultados para ${filas.length} ítems`
+        );
+        continue;
+      }
 
       for (const [i, fila] of filas.entries()) {
+        const resultado = porIndice.get(i)!;
+        const fallo = resultado.ok ? undefined : (resultado.error ?? "rechazado");
         const suClave = comoSeLlama(fila).valor;
-        const porId = falloDe.get(suClave);
-        const ubicable = [fila.pmp_id, fila.presentacion_id, fila.ean]
-          .some((id) => id && falloDe.has(String(id)));
-        const fallo = porId
-          ?? (!ubicable && porOrden && !porOrden[i].ok
-                ? (porOrden[i].error ?? "rechazado")
-                : undefined);
         if (fallo) {
           await pool.query(
             `UPDATE b2b_stock_outbox

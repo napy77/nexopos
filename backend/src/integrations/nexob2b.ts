@@ -859,7 +859,14 @@ export interface ItemStockB2B {
 }
 
 export interface ResultadoStockB2B {
-  /** NexoB2B lo devuelve siempre, haya recibido lo que haya recibido. */
+  /**
+   * La posición del ítem que mandamos. Es la forma correcta de cruzar el
+   * resultado con la fila: el orden también está garantizado, pero lo estaba
+   * por cómo quedó escrito su bucle y no por contrato. Falta sólo si del otro
+   * lado corre una versión anterior a este acuerdo.
+   */
+  indice?: number;
+  /** NexoB2B lo devuelve siempre, además de echar el campo que mandamos. */
   pmp_id?: string;
   presentacion_id?: string;
   ean?: string;
@@ -876,7 +883,25 @@ export async function ajustarStockB2B(
   idempotencyKey: string
 ): Promise<{ resultados: ResultadoStockB2B[]; repetido: boolean }> {
   if (isMockMode()) {
-    return { resultados: items.map((i) => ({ ...i, ok: true })), repetido: false };
+    /*
+     * El mock imita la forma EXACTA de la respuesta real, no una cómoda.
+     *
+     * Antes devolvía `{...item, ok:true}`, que echa justo el campo que uno
+     * mandó y nada más. Con eso, un cruce de resultados equivocado pasaba
+     * todas las pruebas locales: la única forma de descubrirlo era leyendo el
+     * código. Un mock más indulgente que la API no prueba nada.
+     */
+    return {
+      resultados: items.map((i, indice) => ({
+        indice,
+        ...(i.pmp_id ? { pmp_id: i.pmp_id } : {}),
+        ...(i.presentacion_id ? { presentacion_id: i.presentacion_id } : {}),
+        ...(i.ean ? { ean: i.ean } : {}),
+        pmp_id: i.pmp_id ?? `pmp_mock_${indice}`,
+        ok: true,
+      })),
+      repetido: false,
+    };
   }
   const data = await api<{ resultados?: ResultadoStockB2B[]; repetido?: boolean }>(
     "/api/v1/pos/stock",
