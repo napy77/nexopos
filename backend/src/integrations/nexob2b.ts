@@ -837,9 +837,11 @@ export async function catalogoPropio(token: string): Promise<{
  * mayorista vinculada contesta 403 `sin_vinculo`, y si la presentación no es
  * de su propio catálogo devuelve ese ítem con `ok: false`.
  *
- * Se identifica por `presentacion_id` —la presentación maestra— y no por EAN.
- * Con el EAN, una "unidad" y una "caja x12" que comparten el código del
- * producto se descontaban las dos.
+ * El ítem se nombra con `pmp_id`, `presentacion_id` o `ean`, en ese orden de
+ * precisión. Por EAN, una "unidad" y una "caja x12" que comparten el código
+ * del producto se descontaban las dos; y el EAN es el único de los tres que
+ * puede faltar, así que dejarlo de último saca del circuito el último lugar
+ * donde una presentación podía quedar sin nombrar.
  *
  * La cantidad es un delta: negativa cuando se vendió. Un total pisaría lo que
  * haya pasado del otro lado mientras el aviso viajaba. Y como son deltas, el
@@ -847,17 +849,25 @@ export async function catalogoPropio(token: string): Promise<{
  * descuenta de nuevo.
  */
 export interface ItemStockB2B {
+  /** La fila del mayorista: exacta, siempre una sola. */
+  pmp_id?: string;
+  /** La presentación del maestro. */
   presentacion_id?: string;
+  /** Último recurso: es el único de los tres que puede faltar. */
   ean?: string;
   cantidad: number;
 }
 
 export interface ResultadoStockB2B {
+  /** NexoB2B lo devuelve siempre, haya recibido lo que haya recibido. */
+  pmp_id?: string;
   presentacion_id?: string;
   ean?: string;
   ok: boolean;
   error?: string;
   stock?: number;
+  producto?: string;
+  presentacion?: string;
 }
 
 export async function ajustarStockB2B(

@@ -1031,6 +1031,7 @@ function StockB2B({ onError }: { onError: (m: string) => void }) {
   const [estado, setEstado] = useState<{
     activo: boolean; productosPropios: number;
     webhookUrl: string | null; webhookSecret: string | null;
+    secretoConfirmado: boolean;
     pendientes: number; ultimoError: string | null; modoMock: boolean;
   } | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -1109,8 +1110,17 @@ function StockB2B({ onError }: { onError: (m: string) => void }) {
 
           <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
             Los dos son secretos: quien los tenga puede cambiarte el stock. Van en la
-            misma clave de API, en el campo de dirección y en el de secreto. Si cargás
-            sólo la dirección igual funciona, pero con el secreto es más seguro.
+            misma clave de API, en el campo de dirección y en el de secreto.
+          </p>
+
+          {/* Mientras no llegue uno firmado, el secreto no se exige: si se
+              exigiera desde que se genera, el comerciante que todavía no lo
+              cargó allá se cortaría los avisos a sí mismo. */}
+          <p className={estado.secretoConfirmado ? "badge ok" : "badge warn"}
+            style={{ marginTop: 6 }}>
+            {estado.secretoConfirmado
+              ? "Los avisos llegan firmados con el secreto"
+              : "Esperando el primer aviso firmado. Hasta que llegue, alcanza con la dirección."}
           </p>
         </div>
       )}
