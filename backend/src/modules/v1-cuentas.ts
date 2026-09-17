@@ -3,7 +3,9 @@ import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { requiereClave } from "../middleware/api-key.js";
-import { canjearTokenTienda } from "../integrations/clubpay.js";
+import {
+  canjearTokenTienda, pedirEmparejamiento, estadoEmparejamiento,
+} from "../integrations/clubpay.js";
 import { estadoCredito, cicloDe, vencimientoDe } from "./cuenta-corriente.js";
 import { hoy } from "../lib/fechas.js";
 
@@ -193,3 +195,95 @@ cuentasRouter.get("/cuentas/:accountId", cuentas, async (req, res, next) => {
     next(err);
   }
 });
+
+// ── Emparejar dos pantallas ─────────────────────────────────────────────────
+
+/**
+ * La tienda abierta en la computadora de casa y ClubPay en el teléfono.
+ *
+ * El handoff no cubre ese caso: abre la tienda EN el teléfono, y la compu no
+ * tiene con qué demostrar quién es. Se emparejan con un código corto que la
+ * persona lee en la compu y escribe en su app.
+ *
+ * Los dos endpoints son pase de pelota a ClubPay, por lo mismo que el canje:
+ * su API pide la clave del comercio, NexoTienda no la tiene ni puede tenerla
+ * —es un solo servidor que renderiza la tienda de cualquiera— y nosotros sí.
+ *
+ * Y termina en `POST /v1/cuentas/canjear`, el que ya existe. Una segunda forma
+ * de abrir sesión sería una segunda superficie que auditar por el resto de la
+ * vida del producto.
+ */
+
+const emparejarSchema = z.object({
+  storeId: z.string().min(1),
+  /**
+   * Lo que el navegador dice de sí mismo, para que la persona reconozca su
+   * propia compu en la pantalla de confirmación.
+   *
+   * Viaja tal cual y no se le agrega nada, como pidió NexoTienda. Se recorta
+   * porque va a una pantalla de teléfono, no porque desconfiemos del largo.
+   */
+  dispositivo: z.string().trim().max(120).optional(),
+});
+
+/** POST /v1/cuentas/emparejar */
+cuentasRouter.post("/cuentas/emparejar", cuentas, async (req, res, next) => {
+  try {
+    const body = emparejarSchema.parse(req.body);
+    const commerceId = Number(body.storeId);
+    if (!Number.isInteger(commerceId)) throw new HttpError(400, "storeId inválido");
+
+    const apiKey = await claveDe(commerceId);
+    const p = await pedirEmparejamiento(apiKey, {
+      dispositivo: body.dispositivo, commerceId,
+    });
+    res.json({ requestId: p.request_id, code: p.code, expiresAt: p.expira_at });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /v1/cuentas/emparejar/:requestId?storeId=
+ *
+ * Contesta lo que contesta ClubPay y nada más. El `token` que vuelve en
+ * `listo` es el mismo de un solo uso del handoff: se canjea con
+ * `POST /v1/cuentas/canjear`.
+ */
+cuentasRouter.get("/cuentas/emparejar/:requestId", cuentas, async (req, res, next) => {
+  try {
+    const commerceId = Number(req.query.storeId);
+    if (!Number.isInteger(commerceId)) throw new HttpError(400, "Falta storeId");
+    const apiKey = await claveDe(commerceId);
+
+    const estado = await estadoEmparejamiento(
+      apiKey, String(req.params.requestId),
+      // Sólo para el modo demo: el token que devolvería ClubPay al aprobar es
+      // el external_id de una libreta vinculada de este comercio.
+      async () => {
+        const { rows: [c] } = await pool.query(
+          `SELECT id FROM customers
+            WHERE commerce_id = $1 AND clubpay_status IN ('vinculada','aceptada')
+            ORDER BY id LIMIT 1`,
+          [commerceId]
+        );
+        return c ? refDeCliente(Number(c.id)) : null;
+      }
+    );
+    res.json(estado);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** La clave de ClubPay de ese comercio, o el motivo por el que no se puede. */
+async function claveDe(commerceId: number): Promise<string> {
+  const { rows: [com] } = await pool.query(
+    "SELECT clubpay_api_key FROM commerces WHERE id = $1", [commerceId]
+  );
+  if (!com) throw new HttpError(404, "No existe ese comercio");
+  if (!com.clubpay_api_key) {
+    throw new HttpError(409, "Este comercio todavía no tiene configurado ClubPay.");
+  }
+  return String(com.clubpay_api_key);
+}

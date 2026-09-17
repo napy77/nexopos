@@ -581,3 +581,72 @@ export async function canjearTokenTienda(apiKey: string, token: string): Promise
   }
   return api<SesionTienda>("/pos/tienda/sessions", apiKey, { token });
 }
+
+// ── Emparejar dos pantallas ─────────────────────────────────────────────────
+
+export interface PedidoEmparejamiento {
+  request_id: string;
+  code: string;
+  expira_at: string;
+}
+
+export type EstadoEmparejamiento =
+  | { status: "pendiente" }
+  | { status: "listo"; token: string }
+  | { status: "vencido" };
+
+/**
+ * Pide un código corto para abrir la libreta en otra pantalla.
+ *
+ * El caso: la tienda abierta en la computadora de casa y ClubPay en el
+ * teléfono. El handoff no sirve —abre la tienda EN el teléfono— y la compu no
+ * tiene con qué demostrar quién es. Un QR tampoco: nadie escanea su propia
+ * pantalla.
+ *
+ * `dispositivo` es lo que el navegador dice de sí mismo y viaja tal cual, sin
+ * agregarle nada. Sirve para que la persona reconozca su propia compu en la
+ * pantalla de confirmación. **No es una prueba**: en el ataque que este
+ * mecanismo tiene que resistir, el que pide es el atacante, así que ese texto lo
+ * escribe él. Lo que la persona sí puede creer es el nombre del comercio, que
+ * ClubPay deduce de la clave y no de lo que le mandamos.
+ */
+const mockPares = new Map<string, { creado: number; commerceId: number }>();
+
+export async function pedirEmparejamiento(
+  apiKey: string, datos: { dispositivo?: string; commerceId: number }
+): Promise<PedidoEmparejamiento> {
+  if (isMockMode()) {
+    const id = `par_mock_${Date.now()}`;
+    mockPares.set(id, { creado: Date.now(), commerceId: datos.commerceId });
+    return {
+      request_id: id,
+      // Sin I, O, 0 ni 1: alguien tiene que leer esto en voz alta o copiarlo de
+      // una pantalla a un teléfono.
+      code: "VRCCX",
+      expira_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+    };
+  }
+  return api<PedidoEmparejamiento>("/pos/tienda/pairings", apiKey, {
+    device: datos.dispositivo ?? null,
+  });
+}
+
+/** ¿Ya lo aprobó desde la app? */
+export async function estadoEmparejamiento(
+  apiKey: string, requestId: string, resolverTokenMock?: () => Promise<string | null>
+): Promise<EstadoEmparejamiento> {
+  if (isMockMode()) {
+    const p = mockPares.get(requestId);
+    if (!p) return { status: "vencido" };
+    // Se da por aprobado a los cinco segundos, como el cobro por QR del mock:
+    // alcanza para probar el circuito entero sin la app.
+    if (Date.now() - p.creado < 5_000) return { status: "pendiente" };
+    const token = resolverTokenMock ? await resolverTokenMock() : null;
+    if (!token) return { status: "vencido" };
+    mockPares.delete(requestId);
+    return { status: "listo", token };
+  }
+  return apiGet<EstadoEmparejamiento>(
+    `/pos/tienda/pairings/${encodeURIComponent(requestId)}`, apiKey
+  );
+}
