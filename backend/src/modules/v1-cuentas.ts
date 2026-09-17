@@ -4,7 +4,8 @@ import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { requiereClave } from "../middleware/api-key.js";
 import { canjearTokenTienda } from "../integrations/clubpay.js";
-import { estadoCredito } from "./cuenta-corriente.js";
+import { estadoCredito, cicloDe, vencimientoDe } from "./cuenta-corriente.js";
+import { hoy } from "../lib/fechas.js";
 
 /**
  * La libreta, abierta desde la tienda.
@@ -137,13 +138,31 @@ cuentasRouter.get("/cuentas/:accountId", cuentas, async (req, res, next) => {
     if (!Number.isInteger(customerId)) throw new HttpError(400, "accountId inválido");
 
     const { rows: [cliente] } = await pool.query(
-      `SELECT id, name, clubpay_status, clubpay_linked_at
-         FROM customers WHERE id = $1 AND commerce_id = $2`,
+      `SELECT c.id, c.name, c.clubpay_status, c.clubpay_linked_at,
+              co.closing_day, co.due_day
+         FROM customers c JOIN commerces co ON co.id = c.commerce_id
+        WHERE c.id = $1 AND c.commerce_id = $2`,
       [customerId, commerceId]
     );
     if (!cliente) throw new HttpError(404, "Esa libreta no existe en esta tienda");
 
     const estado = await estadoCredito(pool, commerceId, customerId);
+    /*
+     * Cuándo cierra y cuándo vence.
+     *
+     * Van el número del día —que es lo que dice la frase "cierra el 10 de cada
+     * mes"— y también las fechas concretas del período en curso, porque
+     * calcularlas tiene una trampa: un cierre el 31 en febrero es el 28, y el
+     * 29 en los bisiestos. Mandando la fecha ya resuelta, esa cuenta se hace en
+     * un solo lugar y no en cada sistema que la necesite.
+     *
+     * `dueDay` va aunque no lo hayan pedido: "cierra el 10" sin "vence el 20"
+     * es media frase, y el que quiera escribir la otra mitad tendría que pedir
+     * otro viaje.
+     */
+    const cierre = Number(cliente.closing_day);
+    const vence = Number(cliente.due_day);
+    const ciclo = cicloDe(hoy(), cierre);
     res.json({
       accountId: refDeCliente(Number(cliente.id)),
       storeId: String(commerceId),
@@ -159,6 +178,14 @@ cuentasRouter.get("/cuentas/:accountId", cuentas, async (req, res, next) => {
        * comercio no vende fiado por internet".
        */
       onlineEnabled: estado.onlineHabilitado,
+      closingDay: cierre,
+      dueDay: vence,
+      /** El período en curso, con la fecha de cierre ya resuelta. */
+      currentPeriod: {
+        from: ciclo.desde,
+        to: ciclo.hasta,
+        dueDate: vencimientoDe(ciclo.hasta, cierre, vence),
+      },
       linkedAt: cliente.clubpay_linked_at
         ? new Date(cliente.clubpay_linked_at).toISOString() : null,
     });
