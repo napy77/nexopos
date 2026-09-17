@@ -10,6 +10,16 @@ interface Customer {
 }
 interface Tx { id: number; type: string; amount: string; note: string | null; created_at: string }
 
+interface FichaDup {
+  id: number; nombre: string; documento: string | null;
+  telefono: string | null; saldo: number; clubpay: string | null;
+}
+interface GrupoDuplicado { motivo: "telefono" | "documento"; clave: string; fichas: FichaDup[] }
+interface Similar {
+  id: number; nombre: string; documento: string | null;
+  telefono: string | null; saldo: number; motivo: "telefono" | "documento";
+}
+
 const TX_LABEL: Record<string, string> = {
   sale_credit: "Venta a cuenta",
   payment: "Pago",
@@ -53,13 +63,29 @@ export default function ClientesPage() {
   const [selected, setSelected] = useState<Customer | null>(null);
   const [txs, setTxs] = useState<Tx[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [duplicados, setDuplicados] = useState<GrupoDuplicado[]>([]);
+  const [verDuplicados, setVerDuplicados] = useState(false);
+  const [similares, setSimilares] = useState<Similar[]>([]);
   const [editando, setEditando] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
     api<Customer[]>("/api/customers").then(setCustomers).catch(console.error);
+    api<GrupoDuplicado[]>("/api/customers/duplicados").then(setDuplicados).catch(() => setDuplicados([]));
   }, []);
   useEffect(load, [load]);
+
+  /**
+   * Mientras el comerciante escribe el alta. Cortar el nacimiento de un
+   * duplicado cuesta un aviso; limpiarlo después cuesta cobrarle a alguien lo
+   * que ya pagó en la otra ficha.
+   */
+  async function buscarSimilar(campo: { doc?: string; phone?: string }) {
+    const valor = (campo.doc ?? campo.phone ?? "").trim();
+    if (valor.length < 6) return;
+    const qs = new URLSearchParams(campo.doc ? { doc: valor } : { phone: valor });
+    setSimilares(await api<Similar[]>(`/api/customers/similar?${qs}`).catch(() => []));
+  }
 
   async function select(c: Customer) {
     setSelected(c);
@@ -135,18 +161,86 @@ export default function ClientesPage() {
       <h1>Clientes y cuentas corrientes</h1>
       <div className="toolbar">
         <button onClick={() => setShowForm(!showForm)}>+ Nuevo cliente</button>
+        {/*
+          El comerciante no tenía forma de enterarse de que tiene dos fichas del
+          mismo señor: busca por nombre y ve una línea. Por eso el aviso aparece
+          solo, en vez de esperar a que sospeche.
+        */}
+        {duplicados.length > 0 && (
+          <button type="button" className="secondary"
+            onClick={() => setVerDuplicados(!verDuplicados)}>
+            {duplicados.length === 1
+              ? "1 cliente parece estar cargado dos veces"
+              : `${duplicados.length} clientes parecen estar cargados dos veces`}
+          </button>
+        )}
       </div>
       {error && <p className="error">{error}</p>}
+
+      {verDuplicados && duplicados.length > 0 && (
+        <div className="card" style={{ border: "2px solid var(--warning)" }}>
+          <h2 style={{ marginTop: 0, fontSize: 15 }}>Podrían ser la misma persona</h2>
+          <p className="muted" style={{ fontSize: 12 }}>
+            No juntamos nada solos: sumar dos saldos mal deja a alguien debiendo lo que
+            no debe. Miralos y, si son la misma, cobrá y cerrá la que no uses.
+          </p>
+          {duplicados.map((g) => (
+            <div key={g.clave} style={{ marginTop: 10 }}>
+              <span className="muted" style={{ fontSize: 11 }}>
+                Mismo {g.motivo === "telefono" ? "teléfono" : "documento"}: {g.clave}
+              </span>
+              <table style={{ fontSize: 13 }}>
+                <tbody>
+                  {g.fichas.map((f) => (
+                    <tr key={f.id} onClick={() => {
+                      const c = customers.find((x) => x.id === f.id);
+                      if (c) { setVerDuplicados(false); select(c); }
+                    }} style={{ cursor: "pointer" }}>
+                      <td>{f.nombre}</td>
+                      <td className="muted">{f.documento ?? "—"}</td>
+                      <td className="muted">{f.telefono ?? "—"}</td>
+                      <td className="num">{money(f.saldo)}</td>
+                      <td className="muted" style={{ fontSize: 11 }}>
+                        {f.clubpay === "vinculada" || f.clubpay === "aceptada"
+                          ? "ve esta en ClubPay" : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
 
       {showForm && (
         <div className="card" style={{ border: "2px solid var(--primary)" }}>
           <form action={createCustomer} className="toolbar">
             <input name="name" placeholder="Nombre *" required />
-            <input name="doc" placeholder="DNI/CUIT" />
-            <input name="phone" placeholder="Teléfono" />
+            <input name="doc" placeholder="DNI/CUIT" onBlur={(e) => buscarSimilar({ doc: e.target.value })} />
+            <input name="phone" placeholder="Teléfono" onBlur={(e) => buscarSimilar({ phone: e.target.value })} />
             <input name="email" type="email" placeholder="Email" />
             <button type="submit">Guardar</button>
           </form>
+          {similares.length > 0 && (
+            <div className="badge warn" style={{ display: "block", marginTop: 8 }}>
+              Ya tenés a{" "}
+              {similares.map((f, i) => (
+                <span key={f.id}>
+                  {i > 0 && ", "}
+                  <button type="button" className="ghost" style={{ fontSize: 12, padding: 0 }}
+                    onClick={() => {
+                      const c = customers.find((x) => x.id === f.id);
+                      if (c) { setShowForm(false); setSimilares([]); select(c); }
+                    }}>
+                      {f.nombre} ({money(f.saldo)})
+                  </button>
+                </span>
+              ))}
+              {" "}con ese {similares[0].motivo === "telefono" ? "teléfono" : "documento"}.
+              ¿Es la misma persona?
+            </div>
+          )}
         </div>
       )}
 

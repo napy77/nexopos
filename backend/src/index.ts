@@ -24,6 +24,7 @@ import { disponibilidadRouter } from "./modules/disponibilidad.js";
 import { plataformaRouter } from "./modules/plataforma.js";
 import { v1Router } from "./modules/v1-catalogo.js";
 import { pedidosRouter } from "./modules/v1-pedidos.js";
+import { cuentasRouter } from "./modules/v1-cuentas.js";
 import { pedidosPosRouter } from "./modules/pedidos.js";
 import { erpRouter } from "./modules/erp.js";
 import { margenesRouter } from "./modules/margenes.js";
@@ -84,6 +85,7 @@ app.use("/api/erp/v1", erpRouter);
 app.use("/v1", v1Router);
 app.use("/v1", pedidosRouter);
 app.use("/v1", campanasV1Router);
+app.use("/v1", cuentasRouter);
 
 // Los consume Nexo B2B servidor a servidor, con la clave de plataforma:
 // no hay ningún comerciante del otro lado, así que no va requireAuth.

@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Request } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
+import { gruposDuplicados, telefonoNormalizado, documentoNormalizado } from "../lib/identidad.js";
 import { HttpError } from "../middleware/error.js";
 import { sesionAbierta } from "./caja.js";
 import { clubpayKey } from "./clubpay.js";
@@ -28,6 +29,77 @@ customersRouter.get("/", async (req, res, next) => {
       [req.auth.commerceId]
     );
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/customers/duplicados — las fichas que parecen la misma persona.
+ *
+ * Existe porque el comerciante no tenía forma de enterarse: busca por nombre,
+ * ve una línea, y las dos fichas del mismo señor conviven años con saldos
+ * distintos. En Jure hay dos "Germán Yovan", uno con $850 y otro con $27.519,20,
+ * y el documento de uno tiene un dígito comido.
+ *
+ * No fusiona nada. Fusionar es sumar saldos y mover movimientos, y si está mal
+ * alguien queda debiendo lo que no debe: eso lo decide el comerciante ficha por
+ * ficha, mirándolas.
+ */
+customersRouter.get("/duplicados", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, doc_number, phone, balance, clubpay_status
+         FROM customers WHERE commerce_id = $1 ORDER BY name`,
+      [req.auth.commerceId]
+    );
+    const saldoDe = new Map(rows.map((r) => [Number(r.id), r]));
+    res.json(
+      gruposDuplicados(rows.map((r) => ({
+        id: Number(r.id), name: r.name, doc_number: r.doc_number, phone: r.phone,
+      }))).map((g) => ({
+        motivo: g.motivo,
+        clave: g.clave,
+        fichas: g.fichas.map((f) => {
+          const fila = saldoDe.get(f.id);
+          return {
+            id: f.id, nombre: f.name, documento: f.doc_number, telefono: f.phone,
+            saldo: Number(fila?.balance ?? 0),
+            clubpay: fila?.clubpay_status ?? null,
+          };
+        }),
+      }))
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/customers/similar?phone=&doc= — ¿ya tengo a esta persona?
+ *
+ * Se consulta mientras el comerciante escribe el alta, antes de guardar. Cortar
+ * el nacimiento de duplicados nuevos es barato; limpiar los viejos no.
+ */
+customersRouter.get("/similar", async (req, res, next) => {
+  try {
+    const tel = telefonoNormalizado(String(req.query.phone ?? ""));
+    const doc = documentoNormalizado(String(req.query.doc ?? ""));
+    if (!tel && !doc) { res.json([]); return; }
+
+    const { rows } = await pool.query(
+      "SELECT id, name, doc_number, phone, balance FROM customers WHERE commerce_id = $1",
+      [req.auth.commerceId]
+    );
+    const parecidas = rows.filter((r) =>
+      (tel && telefonoNormalizado(r.phone) === tel) ||
+      (doc && documentoNormalizado(r.doc_number) === doc)
+    );
+    res.json(parecidas.map((r) => ({
+      id: Number(r.id), nombre: r.name, documento: r.doc_number,
+      telefono: r.phone, saldo: Number(r.balance),
+      motivo: tel && telefonoNormalizado(r.phone) === tel ? "telefono" : "documento",
+    })));
   } catch (err) {
     next(err);
   }

@@ -549,3 +549,35 @@ export async function empujarResumen(apiKey: string, resumen: ResumenCuenta): Pr
   }
   await api<unknown>("/pos/account/statements", apiKey, resumen);
 }
+
+// ── Handoff: la persona salta de ClubPay a la tienda ────────────────────────
+
+export interface SesionTienda {
+  account_id: string;
+  external_id: string;
+  persona?: string | null;
+}
+
+/**
+ * Le pregunta a ClubPay de quién es este token de entrada.
+ *
+ * El token lo emite ClubPay cuando la persona toca "Ir a la tienda" en su app;
+ * NexoTienda nos lo trae y nosotros preguntamos. **Preguntar es mejor que que
+ * nos lo empujen al emitirlo**, que era lo que habíamos propuesto: así el token
+ * vive en un solo sistema —el que lo creó— y no existe el estado "emitido allá,
+ * no llegado acá", que es el que alguien tendría que diagnosticar a las once de
+ * la noche porque un cliente no puede entrar.
+ *
+ * Va con la clave del comercio, no con una de plataforma, y eso es lo que hace
+ * que un token emitido para un comercio no pueda abrir la tienda de otro:
+ * ClubPay lo valida contra la clave y no coincide.
+ */
+export async function canjearTokenTienda(apiKey: string, token: string): Promise<SesionTienda> {
+  if (isMockMode()) {
+    // En demo, el token es el external_id: alcanza para probar el circuito
+    // entero sin ClubPay, y un token que no empieza con CLI- se rechaza.
+    if (!token.startsWith("CLI-")) throw new HttpError(401, "Token inválido o vencido");
+    return { account_id: `acc_mock_${token}`, external_id: token, persona: "Germán Yovan" };
+  }
+  return api<SesionTienda>("/pos/tienda/sessions", apiKey, { token });
+}

@@ -309,8 +309,20 @@ clubpayWebhookRouter.post("/vinculacion", async (req, res, next) => {
     if (!Number.isInteger(customerId)) throw new HttpError(400, "external_id inválido");
 
     const { rows } = await pool.query(
+      /*
+       * `clubpay_linked_at` se mueve cada vez que el vínculo cambia de estado o
+       * de cuenta. Es la única revocación de la sesión de tienda: vive en una
+       * cookie de un navegador ajeno y nadie puede cerrarla, así que la tienda
+       * compara esta fecha contra cuándo abrió la sesión. Que no se mueva cuando
+       * el estado no cambió es a propósito: una consulta de rutina no tiene por
+       * qué desloguear a nadie.
+       */
       `UPDATE customers SET clubpay_status = $3, clubpay_checked_at = now(),
-              clubpay_account_id = COALESCE($4, clubpay_account_id)
+              clubpay_account_id = COALESCE($4, clubpay_account_id),
+              clubpay_linked_at = CASE
+                WHEN clubpay_status IS DISTINCT FROM $3
+                  OR ($4 IS NOT NULL AND clubpay_account_id IS DISTINCT FROM $4)
+                THEN now() ELSE clubpay_linked_at END
         WHERE id = $1 AND commerce_id = $2
         RETURNING id`,
       [customerId, commerceId, body.status, body.account_id ?? null]
