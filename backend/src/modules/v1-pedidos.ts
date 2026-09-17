@@ -46,6 +46,15 @@ const nuevoPedidoSchema = z.object({
   notes: z.string().trim().max(500).optional(),
   /** Compra a la libreta. Esa cuenta se abrió en el mostrador, nunca acá. */
   accountId: z.string().optional(),
+  /**
+   * El total que la pantalla le mostró al comprador al apretar el botón.
+   *
+   * Sirve para una sola cosa, y es honestidad: si acá da distinto —porque la
+   * campaña terminó mientras el changuito estaba cargado, o el comerciante
+   * cambió un precio— la tienda puede decírselo antes de que lo descubra al
+   * pagar. Opcional: un pedido sin esto se toma igual.
+   */
+  expectedTotalCents: z.coerce.number().int().nonnegative().optional(),
   /** Compra anónima: es la mayoría de las ventas */
   contact: z.object({
     name: z.string().trim().min(1).max(120),
@@ -235,8 +244,27 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
     }
     await client.query("COMMIT");
 
+    const cobrado = Math.round(total * 100);
+    const cambio = body.expectedTotalCents !== undefined && body.expectedTotalCents !== cobrado;
+    if (cambio) {
+      console.log(
+        `[pedido] ${orden.id}: el comprador vio ${body.expectedTotalCents} y se cobró ${cobrado}`
+      );
+    }
+
     await audit(commerceId, "pedido.recibido", "orders", orden.id, { total });
-    res.status(201).json(await armarOrder(Number(orden.id)));
+    /*
+     * El pedido se toma igual: el precio nuestro es el que vale y frenarlo
+     * dejaría al comprador sin nada. Lo que se agrega es el aviso, para que la
+     * tienda pueda contarlo en vez de corregirlo en silencio —y cuente distinto
+     * si bajó o si subió, que es lo que hicieron ellos—.
+     */
+    res.status(201).json({
+      ...(await armarOrder(Number(orden.id))),
+      ...(cambio
+        ? { priceChanged: true, expectedTotalCents: body.expectedTotalCents }
+        : {}),
+    });
   } catch (err) {
     await client.query("ROLLBACK");
     next(err);

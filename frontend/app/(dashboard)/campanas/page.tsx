@@ -119,8 +119,9 @@ export default function CampanasPage() {
         problema con su cliente, no con el software.
       */}
       <p className="badge info" style={{ marginBottom: 12 }}>
-        Sólo cambia el precio de tu tienda online. En el mostrador seguís cobrando el
-        precio de siempre.
+        El descuento cambia el precio de tu tienda online. En el mostrador seguís
+        cobrando el de siempre, y el cliente que vio la oferta y viene al local lo va a
+        notar. Abajo, en cada campaña, están los dos precios de cada producto.
       </p>
 
       {error && <p className="error">{error}</p>}
@@ -216,8 +217,15 @@ export default function CampanasPage() {
                   <table style={{ fontSize: 13 }}>
                     <thead>
                       <tr>
-                        <th>Producto</th><th className="num">Precio</th>
-                        <th className="num">En la campaña</th><th />
+                        {/*
+                          Los encabezados dicen la consecuencia, no el dato:
+                          "En el mostrador $8.500 / En la tienda $6.375" es la
+                          decisión completa, con el número adentro. Un cartel
+                          arriba que enuncia la regla se lee una vez; esto se lee
+                          cada vez que mira la tanda.
+                        */}
+                        <th>Producto</th><th className="num">En el mostrador</th>
+                        <th className="num">En la tienda</th><th />
                       </tr>
                     </thead>
                     <tbody>
