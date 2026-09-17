@@ -512,15 +512,26 @@ v1Router.get("/stores/:storeId/products", catalogo, async (req, res, next) => {
       where += ` AND ${PASILLO_KEY} = $${params.length}`;
     }
     if (sub) {
-      // El id del árbol viene prefijado según el nivel; el nombre pelado
-      // también se acepta, porque es lo que la tienda tenía a mano hasta ahora.
+      /*
+       * `sub` es UN nodo, no el camino hasta él, y se resuelve esté a la
+       * profundidad que esté: `s:Girasol` encuentra sus productos sin que nadie
+       * diga que cuelga de `r:Aceites`. Es lo que permite que el árbol cambie de
+       * forma sin que la tienda toque sus URLs, y es la clase de cosa que se
+       * asume al revés —NexoTienda empezó mandando el camino y no encontraba
+       * nada—.
+       *
+       * El id del árbol viene prefijado según el nivel; el nombre pelado también
+       * se acepta, porque es lo que la tienda tenía a mano hasta ahora.
+       */
       const limpio = sub.replace(/^[rs]:/, "");
       params.push(limpio);
       where += ` AND (p.subrubro_nombre = $${params.length} OR p.rubro_nombre = $${params.length})`;
     }
+    const pedidos = ids
+      ? ids.split(",").map((n) => Number(n.trim())).filter((n) => Number.isFinite(n))
+      : [];
     if (ids) {
-      const lista = ids.split(",").map((n) => Number(n.trim())).filter((n) => Number.isFinite(n));
-      params.push(lista.length > 0 ? lista : [0]);
+      params.push(pedidos.length > 0 ? pedidos : [0]);
       where += ` AND p.id = ANY($${params.length}::bigint[])`;
     }
     if (q) {
@@ -540,7 +551,21 @@ v1Router.get("/stores/:storeId/products", catalogo, async (req, res, next) => {
       params
     );
 
-    const limit = Math.min(Math.max(Number(req.query.limit ?? 60) || 60, 1), 200);
+    /*
+     * Cuando piden ids, el límite por defecto es cuántos pidieron.
+     *
+     * La portada de NexoTienda junta los ids de todas sus estanterías —campañas,
+     * lo más vendido, lo más buscado, lo que esa persona suele llevar— en una
+     * sola consulta, y eso pasa de sesenta sin esfuerzo. Con el default de
+     * navegación, pedir ochenta ids devolvía sesenta productos sin decir nada:
+     * la estantería quedaba corta y del otro lado no había forma de notarlo.
+     *
+     * Un `limit` explícito sigue mandando, por si alguna vez quieren paginar
+     * sobre una lista de ids.
+     */
+    const porDefecto = pedidos.length > 0 ? pedidos.length : 60;
+    const techo = pedidos.length > 0 ? 500 : 200;
+    const limit = Math.min(Math.max(Number(req.query.limit ?? porDefecto) || porDefecto, 1), techo);
     const offset = Math.max(Number(req.query.offset ?? 0) || 0, 0);
     params.push(limit, offset);
     const { rows } = await pool.query(
