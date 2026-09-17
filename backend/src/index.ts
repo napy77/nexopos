@@ -29,6 +29,7 @@ import { erpRouter } from "./modules/erp.js";
 import { margenesRouter } from "./modules/margenes.js";
 import { iniciarOutbox } from "./modules/clubpay-outbox.js";
 import { iniciarWebhooks } from "./modules/webhooks.js";
+import { iniciarFichas } from "./modules/fichas.js";
 import { b2bStockRouter, b2bStockWebhookRouter, iniciarStockB2B } from "./modules/b2b-stock.js";
 
 const arranque = new Date().toISOString();
@@ -112,6 +113,7 @@ async function main() {
   iniciarOutbox();
   iniciarWebhooks();
   iniciarStockB2B();
+  iniciarFichas();
 
   app.listen(config.port, () => {
     console.log(`NexoPOS backend escuchando en http://localhost:${config.port}`);

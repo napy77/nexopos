@@ -716,6 +716,15 @@ export interface B2BProductoPropio {
   pasillo: string | null;
   rubro: string | null;
   subrubro: string | null;
+  /**
+   * Los ids de la taxonomía. NexoB2B los agregó al hacer sus reglas de precio;
+   * antes mandaba sólo los nombres, y por eso los productos que entraron por
+   * esta importación quedaron con los ids en NULL —lo que dejó fuera de alcance
+   * al resync de nombres, que cruza por id—.
+   */
+  pasillo_id?: string | null;
+  rubro_id?: string | null;
+  subrubro_id?: string | null;
   mayoristas: {
     mayorista_id: string;
     mayorista_nombre: string;
@@ -771,6 +780,9 @@ export async function catalogoPropio(token: string): Promise<{
   pasillo: string | null;
   rubro: string | null;
   subrubro: string | null;
+  pasilloId: string | null;
+  rubroId: string | null;
+  subrubroId: string | null;
   /** Costo de reposición, con la lista del comercio aplicada. */
   costo: number | null;
   /** Lo que el mayorista —o sea él mismo— tiene contado. null = no gestiona. */
@@ -782,6 +794,7 @@ export async function catalogoPropio(token: string): Promise<{
       presentacionNombre: "unidad", ean: "7798042240180", marca: "VOSS",
       unidad: "unidad", factor: 1, alicuotaIva: 21,
       imagenUrl: null, imagenes: [], pasillo: "Bazar", rubro: null, subrubro: null,
+      pasilloId: "pa_mock", rubroId: null, subrubroId: null,
       costo: 21629.3, stock: 5,
     }];
   }
@@ -815,6 +828,9 @@ export async function catalogoPropio(token: string): Promise<{
             imagenUrl: urlPublica(p.imagen_url),
             imagenes: absolutas(p.imagenes),
             pasillo: p.pasillo, rubro: p.rubro, subrubro: p.subrubro,
+            pasilloId: p.pasillo_id ?? null,
+            rubroId: p.rubro_id ?? null,
+            subrubroId: p.subrubro_id ?? null,
             // Un precio en cero no es un precio: es el mayorista que todavía
             // no lo cargó. Guardarlo como costo daría un margen del 100%.
             costo: Number(pres.precio) > 0 ? Number(pres.precio) : null,
@@ -908,4 +924,80 @@ export async function ajustarStockB2B(
     { token, method: "PUT", body: { idempotency_key: idempotencyKey, items } }
   );
   return { resultados: data.resultados ?? [], repetido: Boolean(data.repetido) };
+}
+
+// ── Fichas modificadas ──────────────────────────────────────────────────────
+
+/**
+ * Una ficha del catálogo maestro, tal como la devuelve `/api/v1/fichas`.
+ *
+ * Es la ficha, no el listado de un mayorista: el título y la foto de un access
+ * point son los mismos para los cuarenta almacenes que lo venden.
+ */
+export interface B2BFicha {
+  id: string;
+  ean: string | null;
+  nombre: string;
+  descripcion: string | null;
+  marca: string | null;
+  unidad_base: string | null;
+  alicuota_iva: number | string | null;
+  imagen_url: string | null;
+  imagenes?: B2BImagen[];
+  pasillo_id: string | null;
+  pasillo_nombre: string | null;
+  rubro_id: string | null;
+  rubro_nombre: string | null;
+  subrubro_id: string | null;
+  subrubro_nombre: string | null;
+  presentaciones: B2BPresentacionMaestra[] | null;
+  actualizado_at: string;
+}
+
+export interface CursorFichas {
+  desde: string;
+  desde_id?: string;
+}
+
+/**
+ * Lo que cambió en el catálogo maestro desde el cursor.
+ *
+ * Autentica con la clave de plataforma —la misma que NexoB2B usa para
+ * hablarnos a nosotros—, así que se corre una vez para todos los comercios y
+ * no una por cada uno. Ninguna sesión de comerciante puede vencerse y dejar a
+ * alguien con las fichas viejas.
+ *
+ * El `siguiente` se reenvía tal cual vino. No se arma acá a partir de `hasta`:
+ * el cursor necesita la fecha y el id juntos, y reconstruirlo de a pedazos es
+ * exactamente la forma de perder los empates.
+ */
+export async function fichasModificadas(
+  cursor: CursorFichas, limite = 500
+): Promise<{ fichas: B2BFicha[]; hayMas: boolean; siguiente: CursorFichas | null }> {
+  if (isMockMode()) return { fichas: [], hayMas: false, siguiente: null };
+
+  const params = new URLSearchParams({ desde: cursor.desde, limite: String(limite) });
+  if (cursor.desde_id) params.set("desde_id", cursor.desde_id);
+
+  const data = await api<{
+    productos?: B2BFicha[]; hay_mas?: boolean; siguiente?: CursorFichas | null;
+  }>(`/api/v1/fichas?${params}`, { token: config.platformKey }).catch((err) => {
+    // El 401 genérico dice "volvé a iniciar sesión", que acá no significa
+    // nada: no hay ningún comerciante, hay una clave de plataforma que no
+    // coincide. Quien lea el error tiene que ir al .env, no al login.
+    if (err instanceof HttpError && err.status === 401) {
+      throw new HttpError(401, "NexoB2B rechazó la clave de plataforma (NEXOPOS_PLATFORM_KEY).");
+    }
+    throw err;
+  });
+
+  return {
+    fichas: (data.productos ?? []).map((f) => ({
+      ...f,
+      imagen_url: urlPublica(f.imagen_url),
+      imagenes: absolutas(f.imagenes),
+    })),
+    hayMas: Boolean(data.hay_mas),
+    siguiente: data.siguiente ?? null,
+  };
 }

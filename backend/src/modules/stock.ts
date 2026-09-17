@@ -124,8 +124,9 @@ stockRouter.post("/importar-propios", async (req, res, next) => {
       const { rows: [prod] } = await client.query(
         `INSERT INTO products (nexob2b_id, ean, name, brand, category, unit, image_url,
                                alicuota_iva, factor, pasillo_nombre, rubro_nombre,
-                               subrubro_nombre, imagenes, synced_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now())
+                               subrubro_nombre, imagenes,
+                               pasillo_id, rubro_id, subrubro_id, synced_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())
          ON CONFLICT (nexob2b_id) DO UPDATE SET
            name = EXCLUDED.name,
            ean = COALESCE(EXCLUDED.ean, products.ean),
@@ -139,11 +140,18 @@ stockRouter.post("/importar-propios", async (req, res, next) => {
            pasillo_nombre = COALESCE(EXCLUDED.pasillo_nombre, products.pasillo_nombre),
            rubro_nombre = COALESCE(EXCLUDED.rubro_nombre, products.rubro_nombre),
            subrubro_nombre = COALESCE(EXCLUDED.subrubro_nombre, products.subrubro_nombre),
+           -- Los ids llegan desde que NexoB2B los agregó a ese endpoint. Con
+           -- ellos, el resync de nombres de taxonomía —que cruza por id— por
+           -- fin alcanza a los productos que entraron por acá.
+           pasillo_id = COALESCE(EXCLUDED.pasillo_id, products.pasillo_id),
+           rubro_id = COALESCE(EXCLUDED.rubro_id, products.rubro_id),
+           subrubro_id = COALESCE(EXCLUDED.subrubro_id, products.subrubro_id),
            synced_at = now()
          RETURNING id`,
         [l.presentacionId, l.ean, `${l.nombre} — ${l.presentacionNombre}`, l.marca,
          l.rubro, l.presentacionNombre, l.imagenUrl, l.alicuotaIva, l.factor,
-         l.pasillo, l.rubro, l.subrubro, JSON.stringify(l.imagenes)]
+         l.pasillo, l.rubro, l.subrubro, JSON.stringify(l.imagenes),
+         l.pasilloId, l.rubroId, l.subrubroId]
       );
 
       // La cantidad y el precio de venta solo se escriben al dar de alta la
