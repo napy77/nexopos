@@ -5,6 +5,7 @@ import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { requiereClave } from "../middleware/api-key.js";
 import { disponibilidadDe } from "./disponibilidad.js";
+import { PRECIO_EFECTIVO } from "./campanas-precio.js";
 
 /**
  * Los pedidos de la tienda online.
@@ -171,14 +172,23 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
 
     await client.query("BEGIN");
 
-    // Precio y nombre del momento, congelados en la línea: si el comercio
-    // cambia el precio mientras el pedido está en curso, se cobra el que el
-    // comprador vio.
+    /*
+     * Precio y nombre del momento, congelados en la línea: si el comercio cambia
+     * el precio mientras el pedido está en curso, se cobra el que el comprador
+     * vio al hacerlo.
+     *
+     * El precio sale de la MISMA expresión que usa el catálogo, campañas
+     * incluidas. Si acá tomáramos `sale_price` pelado, el comprador vería la
+     * oferta en la tienda y le llegaría un pedido al precio de lista: la tanda
+     * de ofertas sería una mentira de la vidriera.
+     */
     let subtotal = 0;
     const lineas: { productId: number; name: string; unit: string; qty: number; price: number }[] = [];
     for (const l of body.lines) {
       const { rows } = await client.query(
-        `SELECT p.id, p.name, p.unit, s.sale_price, s.quantity, s.availability_policy,
+        `SELECT p.id, p.name, p.unit,
+                ${PRECIO_EFECTIVO} AS sale_price,
+                s.quantity, s.availability_policy,
                 s.declared_state, s.quota_total, s.quota_remaining, s.quota_day,
                 s.es_insumo, s.published_in_store
            FROM stock_items s JOIN products p ON p.id = s.product_id

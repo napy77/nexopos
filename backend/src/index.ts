@@ -27,6 +27,7 @@ import { pedidosRouter } from "./modules/v1-pedidos.js";
 import { pedidosPosRouter } from "./modules/pedidos.js";
 import { erpRouter } from "./modules/erp.js";
 import { margenesRouter } from "./modules/margenes.js";
+import { campanasRouter, campanasV1Router } from "./modules/campanas.js";
 import { iniciarOutbox } from "./modules/clubpay-outbox.js";
 import { iniciarWebhooks } from "./modules/webhooks.js";
 import { iniciarFichas } from "./modules/fichas.js";
@@ -63,6 +64,7 @@ app.use("/api/mayoristas", requireAuth, mayoristasRouter);
 app.use("/api/purchases", requireAuth, purchasesRouter);
 app.use("/api/stock", requireAuth, stockRouter);
 app.use("/api/margenes", requireAuth, margenesRouter);
+app.use("/api/campanas", requireAuth, campanasRouter);
 app.use("/api/sales", requireAuth, salesRouter);
 app.use("/api/customers", requireAuth, customersRouter);
 app.use("/api/reports", requireAuth, reportsRouter);
@@ -81,6 +83,7 @@ app.use("/api/erp/v1", erpRouter);
 // y un `use` al tope, un pedido terminaría exigiendo la clave de catálogo.
 app.use("/v1", v1Router);
 app.use("/v1", pedidosRouter);
+app.use("/v1", campanasV1Router);
 
 // Los consume Nexo B2B servidor a servidor, con la clave de plataforma:
 // no hay ningún comerciante del otro lado, así que no va requireAuth.

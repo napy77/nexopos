@@ -4,6 +4,7 @@ import { HttpError } from "../middleware/error.js";
 import { requiereClave } from "../middleware/api-key.js";
 import { disponibilidadDe, type Availability } from "./disponibilidad.js";
 import { ZONA } from "../lib/fechas.js";
+import { DESCUENTO_VIGENTE, PRECIO_EFECTIVO } from "./campanas-precio.js";
 
 /**
  * La API que consume NexoTienda.
@@ -248,7 +249,10 @@ const SELECT_PRODUCTOS = `
          ${PASILLO_KEY} AS pasillo_key, p.subrubro_nombre,
          COALESCE(s.image_url, p.image_url) AS image_url,
          p.imagenes,
-         s.sale_price, s.quantity, s.availability_policy, s.declared_state,
+         s.sale_price,
+         ${PRECIO_EFECTIVO} AS precio_efectivo,
+         ${DESCUENTO_VIGENTE} AS descuento_campana,
+         s.quantity, s.availability_policy, s.declared_state,
          s.quota_total, s.quota_remaining, s.quota_day
     FROM stock_items s JOIN products p ON p.id = s.product_id
    WHERE s.commerce_id = $1
@@ -280,7 +284,19 @@ function armarProduct(r: Record<string, unknown>, storeId: string) {
         .filter((i) => (i.tipo ?? "imagen") === "imagen" && i.url)
         .map((i) => i.url),
     ],
-    priceCents: centavos(r.sale_price),
+    /*
+     * El precio ya viene con el descuento de campaña aplicado, y el de antes va
+     * aparte para el tachado. Es lo que NexoTienda pidió y tienen razón: si el
+     * porcentaje se multiplicara allá, el changuito diría un número y la nota de
+     * venta otro. El `discountPercent` de la campaña es para el cartel, no para
+     * la cuenta.
+     *
+     * `listPriceCents` sólo va cuando hay diferencia. Mandarlo siempre haría que
+     * la tienda tache un precio contra sí mismo.
+     */
+    priceCents: centavos(r.precio_efectivo),
+    ...(r.descuento_campana !== null && r.descuento_campana !== undefined
+      ? { listPriceCents: centavos(r.sale_price) } : {}),
     unit: r.unit ?? "unidad",
     pasilloId: r.pasillo_key,
     subCategory: r.subrubro_nombre ?? undefined,
