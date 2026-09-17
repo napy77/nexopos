@@ -384,37 +384,191 @@ v1Router.get("/stores/:slug", catalogo, async (req, res, next) => {
 v1Router.get("/stores/:storeId/pasillos", catalogo, async (req, res, next) => {
   try {
     const storeId = Number(req.params.storeId);
+    /*
+     * El árbol se arma de los productos que el comercio TIENE, no de la
+     * taxonomía completa de NexoB2B.
+     *
+     * Es lo que pidieron y es lo correcto: un subrubro vacío ofrecido en
+     * pantalla no se lee como "qué raro, está vacío", se lee como que la tienda
+     * anda mal. Contando desde los productos, un nodo sin nada no existe.
+     */
     const { rows } = await pool.query(
-      `SELECT ${PASILLO_KEY} AS id,
-              MAX(${PASILLO_NOMBRE}) AS name,
-              COUNT(*)::int AS product_count,
-              ARRAY_REMOVE(ARRAY_AGG(DISTINCT p.subrubro_nombre), NULL) AS subs
+      `SELECT ${PASILLO_KEY} AS pasillo_id,
+              ${PASILLO_NOMBRE} AS pasillo_nombre,
+              p.rubro_nombre, p.subrubro_nombre,
+              COUNT(*)::int AS productos
          FROM stock_items s JOIN products p ON p.id = s.product_id
         WHERE s.commerce_id = $1
           ${VISIBLE_EN_TIENDA}
           ${HAY_EXISTENCIA}
-        GROUP BY ${PASILLO_KEY}
-        ORDER BY name`,
+        GROUP BY 1, 2, 3, 4`,
       [storeId]
     );
-    res.json(rows.map((r) => ({
-      id: r.id, name: r.name, subCategories: r.subs ?? [], productCount: r.product_count,
-    })));
+
+    type Nodo = { id: string; name: string; productCount: number; children?: Nodo[] };
+    const pasillos = new Map<string, Nodo & { rubros: Map<string, Nodo & { subs: Map<string, Nodo> }> }>();
+
+    for (const r of rows) {
+      const pid = String(r.pasillo_id);
+      let pas = pasillos.get(pid);
+      if (!pas) {
+        pas = { id: pid, name: String(r.pasillo_nombre), productCount: 0, rubros: new Map() };
+        pasillos.set(pid, pas);
+      }
+      pas.productCount += r.productos;
+      if (!r.rubro_nombre) continue;
+
+      // Prefijo por nivel: el nombre solo no alcanza como id porque un rubro y
+      // un subrubro pueden llamarse igual —"Aceites" dentro de "Aceites"— y la
+      // tienda necesita poder pedir uno sin traerse el otro.
+      const rid = `r:${r.rubro_nombre}`;
+      let rub = pas.rubros.get(rid);
+      if (!rub) {
+        rub = { id: rid, name: String(r.rubro_nombre), productCount: 0, subs: new Map() };
+        pas.rubros.set(rid, rub);
+      }
+      rub.productCount += r.productos;
+      if (!r.subrubro_nombre) continue;
+
+      const sid = `s:${r.subrubro_nombre}`;
+      const sub = rub.subs.get(sid);
+      if (sub) sub.productCount += r.productos;
+      else rub.subs.set(sid, { id: sid, name: String(r.subrubro_nombre), productCount: r.productos });
+    }
+
+    const porNombre = (a: Nodo, b: Nodo) => a.name.localeCompare(b.name, "es");
+    res.json(
+      [...pasillos.values()].sort(porNombre).map((pas) => ({
+        id: pas.id,
+        name: pas.name,
+        productCount: pas.productCount,
+        /*
+         * `subCategories` sigue yendo, con los subrubros aplanados, porque es lo
+         * que consume la tienda que está desplegada hoy. Sale cuando NexoTienda
+         * confirme que pasó a leer `children`: sacarlo antes le deja las
+         * góndolas sin solapas a todos los comercios.
+         */
+        subCategories: [...new Set(
+          [...pas.rubros.values()].flatMap((r) => [...r.subs.values()].map((x) => x.name))
+        )].sort((a, b) => a.localeCompare(b, "es")),
+        children: [...pas.rubros.values()].sort(porNombre).map((rub) => ({
+          id: rub.id,
+          name: rub.name,
+          productCount: rub.productCount,
+          ...(rub.subs.size > 0
+            ? { children: [...rub.subs.values()].sort(porNombre) }
+            : {}),
+        })),
+      }))
+    );
   } catch (err) {
     next(err);
   }
 });
 
 /** GET /v1/stores/:storeId/products */
+/**
+ * GET /v1/stores/:storeId/products
+ *
+ * Con `?pasillo=&sub=&q=&ids=&limit=&offset=` devuelve `{ items, total }`.
+ * Sin ningún parámetro devuelve el arreglo pelado de siempre.
+ *
+ * Las dos formas conviven a propósito y por un rato: la tienda que está
+ * desplegada hoy pide todo y corta en memoria, y cambiar la forma de una sola
+ * vez le rompería la portada a todos los comercios hasta que ellos desplieguen.
+ * Cuando NexoTienda confirme que migró, se va el arreglo pelado.
+ *
+ * Con siete mil productos, pedir todo para mostrar sesenta es traer 6.940 filas
+ * para tirarlas. Eso es lo que esto viene a sacar.
+ *
+ * `total` cuenta DESPUÉS de todos los filtros, el de stock incluido: prometer
+ * 214 y entregar 180 es peor que decir 180.
+ */
 v1Router.get("/stores/:storeId/products", catalogo, async (req, res, next) => {
   try {
     const storeId = String(Number(req.params.storeId));
-    const { rows } = await pool.query(`${SELECT_PRODUCTOS} ${HAY_EXISTENCIA} ORDER BY p.name`, [Number(storeId)]);
-    res.json(rows.map((r) => armarProduct(r, storeId)));
+    const q = String(req.query.q ?? "").trim();
+    const pasillo = String(req.query.pasillo ?? "").trim();
+    const sub = String(req.query.sub ?? "").trim();
+    const ids = String(req.query.ids ?? "").trim();
+    const tieneFiltros = Boolean(
+      q || pasillo || sub || ids ||
+      req.query.limit !== undefined || req.query.offset !== undefined
+    );
+
+    if (!tieneFiltros) {
+      const { rows } = await pool.query(
+        `${SELECT_PRODUCTOS} ${HAY_EXISTENCIA} ORDER BY p.name`, [Number(storeId)]
+      );
+      res.json(rows.map((r) => armarProduct(r, storeId)));
+      return;
+    }
+
+    const params: unknown[] = [Number(storeId)];
+    let where = "";
+
+    if (pasillo) {
+      params.push(pasillo);
+      where += ` AND ${PASILLO_KEY} = $${params.length}`;
+    }
+    if (sub) {
+      // El id del árbol viene prefijado según el nivel; el nombre pelado
+      // también se acepta, porque es lo que la tienda tenía a mano hasta ahora.
+      const limpio = sub.replace(/^[rs]:/, "");
+      params.push(limpio);
+      where += ` AND (p.subrubro_nombre = $${params.length} OR p.rubro_nombre = $${params.length})`;
+    }
+    if (ids) {
+      const lista = ids.split(",").map((n) => Number(n.trim())).filter((n) => Number.isFinite(n));
+      params.push(lista.length > 0 ? lista : [0]);
+      where += ` AND p.id = ANY($${params.length}::bigint[])`;
+    }
+    if (q) {
+      params.push(`%${q}%`);
+      const i = params.length;
+      // Nombre, marca y subrubro: es lo que la tienda venía filtrando en
+      // memoria, movido al único lugar donde están las siete mil filas.
+      where += ` AND (p.name ILIKE $${i} OR p.brand ILIKE $${i} OR p.subrubro_nombre ILIKE $${i})`;
+      registrarBusqueda(Number(storeId), q);
+    }
+
+    const { rows: [cuenta] } = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM (
+         SELECT s.id FROM stock_items s JOIN products p ON p.id = s.product_id
+          WHERE s.commerce_id = $1 ${VISIBLE_EN_TIENDA} ${HAY_EXISTENCIA} ${where}
+       ) t`,
+      params
+    );
+
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 60) || 60, 1), 200);
+    const offset = Math.max(Number(req.query.offset ?? 0) || 0, 0);
+    params.push(limit, offset);
+    const { rows } = await pool.query(
+      `${SELECT_PRODUCTOS} ${HAY_EXISTENCIA} ${where}
+       ORDER BY p.name LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json({ items: rows.map((r) => armarProduct(r, storeId)), total: cuenta.total });
   } catch (err) {
     next(err);
   }
 });
+
+/**
+ * Deja constancia de lo que alguien buscó, sin hacer esperar a nadie por eso.
+ *
+ * Va suelto —sin await— porque una tienda no puede tardar más en contestar por
+ * llevar una estadística, y si la escritura falla, lo que se pierde es un
+ * renglón de un ranking. Se recorta a 80 caracteres: lo que venga más largo que
+ * eso no es una búsqueda.
+ */
+function registrarBusqueda(commerceId: number, termino: string): void {
+  pool.query(
+    "INSERT INTO store_searches (commerce_id, termino) VALUES ($1, $2)",
+    [commerceId, termino.slice(0, 80).toLowerCase()]
+  ).catch(() => {});
+}
 
 /** GET /v1/stores/:storeId/products/:id */
 v1Router.get("/stores/:storeId/products/:id", catalogo, async (req, res, next) => {
@@ -499,6 +653,110 @@ v1Router.get("/towns/:townSlug/search", catalogo, async (req, res, next) => {
       ).catch(() => {});
     }
     res.json({ query: q, hits, exhaustive: false });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/*
+ * ── Destacados ─────────────────────────────────────────────────────────────
+ *
+ * Lo más vendido y lo más buscado, como ids. El catálogo la tienda ya lo pide
+ * aparte.
+ *
+ * El piso es la parte importante, y es lo que NexoTienda pidió con razón: una
+ * lista de "lo más vendido" calculada sobre cuatro ventas no es un dato, es
+ * ruido con título. Y acá se nota al instante, porque el almacenero sabe de
+ * memoria qué es lo que más vende: una lista que diga otra cosa le enseña en
+ * dos segundos que la pantalla inventa, y después no le cree ninguna otra.
+ *
+ * Así que abajo del piso va vacío, que es el estado normal del primer mes.
+ */
+
+/** Ventana de la estadística. Suficiente para tener datos, corta para ser cierta. */
+const DIAS_DESTACADOS = 60;
+
+/** Un producto entra si se vendió al menos esto en la ventana. */
+const PISO_POR_PRODUCTO = 3;
+
+/** Y la lista entera se descarta si no llega a esta cantidad de productos. */
+const PISO_DE_LISTA = 5;
+
+/** GET /v1/stores/:storeId/highlights */
+v1Router.get("/stores/:storeId/highlights", catalogo, async (req, res, next) => {
+  try {
+    const storeId = Number(req.params.storeId);
+
+    /*
+     * Sale de sale_items y no de los pedidos: un pedido de la tienda que se
+     * entrega termina como nota de venta igual que una venta del mostrador, así
+     * que acá están los dos. Contarlos por separado sería contar dos veces.
+     *
+     * Los reembolsos entran con cantidad negativa y se restan solos, que es lo
+     * correcto: lo que se vendió y volvió no es lo que más se vende.
+     */
+    const { rows: vendidos } = await pool.query(
+      `SELECT i.product_id, SUM(i.quantity) AS unidades
+         FROM sale_items i
+         JOIN sales v ON v.id = i.sale_id
+         JOIN stock_items s ON s.commerce_id = v.commerce_id AND s.product_id = i.product_id
+         JOIN products p ON p.id = i.product_id
+        WHERE v.commerce_id = $1
+          AND v.created_at > now() - ($2 || ' days')::interval
+          ${VISIBLE_EN_TIENDA}
+          ${HAY_EXISTENCIA}
+        GROUP BY i.product_id
+       HAVING SUM(i.quantity) >= $3
+        ORDER BY SUM(i.quantity) DESC
+        LIMIT 10`,
+      [storeId, DIAS_DESTACADOS, PISO_POR_PRODUCTO]
+    );
+
+    /*
+     * Lo más buscado son términos, no productos, así que hay que traducirlos: de
+     * cada término frecuente sale el producto que mejor lo responde. Si nadie
+     * buscó todavía —y hasta hoy la búsqueda no pasaba por acá, así que ese es
+     * el estado de todos los comercios— queda vacío.
+     */
+    const { rows: buscados } = await pool.query(
+      `WITH terminos AS (
+         SELECT termino, COUNT(*)::int AS veces
+           FROM store_searches
+          WHERE commerce_id = $1 AND created_at > now() - ($2 || ' days')::interval
+          GROUP BY termino
+         HAVING COUNT(*) >= $3
+          ORDER BY COUNT(*) DESC
+          LIMIT 20
+       )
+       SELECT DISTINCT ON (t.termino) t.termino, t.veces, s.product_id
+         FROM terminos t
+         JOIN stock_items s ON s.commerce_id = $1
+         JOIN products p ON p.id = s.product_id
+        WHERE (p.name ILIKE '%' || t.termino || '%'
+               OR p.brand ILIKE '%' || t.termino || '%'
+               OR p.subrubro_nombre ILIKE '%' || t.termino || '%')
+          ${VISIBLE_EN_TIENDA}
+          ${HAY_EXISTENCIA}
+        ORDER BY t.termino, t.veces DESC, p.name`,
+      [storeId, DIAS_DESTACADOS, PISO_POR_PRODUCTO]
+    );
+
+    const masBuscados = [...new Set(buscados.map((r) => String(r.product_id)))].slice(0, 10);
+
+    res.json({
+      bestSellers: vendidos.length >= PISO_DE_LISTA
+        ? vendidos.map((r) => String(r.product_id)) : [],
+      /*
+       * El piso se mide en TÉRMINOS, no en productos.
+       *
+       * Dos búsquedas distintas pueden caer en el mismo producto —"oliva" y
+       * "zuelo" son el mismo aceite— y contando productos, cinco búsquedas
+       * repetidas se convertían en cuatro y tiraban abajo una lista que tenía
+       * evidencia de sobra. Lo que el piso cuida es que haya búsquedas de
+       * verdad; cuántos productos distintos salgan de ahí es otra cosa.
+       */
+      mostSearched: buscados.length >= PISO_DE_LISTA ? masBuscados : [],
+    });
   } catch (err) {
     next(err);
   }
