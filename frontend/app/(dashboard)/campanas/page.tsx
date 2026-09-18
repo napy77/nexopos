@@ -5,10 +5,11 @@ import { api } from "@/lib/api";
 
 interface Campana {
   id: number; nombre: string; desde: string; hasta: string;
-  descuento: number; vigente: boolean; productos: number;
+  vigente: boolean; productos: number;
 }
 interface EnCampana {
   productId: number; nombre: string; precio: number | null; precioCampana: number | null;
+  descuento: number | null; precioFijo: number | null;
 }
 interface ItemStock { product_id: number; name: string; sale_price: string | null }
 interface Taxo { nivel: "pasillo" | "rubro" | "subrubro"; clave: string; productos: number }
@@ -28,6 +29,12 @@ export default function CampanasPage() {
   const [nivel, setNivel] = useState<"pasillo" | "rubro" | "subrubro">("rubro");
   const [clave, setClave] = useState("");
   const [creando, setCreando] = useState(false);
+  // Con qué entran los productos que se agreguen. Se recuerda entre altas
+  // porque una tanda suele tener el mismo descuento para casi todo.
+  const [rebaja, setRebaja] = useState("25");
+  const [comoRebaja, setComoRebaja] = useState<"descuento" | "precio">("descuento");
+  const [arrastrando, setArrastrando] = useState<number | null>(null);
+  const [arrastrandoProd, setArrastrandoProd] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
 
@@ -64,7 +71,6 @@ export default function CampanasPage() {
           nombre: String(form.get("nombre") || "").trim(),
           desde: String(form.get("desde") || ""),
           hasta: String(form.get("hasta") || ""),
-          descuento: Number(form.get("descuento") || 0),
         }),
       });
       setCreando(false); cargar(); aviso("Campaña creada. Ahora elegí qué productos entran.");
@@ -84,10 +90,58 @@ export default function CampanasPage() {
     }
   }
 
-  async function mover(c: Campana, hacia: "arriba" | "abajo") {
-    await api(`/api/campanas/${c.id}/orden`, { method: "PUT", body: JSON.stringify({ hacia }) })
-      .catch(() => {});
-    cargar();
+  /**
+   * Suelta la campaña que se venía arrastrando encima de otra.
+   *
+   * Se reordena la lista en pantalla primero y se manda entera: arrastrar no es
+   * un movimiento de a uno, y el comerciante ya vio dónde quedó antes de que
+   * conteste el servidor.
+   */
+  async function soltarCampana(sobre: number) {
+    const desde = arrastrando;
+    setArrastrando(null);
+    if (desde === null || desde === sobre) return;
+    const lista = [...campanas];
+    const i = lista.findIndex((c) => c.id === desde);
+    const j = lista.findIndex((c) => c.id === sobre);
+    if (i === -1 || j === -1) return;
+    const [movida] = lista.splice(i, 1);
+    lista.splice(j, 0, movida);
+    setCampanas(lista);
+    await api("/api/campanas/orden", {
+      method: "PUT", body: JSON.stringify({ ids: lista.map((c) => c.id) }),
+    }).catch(() => cargar());
+  }
+
+  async function soltarProducto(campanaId: number, sobre: number) {
+    const desde = arrastrandoProd;
+    setArrastrandoProd(null);
+    if (desde === null || desde === sobre) return;
+    const lista = [...dentro];
+    const i = lista.findIndex((p) => p.productId === desde);
+    const j = lista.findIndex((p) => p.productId === sobre);
+    if (i === -1 || j === -1) return;
+    const [movido] = lista.splice(i, 1);
+    lista.splice(j, 0, movido);
+    setDentro(lista);
+    await api(`/api/campanas/${campanaId}/productos/orden`, {
+      method: "PUT", body: JSON.stringify({ productIds: lista.map((p) => p.productId) }),
+    }).catch(() => cargarDentro(campanaId));
+  }
+
+  /** Cambiarle la rebaja a un producto ya agregado. */
+  async function cambiarRebaja(campanaId: number, productId: number, como: "descuento" | "precio", valor: string) {
+    const n = Number(valor);
+    if (!valor.trim() || Number.isNaN(n) || n <= 0) return;
+    setError("");
+    try {
+      await api(`/api/campanas/${campanaId}/productos/${productId}`, {
+        method: "PUT", body: JSON.stringify({ [como]: n }),
+      });
+      cargarDentro(campanaId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    }
   }
 
   async function tocarProductos(id: number, cambio: Record<string, unknown>) {
@@ -110,7 +164,8 @@ export default function CampanasPage() {
       <h1>Campañas</h1>
       <p className="muted" style={{ maxWidth: 640 }}>
         Tandas de ofertas para tu tienda online. El nombre que le pongas es el título de
-        la sección que ve el comprador.
+        la sección que ve el comprador, y el orden en que las arrastres es el orden en
+        que se ven.
       </p>
       {/*
         Lo más importante de la pantalla, y por eso está arriba de todo: el
@@ -137,22 +192,25 @@ export default function CampanasPage() {
         </p>
       )}
 
-      {campanas.map((c, i) => (
-        <div key={c.id} className="card" style={{ marginBottom: 10 }}>
+      {campanas.map((c) => (
+        <div key={c.id} className="card" style={{ marginBottom: 10 }}
+          draggable
+          onDragStart={() => setArrastrando(c.id)}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={() => soltarCampana(c.id)}
+          onDragEnd={() => setArrastrando(null)}>
           <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
             <h2 style={{ margin: 0, fontSize: 16 }}>{c.nombre}</h2>
             <span className={c.vigente ? "badge ok" : "badge"}>
               {c.vigente ? "en la tienda ahora" : "fuera de fecha"}
             </span>
             <span className="muted" style={{ fontSize: 13 }}>
-              −{c.descuento}% · del {c.desde} al {c.hasta} · {c.productos}{" "}
+              del {c.desde} al {c.hasta} · {c.productos}{" "}
               {c.productos === 1 ? "producto" : "productos"}
             </span>
-            <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-              <button type="button" className="ghost" style={{ fontSize: 11 }}
-                disabled={i === 0} onClick={() => mover(c, "arriba")}>↑</button>
-              <button type="button" className="ghost" style={{ fontSize: 11 }}
-                disabled={i === campanas.length - 1} onClick={() => mover(c, "abajo")}>↓</button>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+              <span className="muted" style={{ fontSize: 11, cursor: "grab" }}
+                title="Arrastrala para cambiarla de lugar">⠿</span>
               <button type="button" className="ghost" style={{ fontSize: 11 }}
                 onClick={() => { const n = abierta === c.id ? null : c.id; setAbierta(n); if (n) cargarDentro(n); }}>
                 {abierta === c.id ? "Cerrar" : "Productos"}
@@ -170,6 +228,22 @@ export default function CampanasPage() {
 
           {abierta === c.id && (
             <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+              {/*
+                Con qué entran los que se agreguen. Va arriba porque se elige
+                una vez y después se agregan diez productos: preguntarlo en cada
+                uno sería hacerle repetir lo mismo diez veces.
+              */}
+              <div className="toolbar">
+                <span className="muted" style={{ fontSize: 12 }}>Los que agregue entran con</span>
+                <select value={comoRebaja}
+                  onChange={(e) => setComoRebaja(e.target.value as typeof comoRebaja)}>
+                  <option value="descuento">% de descuento</option>
+                  <option value="precio">precio fijo</option>
+                </select>
+                <input type="number" step="0.5" min="0" value={rebaja} style={{ width: 100 }}
+                  onChange={(e) => setRebaja(e.target.value)} />
+              </div>
+
               <div className="toolbar">
                 <input value={busca} onChange={(e) => setBusca(e.target.value)}
                   placeholder="Buscá un producto por nombre o código"
@@ -179,7 +253,7 @@ export default function CampanasPage() {
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "6px 0" }}>
                   {encontrados.map((p) => (
                     <button key={p.product_id} type="button" className="ghost" style={{ fontSize: 12 }}
-                      onClick={() => tocarProductos(c.id, { agregar: [p.product_id] })}>
+                      onClick={() => tocarProductos(c.id, { agregar: [p.product_id], rebaja: { [comoRebaja]: Number(rebaja) } })}>
                       + {p.name}
                     </button>
                   ))}
@@ -203,7 +277,7 @@ export default function CampanasPage() {
                   ))}
                 </select>
                 <button type="button" disabled={!clave}
-                  onClick={() => { tocarProductos(c.id, { agregarPor: { nivel, clave } }); setClave(""); }}>
+                  onClick={() => { tocarProductos(c.id, { agregarPor: { nivel, clave }, rebaja: { [comoRebaja]: Number(rebaja) } }); setClave(""); }}>
                   Agregar
                 </button>
               </div>
@@ -224,16 +298,46 @@ export default function CampanasPage() {
                           arriba que enuncia la regla se lee una vez; esto se lee
                           cada vez que mira la tanda.
                         */}
+                        <th style={{ width: 20 }} />
                         <th>Producto</th><th className="num">En el mostrador</th>
+                        <th>Rebaja</th>
                         <th className="num">En la tienda</th><th />
                       </tr>
                     </thead>
                     <tbody>
                       {dentro.map((p) => (
-                        <tr key={p.productId}>
+                        <tr key={p.productId} draggable
+                          onDragStart={() => setArrastrandoProd(p.productId)}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => soltarProducto(c.id, p.productId)}
+                          onDragEnd={() => setArrastrandoProd(null)}>
+                          <td className="muted" style={{ cursor: "grab" }}
+                            title="Arrastralo para cambiarlo de lugar">⠿</td>
                           <td>{p.nombre}</td>
                           <td className="num muted">
                             {p.precio === null ? "sin precio" : money(p.precio)}
+                          </td>
+                          {/*
+                            Se edita en la fila y con el mismo formato con que se
+                            guardó: al que entró por porcentaje se le muestra el
+                            porcentaje, al que entró por precio el precio. Mostrar
+                            siempre el porcentaje convertiría $5.000 en 41,18% y
+                            el comerciante no reconocería su propio número.
+                          */}
+                          <td>
+                            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                              <input type="number" step="0.5" min="0" style={{ width: 88 }}
+                                key={`${p.productId}-${p.descuento ?? p.precioFijo}`}
+                                defaultValue={p.descuento ?? p.precioFijo ?? ""}
+                                onBlur={(e) => cambiarRebaja(
+                                  c.id, p.productId,
+                                  p.precioFijo !== null ? "precio" : "descuento",
+                                  e.target.value
+                                )} />
+                              <span className="muted" style={{ fontSize: 11 }}>
+                                {p.precioFijo !== null ? "$" : "%"}
+                              </span>
+                            </div>
                           </td>
                           <td className="num">
                             {p.precioCampana === null
@@ -280,14 +384,10 @@ export default function CampanasPage() {
                       style={{ width: "100%" }} />
                   </label>
                 </div>
-                <label style={{ fontSize: 13 }}>
-                  Descuento
-                  <input name="descuento" type="number" step="0.5" min="0.5" max="95" required
-                    placeholder="25" style={{ width: "100%" }} />
-                  <span className="muted" style={{ fontSize: 11 }}>
-                    % que se le saca al precio de tu tienda
-                  </span>
-                </label>
+                <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+                  El descuento se le pone a cada producto cuando lo agregues: podés
+                  hacerle 25% a uno y dejar otro en un precio fijo.
+                </p>
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                 <button type="submit">Crear</button>

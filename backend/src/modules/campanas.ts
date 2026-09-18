@@ -44,14 +44,25 @@ campanasV1Router.get(
     try {
       const storeId = Number(req.params.storeId);
       const { rows } = await pool.query(
-        `SELECT c.id, c.nombre, c.desde, c.hasta, c.descuento,
+        `SELECT c.id, c.nombre, c.desde, c.hasta,
                 COALESCE(
-                  ARRAY_AGG(cp.product_id::text ORDER BY cp.product_id)
+                  ARRAY_AGG(cp.product_id::text ORDER BY cp.orden, cp.product_id)
                     FILTER (WHERE cp.product_id IS NOT NULL),
                   '{}'
-                ) AS productos
+                ) AS productos,
+                /*
+                 * El porcentaje más alto de la tanda, no el de la campaña: ya
+                 * no hay uno de la campaña. Con descuentos distintos por
+                 * producto, un número solo miente salvo que se lea como "hasta".
+                 */
+                MAX(CASE WHEN cp.descuento IS NOT NULL THEN cp.descuento
+                         WHEN cp.precio IS NOT NULL AND s.sale_price > 0
+                         THEN ROUND((1 - cp.precio / s.sale_price) * 100, 2)
+                    END) AS tope
            FROM campaigns c
            LEFT JOIN campaign_products cp ON cp.campaign_id = c.id
+           LEFT JOIN stock_items s
+                  ON s.product_id = cp.product_id AND s.commerce_id = c.commerce_id
           WHERE c.commerce_id = $1 AND ${HOY} BETWEEN c.desde AND c.hasta
           GROUP BY c.id
           ORDER BY c.orden, c.id`,
@@ -68,7 +79,14 @@ campanasV1Router.get(
          */
         startsAt: bordeDelDia(r.desde, "inicio"),
         endsAt: bordeDelDia(r.hasta, "fin"),
-        discountPercent: Number(r.descuento),
+        /*
+         * El más alto de la tanda. Antes era el único que había; ahora cada
+         * producto tiene el suyo, así que esto sólo sirve leído como "hasta".
+         * El porcentaje de cada cinta sale de los dos precios del producto, que
+         * es como NexoTienda ya lo hace.
+         */
+        discountPercent: r.tope === null ? 0 : Number(r.tope),
+        /** En el orden que eligió el comerciante, no alfabético. */
         productIds: r.productos as string[],
       })));
     } catch (err) {
@@ -101,14 +119,13 @@ const campanaSchema = z.object({
   nombre: z.string().trim().min(1).max(80),
   desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  descuento: z.coerce.number().gt(0).lte(95),
 });
 
 /** GET /api/campanas — las del comercio, vigentes y no */
 campanasRouter.get("/", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT c.id, c.nombre, c.desde::text, c.hasta::text, c.descuento, c.orden,
+      `SELECT c.id, c.nombre, c.desde::text, c.hasta::text, c.orden,
               (${HOY} BETWEEN c.desde AND c.hasta) AS vigente,
               COUNT(cp.product_id)::int AS productos
          FROM campaigns c
@@ -120,7 +137,7 @@ campanasRouter.get("/", async (req, res, next) => {
     );
     res.json(rows.map((r) => ({
       id: Number(r.id), nombre: r.nombre, desde: r.desde, hasta: r.hasta,
-      descuento: Number(r.descuento), vigente: r.vigente, productos: r.productos,
+      vigente: r.vigente, productos: r.productos,
     })));
   } catch (err) {
     next(err);
@@ -131,20 +148,24 @@ campanasRouter.get("/", async (req, res, next) => {
 campanasRouter.get("/:id/productos", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT p.id AS product_id, p.name, s.sale_price, c.descuento,
-              ROUND(s.sale_price * (1 - c.descuento / 100), 2) AS precio_campana
+      `SELECT p.id AS product_id, p.name, s.sale_price, cp.descuento, cp.precio,
+              COALESCE(cp.precio, ROUND(s.sale_price * (1 - cp.descuento / 100), 2))
+                AS precio_campana
          FROM campaign_products cp
          JOIN campaigns c ON c.id = cp.campaign_id
          JOIN products p ON p.id = cp.product_id
          LEFT JOIN stock_items s ON s.product_id = p.id AND s.commerce_id = c.commerce_id
         WHERE cp.campaign_id = $1 AND c.commerce_id = $2
-        ORDER BY p.name`,
+        ORDER BY cp.orden, p.name`,
       [Number(req.params.id), req.auth.commerceId]
     );
     res.json(rows.map((r) => ({
       productId: Number(r.product_id), nombre: r.name,
       precio: r.sale_price === null ? null : Number(r.sale_price),
       precioCampana: r.precio_campana === null ? null : Number(r.precio_campana),
+      /** Lo que el comerciante escribió: uno de los dos, nunca los dos. */
+      descuento: r.descuento === null ? null : Number(r.descuento),
+      precioFijo: r.precio === null ? null : Number(r.precio),
     })));
   } catch (err) {
     next(err);
@@ -157,16 +178,54 @@ campanasRouter.post("/", async (req, res, next) => {
     const body = campanaSchema.parse(req.body);
     if (body.hasta < body.desde) throw new HttpError(400, "La campaña termina antes de empezar.");
     const { rows: [c] } = await pool.query(
-      `INSERT INTO campaigns (commerce_id, nombre, desde, hasta, descuento, orden)
-       VALUES ($1, $2, $3, $4, $5,
+      `INSERT INTO campaigns (commerce_id, nombre, desde, hasta, orden)
+       VALUES ($1, $2, $3, $4,
                COALESCE((SELECT MAX(orden) + 1 FROM campaigns WHERE commerce_id = $1), 0))
        RETURNING id`,
-      [req.auth.commerceId, body.nombre, body.desde, body.hasta, body.descuento]
+      [req.auth.commerceId, body.nombre, body.desde, body.hasta]
     );
     await audit(req.auth.commerceId, "campana.crear", "campaigns", c.id, body);
     res.status(201).json({ id: Number(c.id) });
   } catch (err) {
     next(err);
+  }
+});
+
+/**
+ * PUT /api/campanas/orden — el orden completo, como quedó después de arrastrar.
+ *
+ * Se manda la lista entera y no "subí ésta": arrastrar no es un movimiento de a
+ * uno, y reconstruirlo como una secuencia de intercambios da resultados
+ * distintos según en qué orden lleguen. Además reescribe todos los `orden`, que
+ * es lo que evita los empates que hacen que dos campañas se intercambien solas
+ * la próxima vez.
+ *
+ * Las que no vengan en la lista quedan al final, en el orden que tenían: un
+ * cliente desactualizado no puede mandar al fondo una campaña que no conocía.
+ */
+campanasRouter.put("/orden", async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const ids = z.array(z.coerce.number().int()).parse(req.body?.ids ?? []);
+    const commerceId = req.auth.commerceId;
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      "SELECT id FROM campaigns WHERE commerce_id = $1 ORDER BY orden, id FOR UPDATE",
+      [commerceId]
+    );
+    const existentes = rows.map((r) => Number(r.id));
+    const pedidos = ids.filter((id) => existentes.includes(id));
+    const final = [...pedidos, ...existentes.filter((id) => !pedidos.includes(id))];
+    for (const [orden, id] of final.entries()) {
+      await client.query("UPDATE campaigns SET orden = $2 WHERE id = $1", [id, orden]);
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    next(err);
+  } finally {
+    client.release();
   }
 });
 
@@ -176,9 +235,9 @@ campanasRouter.put("/:id", async (req, res, next) => {
     const body = campanaSchema.parse(req.body);
     if (body.hasta < body.desde) throw new HttpError(400, "La campaña termina antes de empezar.");
     const { rowCount } = await pool.query(
-      `UPDATE campaigns SET nombre = $3, desde = $4, hasta = $5, descuento = $6
+      `UPDATE campaigns SET nombre = $3, desde = $4, hasta = $5
         WHERE id = $1 AND commerce_id = $2`,
-      [Number(req.params.id), req.auth.commerceId, body.nombre, body.desde, body.hasta, body.descuento]
+      [Number(req.params.id), req.auth.commerceId, body.nombre, body.desde, body.hasta]
     );
     if (rowCount === 0) throw new HttpError(404, "Esa campaña no existe");
     res.json({ ok: true });
@@ -201,44 +260,27 @@ campanasRouter.delete("/:id", async (req, res, next) => {
   }
 });
 
-/** PUT /api/campanas/:id/orden — subir o bajar la sección en la tienda */
-campanasRouter.put("/:id/orden", async (req, res, next) => {
-  const client = await pool.connect();
-  try {
-    const hacia = req.body?.hacia === "arriba" ? "arriba" : "abajo";
-    const commerceId = req.auth.commerceId;
-    await client.query("BEGIN");
-    const { rows } = await client.query(
-      "SELECT id FROM campaigns WHERE commerce_id = $1 ORDER BY orden, id FOR UPDATE",
-      [commerceId]
-    );
-    const ids = rows.map((r) => Number(r.id));
-    const i = ids.indexOf(Number(req.params.id));
-    if (i === -1) throw new HttpError(404, "Esa campaña no existe");
-    const j = hacia === "arriba" ? i - 1 : i + 1;
-    if (j >= 0 && j < ids.length) {
-      [ids[i], ids[j]] = [ids[j], ids[i]];
-      // Se reescribe la lista entera: dejar huecos o empates en `orden` es lo
-      // que hace que dos campañas se intercambien solas la próxima vez.
-      for (const [orden, id] of ids.entries()) {
-        await client.query("UPDATE campaigns SET orden = $2 WHERE id = $1", [id, orden]);
-      }
-    }
-    await client.query("COMMIT");
-    res.json({ ok: true });
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
-    next(err);
-  } finally {
-    client.release();
-  }
-});
-
 // ── Qué productos entran ────────────────────────────────────────────────────
+
+/**
+ * Con cuánto entran los productos que se agregan.
+ *
+ * Uno de los dos, nunca los dos. El comerciante piensa de las dos formas —"a
+ * éste hacele 25%" y "éste lo quiero a $5.000"— y se guarda la que dijo: pasar
+ * el precio a porcentaje lo traicionaría, porque $8.500 a $5.000 es 41,17…% y
+ * al redondear vuelve $5.000,30.
+ */
+const rebajaSchema = z.object({
+  descuento: z.coerce.number().gt(0).lte(95).optional(),
+  precio: z.coerce.number().positive().optional(),
+}).refine((r) => (r.descuento === undefined) !== (r.precio === undefined),
+  { message: "Poné un porcentaje o un precio, uno de los dos." });
 
 const productosSchema = z.object({
   agregar: z.array(z.coerce.number().int()).optional(),
   quitar: z.array(z.coerce.number().int()).optional(),
+  /** Con qué entran los de `agregar` y `agregarPor`. */
+  rebaja: rebajaSchema.optional(),
   /** Mete de una todos los de un rubro, pasillo o subrubro del stock */
   agregarPor: z.object({
     nivel: z.enum(["pasillo", "rubro", "subrubro"]),
@@ -268,28 +310,45 @@ campanasRouter.put("/:id/productos", async (req, res, next) => {
 
     await client.query("BEGIN");
 
+    if ((body.agregar?.length || body.agregarPor) && !body.rebaja) {
+      throw new HttpError(400, "Decime con qué descuento entran: un porcentaje o un precio.");
+    }
+    const desc = body.rebaja?.descuento ?? null;
+    const prec = body.rebaja?.precio ?? null;
+    // Los nuevos van al final de la tanda, no al principio: el orden de arriba
+    // ya lo eligió el comerciante y agregar no es motivo para pisárselo.
+    const { rows: [ult] } = await client.query(
+      "SELECT COALESCE(MAX(orden) + 1, 0) AS n FROM campaign_products WHERE campaign_id = $1",
+      [campaignId]
+    );
+    let siguiente = Number(ult.n);
+
     if (body.agregarPor) {
       const col = { pasillo: "pasillo_nombre", rubro: "rubro_nombre", subrubro: "subrubro_nombre" }[
         body.agregarPor.nivel
       ];
-      await client.query(
-        `INSERT INTO campaign_products (campaign_id, product_id)
-         SELECT $1, s.product_id
+      const { rowCount } = await client.query(
+        `INSERT INTO campaign_products (campaign_id, product_id, descuento, precio, orden)
+         SELECT $1, s.product_id, $4, $5,
+                $6 + ROW_NUMBER() OVER (ORDER BY p.name) - 1
            FROM stock_items s JOIN products p ON p.id = s.product_id
           WHERE s.commerce_id = $2 AND NOT s.es_insumo AND p.${col} = $3
          ON CONFLICT DO NOTHING`,
-        [campaignId, commerceId, body.agregarPor.clave]
+        [campaignId, commerceId, body.agregarPor.clave, desc, prec, siguiente]
       );
+      siguiente += rowCount ?? 0;
     }
     if (body.agregar?.length) {
       // El filtro por stock_items no es decorativo: sin él, un id de otro
       // comercio entraría a la campaña de éste.
       await client.query(
-        `INSERT INTO campaign_products (campaign_id, product_id)
-         SELECT $1, s.product_id FROM stock_items s
+        `INSERT INTO campaign_products (campaign_id, product_id, descuento, precio, orden)
+         SELECT $1, s.product_id, $4, $5,
+                $6 + ROW_NUMBER() OVER (ORDER BY s.product_id) - 1
+           FROM stock_items s
           WHERE s.commerce_id = $2 AND s.product_id = ANY($3::bigint[])
          ON CONFLICT DO NOTHING`,
-        [campaignId, commerceId, body.agregar]
+        [campaignId, commerceId, body.agregar, desc, prec, siguiente]
       );
     }
     if (body.quitar?.length) {
@@ -309,5 +368,76 @@ campanasRouter.put("/:id/productos", async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+/**
+ * PUT /api/campanas/:id/productos/orden — el orden dentro de la tanda.
+ *
+ * La tienda muestra los primeros y el resto queda en "Ver todos", así que esto
+ * es una decisión comercial y no una preferencia de pantalla: el producto que
+ * empieza con Z puede ser justo el que se quiere adelante.
+ *
+ * Misma forma que el orden de campañas y por el mismo motivo: llega la lista
+ * entera, y lo que no venga queda al final como estaba.
+ */
+campanasRouter.put("/:id/productos/orden", async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const ids = z.array(z.coerce.number().int()).parse(req.body?.productIds ?? []);
+    const campaignId = Number(req.params.id);
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT cp.product_id FROM campaign_products cp
+         JOIN campaigns c ON c.id = cp.campaign_id
+        WHERE cp.campaign_id = $1 AND c.commerce_id = $2
+        ORDER BY cp.orden, cp.product_id
+          FOR UPDATE OF cp`,
+      [campaignId, req.auth.commerceId]
+    );
+    if (rows.length === 0) throw new HttpError(404, "Esa campaña no existe o está vacía");
+    const existentes = rows.map((r) => Number(r.product_id));
+    const pedidos = ids.filter((id) => existentes.includes(id));
+    const final = [...pedidos, ...existentes.filter((id) => !pedidos.includes(id))];
+    for (const [orden, id] of final.entries()) {
+      await client.query(
+        "UPDATE campaign_products SET orden = $3 WHERE campaign_id = $1 AND product_id = $2",
+        [campaignId, id, orden]
+      );
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * PUT /api/campanas/:id/productos/:productId — cambiarle la rebaja a uno.
+ *
+ * Acepta porcentaje o precio, y guarda el que vino. Que el comerciante pueda
+ * escribir cualquiera de los dos no es comodidad: en una góndola se piensa
+ * "a éste hacele 25" para unos y "éste tiene que quedar en 5.000" para otros,
+ * y obligarlo a convertir es pedirle que haga una cuenta para que la hagamos
+ * nosotros al revés.
+ */
+campanasRouter.put("/:id/productos/:productId", async (req, res, next) => {
+  try {
+    const r = rebajaSchema.parse(req.body ?? {});
+    const { rowCount } = await pool.query(
+      `UPDATE campaign_products cp SET descuento = $3, precio = $4
+         FROM campaigns c
+        WHERE c.id = cp.campaign_id AND cp.campaign_id = $1
+          AND cp.product_id = $2 AND c.commerce_id = $5`,
+      [Number(req.params.id), Number(req.params.productId),
+       r.descuento ?? null, r.precio ?? null, req.auth.commerceId]
+    );
+    if (rowCount === 0) throw new HttpError(404, "Ese producto no está en la campaña");
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
   }
 });
