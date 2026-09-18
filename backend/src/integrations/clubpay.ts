@@ -579,7 +579,8 @@ export async function canjearTokenTienda(apiKey: string, token: string): Promise
     if (!token.startsWith("CLI-")) throw new HttpError(401, "Token inválido o vencido");
     return { account_id: `acc_mock_${token}`, external_id: token, persona: "Germán Yovan" };
   }
-  return api<SesionTienda>("/pos/tienda/sessions", apiKey, { token });
+  return saltoAClubPay("el token de entrada", () =>
+    api<SesionTienda>("/pos/tienda/sessions", apiKey, { token }));
 }
 
 // ── Emparejar dos pantallas ─────────────────────────────────────────────────
@@ -588,6 +589,52 @@ export interface PedidoEmparejamiento {
   request_id: string;
   code: string;
   expira_at: string;
+}
+
+/**
+ * Lo que devuelve ClubPay, leído con tolerancia de nombres.
+ *
+ * No tenemos su especificación escrita: la forma nos llega contada por
+ * NexoTienda. Aceptar las dos convenciones de nombre cuesta cinco líneas y
+ * ahorra un ida y vuelta de tres equipos, que es lo que ya costó una vez.
+ */
+function leerPedido(d: Record<string, unknown>): PedidoEmparejamiento {
+  const str = (...claves: string[]): string => {
+    for (const k of claves) if (typeof d[k] === "string" && d[k]) return d[k] as string;
+    return "";
+  };
+  const pedido = {
+    request_id: str("request_id", "requestId", "id"),
+    code: str("code", "codigo"),
+    expira_at: str("expira_at", "expires_at", "expiresAt"),
+  };
+  if (!pedido.request_id || !pedido.code) {
+    console.error("[clubpay] emparejamiento con forma inesperada:", JSON.stringify(d).slice(0, 300));
+    throw new HttpError(502, "ClubPay devolvió un pedido de emparejamiento que no entendemos.");
+  }
+  return pedido;
+}
+
+/**
+ * Un 404 de ClubPay NO puede salir como 404 nuestro.
+ *
+ * Esto costó un ida y vuelta entre tres equipos: NexoTienda lee un 404 como
+ * "la ruta de NexoPOS no existe" —y está bien que lo lea así— mientras que acá
+ * significaba "ClubPay no tiene esa ruta". Dos causas opuestas, el mismo número,
+ * y cada equipo señalando al de al lado.
+ *
+ * Hacia afuera es 502: el pedido de quien nos llamó estaba bien, lo que falló
+ * fue el salto de atrás. Y el mensaje dice cuál.
+ */
+async function saltoAClubPay<T>(que: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 404) {
+      throw new HttpError(502, `ClubPay no reconoce ${que}. La ruta de NexoPOS existe; lo que falta está del otro lado.`);
+    }
+    throw err;
+  }
 }
 
 export type EstadoEmparejamiento =
@@ -626,9 +673,20 @@ export async function pedirEmparejamiento(
       expira_at: new Date(Date.now() + 5 * 60_000).toISOString(),
     };
   }
-  return api<PedidoEmparejamiento>("/pos/tienda/pairings", apiKey, {
-    device: datos.dispositivo ?? null,
-  });
+  /*
+   * El nombre de la ruta lo dijo NexoTienda, que lo habló con ClubPay. Nosotros
+   * habíamos inventado uno en inglés —`/pos/tienda/pairings`— y ClubPay
+   * contestaba 404, que es exactamente el síntoma que los tres estábamos
+   * mirando sin entender.
+   */
+  const d = await saltoAClubPay(
+    "el pedido de emparejamiento",
+    () => api<Record<string, unknown>>("/pos/tienda/emparejar", apiKey, {
+      device: datos.dispositivo ?? null,
+      client_hint: datos.dispositivo ?? null,
+    })
+  );
+  return leerPedido(d);
 }
 
 /** ¿Ya lo aprobó desde la app? */
@@ -646,7 +704,10 @@ export async function estadoEmparejamiento(
     mockPares.delete(requestId);
     return { status: "listo", token };
   }
-  return apiGet<EstadoEmparejamiento>(
-    `/pos/tienda/pairings/${encodeURIComponent(requestId)}`, apiKey
+  return saltoAClubPay(
+    "ese pedido de emparejamiento",
+    () => apiGet<EstadoEmparejamiento>(
+      `/pos/tienda/emparejar/${encodeURIComponent(requestId)}`, apiKey
+    )
   );
 }

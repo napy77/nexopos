@@ -224,6 +224,12 @@ const emparejarSchema = z.object({
    * porque va a una pantalla de teléfono, no porque desconfiemos del largo.
    */
   dispositivo: z.string().trim().max(120).optional(),
+  /**
+   * El mismo dato con el nombre que NexoTienda terminó usando. Se aceptan los
+   * dos: renombrar un campo opcional no rompe nada visible —sigue andando— pero
+   * deja de viajar justo el dato que sostiene la confirmación de la app.
+   */
+  clientHint: z.string().trim().max(120).optional(),
 });
 
 /** POST /v1/cuentas/emparejar */
@@ -235,7 +241,7 @@ cuentasRouter.post("/cuentas/emparejar", cuentas, async (req, res, next) => {
 
     const apiKey = await claveDe(commerceId);
     const p = await pedirEmparejamiento(apiKey, {
-      dispositivo: body.dispositivo, commerceId,
+      dispositivo: body.clientHint ?? body.dispositivo, commerceId,
     });
     res.json({ requestId: p.request_id, code: p.code, expiresAt: p.expira_at });
   } catch (err) {
