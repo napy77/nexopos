@@ -23,7 +23,10 @@ export async function clubpayKey(req: Request): Promise<string> {
   );
   const key = rows[0]?.clubpay_api_key ?? "";
   if (!key && !isMockMode()) {
-    throw new HttpError(400, "Este comercio todavía no tiene configurado ClubPay.");
+    // Dice dónde se arregla: es la causa más común y el comerciante la puede
+    // resolver solo, pero no si el mensaje sólo le dice que algo no anda.
+    throw new HttpError(400,
+      "Este comercio todavía no tiene configurado ClubPay. Cargá la clave en Configuración.");
   }
   return key;
 }

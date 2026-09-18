@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { pool } from "../db.js";
+import { HttpError } from "../middleware/error.js";
 import { config } from "../config.js";
 import { statementId } from "./cuenta-corriente.js";
 import {
@@ -208,7 +209,19 @@ const DIAS_A_RECUPERAR = 30;
  */
 export async function refrescarVinculacion(
   commerceId: number,
-  customerId: number
+  customerId: number,
+  /*
+   * Si el error se traga o sale.
+   *
+   * Los dos llamadores de fondo —el repaso periódico y la apertura de la ficha—
+   * lo quieren callado: que ClubPay no conteste no puede romper una pantalla
+   * que el comerciante abrió para ver un saldo.
+   *
+   * El botón lo quiere ruidoso. Tragárselo ahí es lo que dejaba a un cliente
+   * trabado con "no se pudo consultar, probá en un rato" durante semanas,
+   * cuando lo que faltaba era cargar la clave de ClubPay en Configuración.
+   */
+  silencioso = true
 ): Promise<string | null> {
   const { rows } = await pool.query(
     `SELECT c.doc_number, c.clubpay_status, co.clubpay_api_key
@@ -218,6 +231,13 @@ export async function refrescarVinculacion(
   );
   const cliente = rows[0];
   if (!cliente?.doc_number) return null;
+  if (!cliente.clubpay_api_key && !isMockMode()) {
+    // La causa más común y la única que el comerciante puede resolver solo.
+    const falta = new HttpError(400,
+      "Este comercio todavía no tiene configurado ClubPay. Cargá la clave en Configuración.");
+    if (!silencioso) throw falta;
+    return null;
+  }
 
   try {
     /*
@@ -250,6 +270,7 @@ export async function refrescarVinculacion(
     return r.status;
   } catch (err) {
     console.error("[clubpay] no se pudo consultar la vinculación:", err instanceof Error ? err.message : err);
+    if (!silencioso) throw err;
     return null;
   }
 }

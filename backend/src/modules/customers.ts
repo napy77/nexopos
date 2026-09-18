@@ -175,17 +175,33 @@ customersRouter.put("/:id", async (req, res, next) => {
  * almacenero cargue un cliente. Si no sale, queda sin estado y se puede
  * reintentar desde la ficha.
  */
-async function proponerVinculacion(req: Request, customerId: number, dni: string): Promise<string | null> {
+async function proponerVinculacion(
+  req: Request, customerId: number, dni: string, silencioso = true
+): Promise<string | null> {
   try {
     const key = await clubpayKey(req);
     const r = await vincularCliente(key, { dni, externalId: `CLI-${customerId}` });
     await pool.query(
-      "UPDATE customers SET clubpay_status = $1, clubpay_checked_at = now() WHERE id = $2",
+      `UPDATE customers SET clubpay_status = $1, clubpay_checked_at = now(),
+              clubpay_linked_at = CASE
+                WHEN clubpay_status IS DISTINCT FROM $1 THEN now() ELSE clubpay_linked_at END
+        WHERE id = $2`,
       [r.status, customerId]
     );
     return r.status;
   } catch (err) {
     console.error("[clubpay] no se pudo proponer la vinculación:", err instanceof Error ? err.message : err);
+    /*
+     * Al dar de alta el cliente se traga el error a propósito: el alta no puede
+     * fallar porque ClubPay no conteste, y el comerciante está esperando para
+     * fiarle a alguien que tiene enfrente.
+     *
+     * Pero cuando el que aprieta es el botón de "Proponer vinculación", el
+     * error tiene que salir. Si se lo traga, la pantalla dice "todavía no se le
+     * propuso" para siempre y el comerciante aprieta el mismo botón toda la
+     * semana sin enterarse de que le falta cargar la clave de ClubPay.
+     */
+    if (!silencioso) throw err;
     return null;
   }
 }
@@ -201,17 +217,35 @@ async function proponerVinculacion(req: Request, customerId: number, dni: string
 customersRouter.post("/:id/clubpay", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      "SELECT id, doc_number FROM customers WHERE id = $1 AND commerce_id = $2",
+      "SELECT id, doc_number, clubpay_status FROM customers WHERE id = $1 AND commerce_id = $2",
       [Number(req.params.id), req.auth.commerceId]
     );
     if (!rows[0]) throw new HttpError(404, "Cliente no encontrado");
     if (!rows[0].doc_number) {
       throw new HttpError(400, "Cargale el DNI al cliente para poder proponerle la vinculación.");
     }
-    // Por acá y no por proponerVinculacion: este camino además recupera los
-    // movimientos que quedaron sin avisar si la persona ya había aceptado.
-    const status = await refrescarVinculacion(req.auth.commerceId, Number(rows[0].id));
-    if (!status) throw new HttpError(502, "No se pudo consultar ClubPay. Probá de nuevo en un rato.");
+
+    /*
+     * Proponer o volver a preguntar, según en qué esté. La pantalla ya muestra
+     * dos textos distintos en el botón; hasta ahora el backend hacía siempre lo
+     * mismo —consultar— así que el que decía "Proponer vinculación" no proponía
+     * nada.
+     *
+     * Y consultar por alguien que nunca se propuso no puede funcionar: ClubPay
+     * no lo conoce. El cliente quedaba trabado para siempre, y el mensaje
+     * mandaba a esperar un rato.
+     */
+    if (!rows[0].clubpay_status) {
+      const status = await proponerVinculacion(
+        req, Number(rows[0].id), String(rows[0].doc_number), false
+      );
+      res.json({ status });
+      return;
+    }
+
+    // Ya propuesta: se consulta, que además recupera los movimientos que
+    // quedaron sin avisar si la persona aceptó y no nos enteramos.
+    const status = await refrescarVinculacion(req.auth.commerceId, Number(rows[0].id), false);
     res.json({ status });
   } catch (err) {
     next(err);
