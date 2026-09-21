@@ -219,7 +219,7 @@ stockRouter.put("/:productId/precio", async (req, res, next) => {
        SET sale_price = COALESCE($1, sale_price),
            -- Un precio que escribió el comerciante queda suyo: la próxima
            -- corrida de márgenes lo saltea en vez de pisárselo.
-           precio_manual = (stock_items.precio_manual OR $1 IS NOT NULL),
+           precio_manual = (stock_items.precio_manual OR $1::numeric IS NOT NULL),
            cost = COALESCE($2, cost),
            min_stock = COALESCE($3, min_stock),
            updated_at = now()
@@ -257,12 +257,12 @@ stockRouter.post("/adjust", async (req, res, next) => {
     } = await client.query(
       `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price,
                                 min_stock, precio_manual, updated_at)
-       VALUES ($1, $2, GREATEST($3, 0), $4, $5, COALESCE($6, 0), $5 IS NOT NULL, now())
+       VALUES ($1, $2, GREATEST($3, 0), $4, $5, COALESCE($6, 0), $5::numeric IS NOT NULL, now())
        ON CONFLICT (commerce_id, product_id) DO UPDATE SET
          quantity = GREATEST(stock_items.quantity + $3, 0),
          cost = COALESCE($4, stock_items.cost),
          sale_price = COALESCE($5, stock_items.sale_price),
-         precio_manual = (stock_items.precio_manual OR $5 IS NOT NULL),
+         precio_manual = (stock_items.precio_manual OR $5::numeric IS NOT NULL),
          min_stock = COALESCE($6, stock_items.min_stock),
          updated_at = now()
        RETURNING id, quantity`,
@@ -376,12 +376,12 @@ stockRouter.post("/add-from-catalog", async (req, res, next) => {
     await client.query(
       `INSERT INTO stock_items (commerce_id, product_id, quantity, cost, sale_price,
                                 min_stock, precio_manual, updated_at)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), $5 IS NOT NULL, now())
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), $5::numeric IS NOT NULL, now())
        ON CONFLICT (commerce_id, product_id) DO UPDATE SET
          quantity = stock_items.quantity + EXCLUDED.quantity,
          cost = COALESCE($4, stock_items.cost),
          sale_price = COALESCE($5, stock_items.sale_price),
-         precio_manual = (stock_items.precio_manual OR $5 IS NOT NULL),
+         precio_manual = (stock_items.precio_manual OR $5::numeric IS NOT NULL),
          min_stock = COALESCE($6, stock_items.min_stock),
          updated_at = now()`,
       [commerceId, product.id, body.quantity, body.cost ?? null, body.salePrice ?? null, body.minStock ?? null]

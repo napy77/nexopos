@@ -254,7 +254,7 @@ export async function refrescarVinculacion(
               clubpay_account_id = COALESCE($3, clubpay_account_id),
               clubpay_linked_at = CASE
                 WHEN clubpay_status IS DISTINCT FROM $1
-                  OR ($3 IS NOT NULL AND clubpay_account_id IS DISTINCT FROM $3)
+                  OR ($3::text IS NOT NULL AND clubpay_account_id IS DISTINCT FROM $3)
                 THEN now() ELSE clubpay_linked_at END
         WHERE id = $2`,
       [r.status, customerId, r.account_id ?? null]

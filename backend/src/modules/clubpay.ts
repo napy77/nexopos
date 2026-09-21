@@ -324,7 +324,7 @@ clubpayWebhookRouter.post("/vinculacion", async (req, res, next) => {
               clubpay_account_id = COALESCE($4, clubpay_account_id),
               clubpay_linked_at = CASE
                 WHEN clubpay_status IS DISTINCT FROM $3
-                  OR ($4 IS NOT NULL AND clubpay_account_id IS DISTINCT FROM $4)
+                  OR ($4::text IS NOT NULL AND clubpay_account_id IS DISTINCT FROM $4)
                 THEN now() ELSE clubpay_linked_at END
         WHERE id = $1 AND commerce_id = $2
         RETURNING id`,
