@@ -84,6 +84,11 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 ## Cambios recientes que conviene conocer
 
+0. **El sync de fichas estuvo trabado del 6 de julio al 23 de septiembre**
+   (CR-0001, causa en NexoB2B, ya arreglada). Hace falta **reiniciar el cursor
+   a `2026-07-06` y dejar correr la resincronización completa** (~72.000
+   fichas); después, contestarle a NexoB2B cuántas trajo y si `hay_mas` terminó
+   en `false`. Del lado nuestro se agregó la detección de cursor estancado.
 1. **`$5 IS NOT NULL` sin cast rompió `/api/stock/adjust` y
    `/api/stock/add-from-catalog` durante cinco días** (16 al 21 de septiembre).
    Arreglado en `2914f92`. La lección está en `CLAUDE.md` como regla 7.

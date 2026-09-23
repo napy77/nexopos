@@ -42,6 +42,12 @@ el código.**
 - **Riesgo conocido:** el cursor lleva **fecha e id**. Con sólo la fecha, un
   UPDATE masivo deja empates y la lectura se saltea filas o se estanca. Lo midió
   NexoB2B. Ver DEC-008.
+- **Incidente CR-0001 (6 jul → 23 sep 2026):** NexoB2B guardaba la fecha con
+  microsegundos y paginaba con milisegundos; la misma página volvía siempre y no
+  llegó ninguna corrección en dos meses y medio. Lo arregló NexoB2B. De nuestro
+  lado quedó: el cursor se lee sin recortar la precisión, una página que sólo
+  repite fichas corta la corrida y deja el error en `sync_cursor.ultimo_error`,
+  y cada corrida loguea fichas, distintas, páginas y `hay_mas` final.
 
 ### Stock compartido (sólo el híbrido)
 - **Dirección:** los dos sentidos

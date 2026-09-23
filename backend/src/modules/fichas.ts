@@ -87,16 +87,34 @@ async function aplicarFicha(ficha: B2BFicha): Promise<number> {
 }
 
 async function cursorGuardado(): Promise<CursorFichas> {
+  // La fecha sale como texto armado por Postgres, no como Date de JavaScript.
+  // Un Date recorta a milisegundos; si NexoB2B vuelve a mandar microsegundos,
+  // reenviar el cursor recortado lo deja antes del bloque empatado y la misma
+  // página vuelve una y otra vez. Fue exactamente lo que pasó entre julio y
+  // septiembre de 2026 (CR-0001), aunque esa vez la causa estaba del otro lado.
   const { rows: [c] } = await pool.query(
-    "SELECT fecha, id FROM sync_cursor WHERE clave = $1", [CLAVE]
+    `SELECT to_char(fecha AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fecha, id
+       FROM sync_cursor WHERE clave = $1`,
+    [CLAVE]
   );
   // Sin cursor se arranca del principio de los tiempos: la primera corrida trae
   // el catálogo entero y deja todo parejo. Es una sola vez.
   return {
-    desde: c?.fecha ? new Date(c.fecha).toISOString() : "1970-01-01T00:00:00.000Z",
+    desde: c?.fecha ?? "1970-01-01T00:00:00.000Z",
     ...(c?.id ? { desde_id: String(c.id) } : {}),
   };
 }
+
+const mismoCursor = (a: CursorFichas, b: CursorFichas): boolean =>
+  new Date(a.desde).getTime() === new Date(b.desde).getTime() &&
+  (a.desde_id ?? null) === (b.desde_id ?? null);
+
+/**
+ * Una corrida por vez. Resincronizar el catálogo entero son ~150 páginas y
+ * puede pasar de la hora; sin esto el setInterval arranca otra encima con el
+ * mismo cursor y las dos leen lo mismo.
+ */
+let corriendo = false;
 
 /**
  * Trae y aplica lo que haya. Devuelve cuántas fichas leyó.
@@ -109,16 +127,47 @@ async function cursorGuardado(): Promise<CursorFichas> {
  */
 export async function sincronizarFichas(): Promise<number> {
   if (isMockMode() || !config.platformKey) return 0;
+  if (corriendo) return 0;
+  corriendo = true;
+  try {
+    return await sincronizar();
+  } finally {
+    corriendo = false;
+  }
+}
 
+async function sincronizar(): Promise<number> {
   let cursor = await cursorGuardado();
+  const desde = cursor.desde;
   let leidas = 0;
   let filas = 0;
+  let paginas = 0;
+  let ultimoHayMas = false;
+  // Los ids vistos en la corrida. Una página que no trae ninguna ficha nueva es
+  // un cursor que no avanza: del 6 de julio al 23 de septiembre de 2026 se leyó
+  // la misma página doscientas veces por hora y nada lo decía.
+  const vistas = new Set<string>();
 
   // Tope de vueltas: con 500 por página son 100.000 fichas, más que el catálogo
   // entero. Si se llega acá es que el cursor no avanza, y girar para siempre
   // sería peor que cortar y volver dentro de una hora.
   for (let vuelta = 0; vuelta < 200; vuelta++) {
     const { fichas, hayMas, siguiente } = await fichasModificadas(cursor);
+    paginas++;
+    ultimoHayMas = hayMas;
+
+    const nuevas = fichas.filter((f) => !vistas.has(f.id));
+    if (fichas.length > 0 && nuevas.length === 0) {
+      throw new Error(
+        `el cursor no avanza: la página ${paginas} repite ${fichas.length} fichas ya leídas ` +
+        `(desde=${cursor.desde}, desde_id=${cursor.desde_id ?? "-"})`
+      );
+    }
+    if (hayMas && siguiente && mismoCursor(siguiente, cursor)) {
+      throw new Error(`el cursor no avanza: NexoB2B devolvió el mismo siguiente (desde=${cursor.desde})`);
+    }
+    for (const f of fichas) vistas.add(f.id);
+
     for (const ficha of fichas) filas += await aplicarFicha(ficha);
     leidas += fichas.length;
 
@@ -137,7 +186,12 @@ export async function sincronizarFichas(): Promise<number> {
   }
 
   if (leidas > 0) {
-    console.log(`[fichas] ${leidas} fichas de NexoB2B, ${filas} líneas del stock actualizadas`);
+    // Una línea con todo lo que hace falta para contestarle a NexoB2B si la
+    // paginación terminó bien, sin tener que reconstruirlo de a página.
+    console.log(
+      `[fichas] ${leidas} fichas de NexoB2B (${vistas.size} distintas) en ${paginas} páginas ` +
+      `desde ${desde}, hay_mas=${ultimoHayMas}, ${filas} líneas del stock actualizadas`
+    );
   }
   return leidas;
 }
