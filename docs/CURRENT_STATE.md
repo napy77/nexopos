@@ -7,7 +7,7 @@ es parte de terminar un cambio.**
 
 ## En producción
 
-`https://nexopos.app` · último commit desplegado: **`2914f92`**
+`https://nexopos.app` · último commit desplegado: **`452bc85`**
 (verificable en `GET /health`, que devuelve el commit y cuándo arrancó).
 
 Comercios reales en uso conocidos: **Jure Hnos**, **Rivera Hogar** (mayorista y
@@ -79,16 +79,19 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 - **`refreshProductTaxonomy` cruza por id.** Los productos que entraron por la
   importación de catálogo propio antes de que NexoB2B mandara los ids tienen
   `pasillo_id` en NULL y no los alcanza. Se corrigen solos con el sync de fichas.
+- **200 productos con `nexob2b_id` `mock…` en el catálogo global de
+  producción**, sin comercio. Restos de algún arranque en modo demo contra esta
+  base. Sin tocar.
 - **No hay tests automatizados.** La verificación es manual contra la base y la
   API. Es la deuda más grande del proyecto.
 
 ## Cambios recientes que conviene conocer
 
 0. **El sync de fichas estuvo trabado del 6 de julio al 23 de septiembre**
-   (CR-0001, causa en NexoB2B, ya arreglada). Hace falta **reiniciar el cursor
-   a `2026-07-06` y dejar correr la resincronización completa** (~72.000
-   fichas); después, contestarle a NexoB2B cuántas trajo y si `hay_mas` terminó
-   en `false`. Del lado nuestro se agregó la detección de cursor estancado.
+   (CR-0001, causa en NexoB2B). Resincronizado el 23/9: 72.051 fichas en 145
+   páginas, `hay_mas=false`, 10.489 líneas actualizadas. Respuesta en
+   `RESPUESTA-CR-0001-FICHAS-A-NEXOB2B.md`. Ahora un cursor estancado corta la
+   corrida y queda en `sync_cursor.ultimo_error`.
 1. **`$5 IS NOT NULL` sin cast rompió `/api/stock/adjust` y
    `/api/stock/add-from-catalog` durante cinco días** (16 al 21 de septiembre).
    Arreglado en `2914f92`. La lección está en `CLAUDE.md` como regla 7.
