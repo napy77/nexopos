@@ -7,7 +7,7 @@ import { HttpError } from "../middleware/error.js";
 import { isMockMode, aCentavos } from "../integrations/clubpay.js";
 import {
   estadoCuentaMP, crearCobroMP, consultarCobroMP, cancelarCobroMP, devolverCobroMP,
-  mockResolverCheckout, type CobroMP, type EstadoCuentaMP,
+  mockResolverCheckout, simulandoCobros, type CobroMP, type EstadoCuentaMP,
 } from "../integrations/clubpay-cobros.js";
 import { encolarEvento } from "./webhooks.js";
 import { armarOrder } from "./v1-pedidos.js";
@@ -70,6 +70,9 @@ export async function disponibilidadMP(commerceId: number): Promise<Disponibilid
   // El interruptor de la tienda es del comerciante, en NexoPOS: puede querer
   // Mercado Pago en el mostrador y no en la tienda, o al revés.
   const tiendaPrendida = Boolean(rows[0]?.clubpay_pay_enabled);
+  // Sin ClubPay y sin simulador pedido: no se ofrece, y sin motivo, porque no
+  // hay nada que el comerciante pueda hacer al respecto.
+  if (isMockMode() && !simulandoCobros()) return { mostrador: false, tienda: false, motivo: null };
   if (!key && !isMockMode()) {
     return { mostrador: false, tienda: false, motivo: "Mercado Pago se cobra a través de ClubPay, y este comercio no tiene la clave cargada." };
   }
@@ -263,7 +266,7 @@ export async function procesarAvisoCobro(apiKey: string, cuerpo: unknown): Promi
 /** GET /api/mercadopago/estado — si el mostrador puede ofrecer Mercado Pago */
 mercadopagoRouter.get("/estado", async (req, res, next) => {
   try {
-    res.json({ ...(await disponibilidadMP(req.auth.commerceId)), simulador: isMockMode() });
+    res.json({ ...(await disponibilidadMP(req.auth.commerceId)), simulador: simulandoCobros() });
   } catch (err) {
     next(err);
   }
@@ -390,7 +393,7 @@ mercadopagoRouter.post("/cobro/:paymentId/devolver", async (req, res, next) => {
 // ── Simulador del checkout de la tienda ──────────────────────────────────────
 
 /**
- * Sólo existe sin CLUBPAY_API_URL. Hace de Mercado Pago: el comprador elige
+ * Sólo existe sin CLUBPAY_API_URL y con MERCADOPAGO_SIMULADOR=on. Hace de Mercado Pago: el comprador elige
  * aprobar o rechazar y vuelve a la tienda, para que NexoTienda pueda probar
  * los dos caminos sin plata de verdad.
  */
@@ -398,7 +401,7 @@ export const mercadopagoSimuladorRouter = Router();
 
 mercadopagoSimuladorRouter.get("/:paymentId", async (req, res, next) => {
   try {
-    if (!isMockMode()) throw new HttpError(404, "No existe");
+    if (!simulandoCobros()) throw new HttpError(404, "No existe");
     const vuelta = String(req.query.vuelta ?? "");
     const id = encodeURIComponent(req.params.paymentId);
     const q = (aprobar: 0 | 1) =>
@@ -420,7 +423,7 @@ mercadopagoSimuladorRouter.get("/:paymentId", async (req, res, next) => {
 
 mercadopagoSimuladorRouter.post("/:paymentId/resolver", async (req, res, next) => {
   try {
-    if (!isMockMode()) throw new HttpError(404, "No existe");
+    if (!simulandoCobros()) throw new HttpError(404, "No existe");
     const { rows: [c] } = await pool.query(
       "SELECT commerce_id FROM mp_cobros WHERE payment_id = $1", [req.params.paymentId]
     );

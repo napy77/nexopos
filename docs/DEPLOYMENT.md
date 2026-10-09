@@ -99,6 +99,8 @@ Nombres y para qué sirven. Los valores están en el servidor.
 | `NEXOB2B_PUBLISHABLE_KEY` | — |
 | `NEXOB2B_PUBLIC_URL` | usa `NEXOB2B_API_URL` |
 | `CLUBPAY_API_URL` | modo demo. **El QR lleva una URL falsa que la app no abre.** |
+| `MERCADOPAGO_SIMULADOR` | apagado. Con `on` **y** sin `CLUBPAY_API_URL`, simula los cobros con Mercado Pago. **Nunca en producción.** |
+| `NEXOPOS_PUBLIC_URL` | `http://localhost:PORT`. Sólo lo usa el simulador para el link del checkout. |
 | `CLUBPAY_STATEMENTS` | los resúmenes quedan retenidos en la cola (default) |
 | `NEXOPOS_PLATFORM_KEY` | los endpoints de plataforma devuelven **503** |
 | `NEXOTIENDA_KEY_CATALOGO` / `_PEDIDOS` / `_CUENTAS` | esa capacidad queda cerrada |

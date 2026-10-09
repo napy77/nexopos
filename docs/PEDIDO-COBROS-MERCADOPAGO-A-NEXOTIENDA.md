@@ -153,7 +153,8 @@ el simulador. Dos precisiones sobre lo que escribimos antes:
   pidió otro), el segundo pago se devuelve solo. El pedido queda pagado una
   vez, con el primero que acreditó.
 
-El simulador corre en un NexoPOS **sin `CLUBPAY_API_URL`**: el link de pago
+El simulador corre en un NexoPOS **sin `CLUBPAY_API_URL` y con
+`MERCADOPAGO_SIMULADOR=on`**: el link de pago
 lleva a `/api/mercadopago/simulador/…`, una página con "Pagar" y "Rechazar la
 tarjeta" que después vuelve a su `returnUrl`. `nexopos.app` ya habla con
 ClubPay de verdad, así que para probar con el simulador levanten un NexoPOS

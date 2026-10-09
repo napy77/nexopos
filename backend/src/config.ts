@@ -79,5 +79,12 @@ export const config = {
      * cola: nada se pierde, sale todo junto en la primera vuelta.
      */
     enviarResumenes: (process.env.CLUBPAY_STATEMENTS || "").toLowerCase() === "on",
+    /**
+     * El simulador de cobros con Mercado Pago, sólo con "on" y sólo sin
+     * CLUBPAY_API_URL. No alcanza con el modo mock de ClubPay: un servidor al
+     * que le falte la URL por error ofrecería Mercado Pago a comercios reales
+     * y "aprobaría" pagos que nadie hizo.
+     */
+    simuladorCobros: (process.env.MERCADOPAGO_SIMULADOR || "").toLowerCase() === "on",
   },
 };

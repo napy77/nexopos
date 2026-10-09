@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../middleware/error.js";
+import { config } from "../config.js";
 import { api, apiGet, isMockMode } from "./clubpay.js";
+
+/** El simulador corre sólo si se pidió explícitamente; ver config.clubpay.simuladorCobros */
+export const simulandoCobros = (): boolean => isMockMode() && config.clubpay.simuladorCobros;
+
+function sinClubPay(): never {
+  throw new HttpError(409, "Mercado Pago no está disponible: este servidor no tiene ClubPay configurado.");
+}
 
 /**
  * Cobros con Mercado Pago a través del vínculo que el comercio ya hizo en
@@ -106,7 +114,8 @@ export function mockResolverCheckout(id: string, aprobar: boolean): CobroMP {
 // ── API ──────────────────────────────────────────────────────────────────────
 
 export async function estadoCuentaMP(apiKey: string): Promise<EstadoCuentaMP> {
-  if (isMockMode()) return { mercadopago: "connected", enabled_for_pos: true, mostrador_listo: true };
+  if (simulandoCobros()) return { mercadopago: "connected", enabled_for_pos: true, mostrador_listo: true };
+  if (isMockMode()) return { mercadopago: "disconnected", enabled_for_pos: false, mostrador_listo: false };
   return apiGet<EstadoCuentaMP>("/pos/payments/status", apiKey);
 }
 
@@ -120,6 +129,7 @@ export async function crearCobroMP(
     returnUrl?: string | null;
   }
 ): Promise<CobroMP> {
+  if (isMockMode() && !simulandoCobros()) sinClubPay();
   if (isMockMode()) {
     const ya = mockRefs.get(datos.externalReference);
     if (ya) {
@@ -166,6 +176,7 @@ export async function crearCobroMP(
 }
 
 export async function consultarCobroMP(apiKey: string, paymentId: string): Promise<CobroMP> {
+  if (isMockMode() && !simulandoCobros()) sinClubPay();
   if (isMockMode()) return mockActualizar(mockTraer(paymentId));
   return apiGet<CobroMP>(`/pos/payments/${encodeURIComponent(paymentId)}`, apiKey);
 }
@@ -178,6 +189,7 @@ export async function consultarCobroMP(apiKey: string, paymentId: string): Promi
  * un pago y no lo pierda porque el cajero apretó cancelar un segundo tarde.
  */
 export async function cancelarCobroMP(apiKey: string, paymentId: string): Promise<CobroMP> {
+  if (isMockMode() && !simulandoCobros()) sinClubPay();
   if (isMockMode()) {
     const c = mockTraer(paymentId);
     const actual = mockActualizar(c);
@@ -201,6 +213,7 @@ export async function devolverCobroMP(
   paymentId: string,
   datos: { externalReference: string; amountCents?: number }
 ): Promise<CobroMP> {
+  if (isMockMode() && !simulandoCobros()) sinClubPay();
   if (isMockMode()) {
     const c = mockTraer(paymentId);
     mockActualizar(c);
