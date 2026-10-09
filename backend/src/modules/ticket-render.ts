@@ -31,6 +31,7 @@ export const PAYMENT_LABEL: Record<string, string> = {
   transfer: "Transferencia",
   account: "Cuenta corriente",
   clubpay: "ClubPay (app)",
+  mercadopago: "Mercado Pago",
 };
 
 /** 1.000 → "1" ; 1.750 → "1,75" (la cantidad es NUMERIC(12,3) en la base) */

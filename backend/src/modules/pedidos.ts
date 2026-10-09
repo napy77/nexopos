@@ -8,6 +8,8 @@ import { periodoAbierto } from "./cuenta-corriente.js";
 import { encolarMovimiento } from "./clubpay-outbox.js";
 import { encolarEvento, type EventoPedido } from "./webhooks.js";
 import { armarOrder } from "./v1-pedidos.js";
+import { devolverCobroMP, cancelarCobroMP } from "../integrations/clubpay-cobros.js";
+import { aplicarCobro } from "./mercadopago.js";
 
 /**
  * Los pedidos, desde el mostrador.
@@ -215,14 +217,44 @@ pedidosPosRouter.post("/:id/cancelar", async (req, res, next) => {
         );
       }
     }
+    /*
+     * Pagado con Mercado Pago: la plata vuelve sola al comprador. Antes del
+     * COMMIT, para que si ClubPay no puede devolver el pedido no quede
+     * cancelado con la plata del otro lado. La referencia es por pedido: un
+     * reintento no devuelve dos veces.
+     */
+    const { rows: [pago] } = await client.query(
+      `SELECT o.code, o.payment_status, o.payment_id, c.clubpay_api_key
+         FROM orders o JOIN commerces c ON c.id = o.commerce_id WHERE o.id = $1 FOR UPDATE OF o`,
+      [id]
+    );
+    let devolucion: Awaited<ReturnType<typeof devolverCobroMP>> | null = null;
+    if (pago.payment_status === "pagado" && pago.payment_id) {
+      devolucion = await devolverCobroMP(pago.clubpay_api_key ?? "", pago.payment_id, {
+        externalReference: `nexopos-${commerceId}-pedido-${pago.code}-cancelado`,
+      });
+    }
     await client.query(
       `UPDATE orders SET status = 'cancelado', cancel_reason = $2,
-              cancelled_by = 'comercio', updated_at = now() WHERE id = $1`,
-      [id, motivo]
+              cancelled_by = 'comercio', updated_at = now(),
+              payment_status = CASE WHEN $3::boolean THEN 'reembolsado' ELSE payment_status END
+        WHERE id = $1`,
+      [id, motivo, devolucion !== null && devolucion.refunded_cents >= devolucion.amount_cents]
     );
     await encolarEvento(client, commerceId, id, "order.cancelado", await armarOrder(id, client));
     await client.query("COMMIT");
     await audit(commerceId, "pedido.cancelado", "orders", id, { motivo });
+    if (devolucion) await aplicarCobro(commerceId, devolucion).catch((e) => console.error("[mercadopago]", e));
+    // Los links que sigan vivos se dan de baja. Si alguno se paga igual,
+    // aplicarCobro ve el pedido cancelado y lo devuelve.
+    const { rows: vivos } = await pool.query(
+      "SELECT payment_id FROM mp_cobros WHERE order_id = $1 AND status IN ('pending','rejected')", [id]
+    );
+    for (const v of vivos) {
+      await cancelarCobroMP(pago.clubpay_api_key ?? "", v.payment_id)
+        .then((c) => aplicarCobro(commerceId, c))
+        .catch((e) => console.error("[mercadopago] no se pudo dar de baja el link:", e instanceof Error ? e.message : e));
+    }
     res.json({ ok: true, status: "cancelado" });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -245,7 +277,7 @@ async function emitirNotaDeVenta(
   pedido: Record<string, unknown>
 ): Promise<void> {
   const METODO: Record<string, string> = {
-    efectivo_entrega: "cash", online: "online", cuenta_corriente: "account",
+    efectivo_entrega: "cash", online: "mercadopago", cuenta_corriente: "account",
   };
   const metodo = METODO[String(pedido.payment_method)] ?? "cash";
   const total = Number(pedido.total);

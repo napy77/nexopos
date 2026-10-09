@@ -72,7 +72,7 @@ export const RECORTE_TEXTO: Record<string, string> = {
 
 export const isMockMode = (): boolean => !config.clubpay.apiUrl;
 
-async function api<T>(path: string, apiKey: string, body: unknown): Promise<T> {
+export async function api<T>(path: string, apiKey: string, body: unknown): Promise<T> {
   if (!apiKey) {
     throw new HttpError(400, "Este comercio todavía no tiene configurado ClubPay.");
   }
@@ -281,7 +281,7 @@ export interface ClubPayChargeEstado {
   error?: string;
 }
 
-async function apiGet<T>(path: string, apiKey: string): Promise<T> {
+export async function apiGet<T>(path: string, apiKey: string): Promise<T> {
   if (!apiKey) throw new HttpError(400, "Este comercio todavía no tiene configurado ClubPay.");
   let res: Response;
   try {

@@ -612,8 +612,8 @@ export default function ConfiguracionPage() {
                 </div>
               )}
 
-              <Switch label="ClubPay" ayuda={tienda.pagos.clubpayDisponible
-                  ? "Con la billetera del cliente"
+              <Switch label="Mercado Pago" ayuda={tienda.pagos.clubpayDisponible
+                  ? "Se cobra con la cuenta de Mercado Pago que conectaste en ClubPay › Cobros"
                   : "Cargá primero la clave de ClubPay, más arriba"}
                 on={tienda.pagos.clubpay} disabled={!tienda.pagos.clubpayDisponible}
                 set={(v) => guardarTienda({ pagos: { clubpay: v } })} />

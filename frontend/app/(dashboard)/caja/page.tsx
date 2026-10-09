@@ -37,6 +37,8 @@ const MEDIOS = [
   { id: "card", label: "Tarjeta", icon: "💳", enCajon: false },
   { id: "transfer", label: "Transferencia", icon: "🏦", enCajon: false },
   { id: "account", label: "Cuenta corriente", icon: "📒", enCajon: false },
+  // Va directo a la cuenta de Mercado Pago del comercio, no al cajón
+  { id: "mercadopago", label: "Mercado Pago", icon: "📲", enCajon: false },
 ];
 
 export default function CajaPage() {

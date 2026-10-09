@@ -6,6 +6,12 @@ export const config = {
     process.env.DATABASE_URL ??
     "postgres://nexopos:nexopos@localhost:5433/nexopos",
   jwtSecret: process.env.JWT_SECRET ?? "dev-secret",
+  /**
+   * Cómo se llega a este backend desde afuera. Hoy sólo lo usa el simulador de
+   * cobros con Mercado Pago, para armar el link de checkout que abre el
+   * comprador desde la tienda.
+   */
+  publicUrl: process.env.NEXOPOS_PUBLIC_URL || `http://localhost:${process.env.PORT ?? 4000}`,
   nexob2b: {
     apiUrl: process.env.NEXOB2B_API_URL || null, // null → modo mock
     publishableKey: process.env.NEXOB2B_PUBLISHABLE_KEY ?? "",

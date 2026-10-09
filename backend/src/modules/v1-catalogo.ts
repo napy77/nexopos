@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { disponibilidadMP } from "./mercadopago.js";
+import { isMockMode } from "../integrations/clubpay.js";
 import { pool } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { requiereClave } from "../middleware/api-key.js";
@@ -156,6 +158,13 @@ async function armarStore(fila: Record<string, unknown>) {
     ...(fila.free_delivery_over !== null
       ? { freeDeliveryOverCents: centavos(fila.free_delivery_over) } : {}),
     acceptsOnlinePayment: online,
+    /**
+     * Si la tienda puede cobrar con Mercado Pago. No es lo mismo que
+     * `acceptsOnlinePayment`, que también da true con contra entrega.
+     * Sólo se le pregunta a ClubPay si el comerciante lo prendió.
+     */
+    acceptsMercadoPago: Boolean(fila.clubpay_pay_enabled) && (Boolean(fila.clubpay_api_key) || isMockMode())
+      ? (await disponibilidadMP(Number(id))).tienda : false,
     allowsCredit: Boolean(fila.online_credit_enabled),
     /*
      * Si false, los productos sin stock NO vienen en la lista: los filtramos

@@ -88,6 +88,16 @@ la tienda cuando la venta nació de uno.
 El pedido de la tienda. Estados: `recibido`, `aceptado`, `listo`, `en_camino`,
 `entregado`, `cancelado`. Pago: `efectivo_entrega`, `online`,
 `cuenta_corriente`. El precio y el nombre quedan **congelados en la línea**.
+`online` es Mercado Pago; `payment_status` suma `reembolsado` y
+`payment_error` guarda el motivo del rechazo para el comprador (042).
+
+### `mp_cobros`
+Cada cobro con Mercado Pago pedido a ClubPay, del mostrador o de la tienda.
+Guarda el estado que dijo ClubPay, a qué venta (`sale_id`, único) o pedido
+(`order_id`) quedó atado, y `abandonado` si lo canceló NexoPOS: un cobro
+cancelado puede terminar pagado igual, y entonces se devuelve solo. Los
+efectos —marcar el pedido pagado, devolver— se disparan en la transición y
+viven en un único lugar, `aplicarCobro` en `modules/mercadopago.ts`.
 
 ### `campaigns` / `campaign_products`
 Tandas de ofertas. El descuento vive en `campaign_products`: **o** `descuento`

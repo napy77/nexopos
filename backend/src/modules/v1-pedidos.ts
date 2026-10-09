@@ -6,6 +6,8 @@ import { HttpError } from "../middleware/error.js";
 import { requiereClave } from "../middleware/api-key.js";
 import { disponibilidadDe } from "./disponibilidad.js";
 import { PRECIO_EFECTIVO } from "./campanas-precio.js";
+import { disponibilidadMP } from "./mercadopago.js";
+import { crearCobroMP, cancelarCobroMP } from "../integrations/clubpay-cobros.js";
 
 /**
  * Los pedidos de la tienda online.
@@ -102,6 +104,8 @@ export async function armarOrder(orderId: number, db: { query: typeof pool.query
     address: o.address ?? undefined,
     paymentMethod: o.payment_method,
     paymentStatus: o.payment_status,
+    /** Por qué Mercado Pago rechazó el pago, escrito para el comprador */
+    paymentError: o.payment_error ?? undefined,
     paymentId: o.payment_id ?? undefined,
     status: o.status,
     createdAt: new Date(o.created_at).toISOString(),
@@ -149,6 +153,11 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
     }
     if (body.paymentMethod === "cuenta_corriente" && !comercio.online_credit_enabled) {
       throw new HttpError(409, "Este comercio toma la cuenta corriente solo en el mostrador.");
+    }
+    // `online` es Mercado Pago. Hasta acá entraba aunque nadie pudiera
+    // cobrarlo, y el pedido quedaba pendiente para siempre.
+    if (body.paymentMethod === "online" && !(await disponibilidadMP(commerceId)).tienda) {
+      throw new HttpError(409, "Este comercio no está cobrando con Mercado Pago por ahora. Elegí otra forma de pago.");
     }
 
     // La franja tiene que ser suya, y el reparto necesita dirección
@@ -291,11 +300,83 @@ pedidosRouter.get("/orders/:code", pedidos, async (req, res, next) => {
   }
 });
 
+const checkoutSchema = z.object({ returnUrl: z.string().url().max(500) });
+
+/**
+ * POST /v1/orders/:code/checkout
+ *
+ * El link de pago con Mercado Pago. Separado de crear el pedido porque el
+ * comprador puede necesitar intentar más de una vez: rechazó la tarjeta,
+ * venció el link. El importe no viaja: sale del pedido, o se podría pagar
+ * menos de lo que se compró.
+ */
+pedidosRouter.post("/orders/:code/checkout", pedidos, async (req, res, next) => {
+  try {
+    const { returnUrl } = checkoutSchema.parse(req.body);
+    const code = String(req.params.code).toUpperCase();
+    const { rows: [o] } = await pool.query(
+      `SELECT o.id, o.commerce_id, o.status, o.payment_method, o.payment_status, o.total,
+              c.name AS store_name, c.clubpay_api_key
+         FROM orders o JOIN commerces c ON c.id = o.commerce_id WHERE o.code = $1`,
+      [code]
+    );
+    if (!o) throw new HttpError(404, "No existe ese pedido");
+    if (o.payment_method !== "online") throw new HttpError(409, "Este pedido no se paga con Mercado Pago.");
+    if (o.status === "cancelado") throw new HttpError(409, "Este pedido está cancelado.");
+    if (o.payment_status === "pagado") throw new HttpError(409, "Este pedido ya está pagado.");
+    const commerceId = Number(o.commerce_id);
+    const disp = await disponibilidadMP(commerceId);
+    if (!disp.tienda) throw new HttpError(409, "Este comercio no está cobrando con Mercado Pago por ahora.");
+    const key: string = o.clubpay_api_key ?? "";
+
+    // El link anterior se da de baja: dos links vivos son dos formas de pagar
+    // lo mismo. Si igual se pagan los dos, el segundo se devuelve solo.
+    const { rows: previos } = await pool.query(
+      "SELECT payment_id, status FROM mp_cobros WHERE order_id = $1 ORDER BY id", [o.id]
+    );
+    for (const p of previos.filter((p) => p.status === "pending" || p.status === "rejected")) {
+      await cancelarCobroMP(key, p.payment_id).catch((e) =>
+        console.error("[mercadopago] no se pudo dar de baja el link anterior:", e instanceof Error ? e.message : e));
+    }
+
+    const cobro = await crearCobroMP(key, {
+      amountCents: centavos(o.total),
+      externalReference: `nexopos-${commerceId}-pedido-${code}-${previos.length + 1}`,
+      channel: "tienda",
+      description: `${o.store_name} · Pedido ${code}`,
+      returnUrl,
+    });
+    await pool.query(
+      `INSERT INTO mp_cobros (commerce_id, payment_id, external_reference, channel, amount_cents, status, order_id)
+       VALUES ($1, $2, $3, 'tienda', $4, $5, $6) ON CONFLICT (payment_id) DO NOTHING`,
+      [commerceId, cobro.payment_id, cobro.external_reference, cobro.amount_cents, cobro.status, o.id]
+    );
+    await pool.query(
+      `UPDATE orders SET payment_status = 'pendiente', payment_error = NULL, updated_at = now()
+        WHERE id = $1 AND payment_status = 'rechazado'`,
+      [o.id]
+    );
+    if (!cobro.checkout_url) throw new HttpError(502, "ClubPay no devolvió el link de pago.");
+    res.status(201).json({ checkoutUrl: cobro.checkout_url, expiresAt: cobro.expires_at });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /** POST /v1/orders/:code/payment — el cobro se acreditó */
 pedidosRouter.post("/orders/:code/payment", pedidos, async (req, res, next) => {
   try {
     const paymentId = String(req.body?.paymentId ?? "").trim();
     if (!paymentId) throw new HttpError(400, "Falta el paymentId");
+    // Con Mercado Pago quien confirma es Mercado Pago, por ClubPay. Si la
+    // tienda pudiera marcarlo, un error suyo —o alguien con su clave— dejaría
+    // pedidos pagados que nadie pagó.
+    const { rows: [metodo] } = await pool.query(
+      "SELECT payment_method FROM orders WHERE code = $1", [String(req.params.code).toUpperCase()]
+    );
+    if (metodo?.payment_method === "online") {
+      throw new HttpError(409, "Los pedidos con Mercado Pago se marcan pagados solos, cuando Mercado Pago acredita.");
+    }
     const { rows } = await pool.query(
       `UPDATE orders SET payment_status = 'pagado', payment_id = $2, updated_at = now()
         WHERE code = $1 AND payment_status <> 'pagado' RETURNING id`,

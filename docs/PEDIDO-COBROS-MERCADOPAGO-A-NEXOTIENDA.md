@@ -137,3 +137,27 @@ pueden integrarlo y probarlo de punta a punta antes de que haya Mercado Pago de
 verdad del otro lado. Les avisamos cuándo está publicado en `nexopos.app`; con
 el simulador, el link de pago lleva a una página nuestra que aprueba o rechaza
 a elección, para que puedan probar los dos caminos.
+
+---
+
+## Actualización — 9 de octubre: nuestro lado está construido
+
+Todo lo de arriba está programado en NexoPOS y probado de punta a punta contra
+el simulador. Dos precisiones sobre lo que escribimos antes:
+
+- **Cuando el comercio cancela un pedido pagado** la devolución sale en el
+  mismo momento, y llega **un solo aviso**, `order.cancelado`, con
+  `paymentStatus: "reembolsado"` adentro. `order.reembolsado` queda para la
+  devolución que pasa sin cancelar el pedido.
+- **Si el comprador paga dos links del mismo pedido** (abrió uno, volvió y
+  pidió otro), el segundo pago se devuelve solo. El pedido queda pagado una
+  vez, con el primero que acreditó.
+
+El simulador corre en un NexoPOS **sin `CLUBPAY_API_URL`**: el link de pago
+lleva a `/api/mercadopago/simulador/…`, una página con "Pagar" y "Rechazar la
+tarjeta" que después vuelve a su `returnUrl`. `nexopos.app` ya habla con
+ClubPay de verdad, así que para probar con el simulador levanten un NexoPOS
+local, o avísennos y armamos uno de prueba.
+
+Antes de que un comercio real lo use, ClubPay hace una venta de tienda con
+plata real y su devolución. Les avisamos cuando esté hecha.

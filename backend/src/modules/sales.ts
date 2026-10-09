@@ -11,6 +11,8 @@ import { encolarMovimiento } from "./clubpay-outbox.js";
 import { descontarCupo } from "./disponibilidad.js";
 import { periodoAbierto, estadoCredito } from "./cuenta-corriente.js";
 import { encolarStockB2B } from "./b2b-stock.js";
+import { consultarCobroMP, devolverCobroMP } from "../integrations/clubpay-cobros.js";
+import { aplicarCobro } from "./mercadopago.js";
 
 export const salesRouter = Router();
 
@@ -26,7 +28,13 @@ const createSaleSchema = z.object({
       })
     )
     .min(1),
-  paymentMethod: z.enum(["cash", "wallet", "card", "transfer", "account"]),
+  paymentMethod: z.enum(["cash", "wallet", "card", "transfer", "account", "mercadopago"]),
+  /**
+   * El cobro de Mercado Pago que el cliente ya pagó con el QR. Sólo el id: el
+   * estado y el importe se le preguntan a ClubPay, nunca se toman de la
+   * pantalla.
+   */
+  mercadopago: z.object({ paymentId: z.string().min(1) }).nullish(),
   customerId: z.coerce.number().int().optional(),
   discount: z.coerce.number().nonnegative().default(0),
   /** Con cuánto pagó el cliente, para dejar el vuelto en el ticket */
@@ -176,6 +184,38 @@ salesRouter.post("/", async (req, res, next) => {
     // cubre el cupón. La venta sigue siendo por el total.
     const aCobrar = Math.round((total - descuentoClubpay) * 100) / 100;
 
+    /*
+     * Mercado Pago: la venta se cierra con un cobro ya acreditado y por el
+     * importe exacto. Se relee de ClubPay en este momento; la pantalla pudo
+     * ver "pagado" hace un segundo, pero quien manda es Mercado Pago.
+     *
+     * El FOR UPDATE sobre el cobro y el índice único de sale_id son los que
+     * impiden cerrar dos ventas con el mismo pago desde dos cajas.
+     */
+    let cobroMP: Awaited<ReturnType<typeof consultarCobroMP>> | null = null;
+    let cobroMPId: number | null = null;
+    if (body.paymentMethod === "mercadopago") {
+      const paymentId = body.mercadopago?.paymentId;
+      if (!paymentId) throw new HttpError(400, "Falta el cobro de Mercado Pago.");
+      const { rows: [propio] } = await client.query(
+        `SELECT id, sale_id FROM mp_cobros
+          WHERE payment_id = $1 AND commerce_id = $2 AND channel = 'mostrador' FOR UPDATE`,
+        [paymentId, commerceId]
+      );
+      if (!propio) throw new HttpError(404, "No existe ese cobro de Mercado Pago.");
+      if (propio.sale_id) throw new HttpError(409, "Ese cobro de Mercado Pago ya está en otra venta.");
+      cobroMP = await consultarCobroMP(await clubpayKey(req), paymentId);
+      if (cobroMP.status !== "paid") {
+        throw new HttpError(409, cobroMP.error ?? "Mercado Pago todavía no acreditó el pago.");
+      }
+      if (cobroMP.amount_cents !== aCentavos(aCobrar)) {
+        throw new HttpError(409,
+          `El cobro de Mercado Pago es por $${aPesos(cobroMP.amount_cents).toLocaleString("es-AR")} ` +
+          `y la venta da $${aCobrar.toLocaleString("es-AR")}. Devolvele el pago al cliente y generá un QR nuevo.`);
+      }
+      cobroMPId = Number(propio.id);
+    }
+
     const {
       rows: [sale],
     } = await client.query(
@@ -202,9 +242,22 @@ salesRouter.post("/", async (req, res, next) => {
      * beneficios.
      */
     await client.query(
-      `INSERT INTO sale_payments (commerce_id, sale_id, method, amount) VALUES ($1, $2, $3, $4)`,
-      [commerceId, sale.id, body.paymentMethod, aCobrar]
+      `INSERT INTO sale_payments (commerce_id, sale_id, method, amount, meta) VALUES ($1, $2, $3, $4, $5)`,
+      [commerceId, sale.id, body.paymentMethod, aCobrar,
+       cobroMP ? JSON.stringify({
+         payment_id: cobroMP.payment_id,
+         mp_payment_id: cobroMP.mp_payment_id,
+         // Lo que retuvo ClubPay en la operación: es lo que hace cuadrar el
+         // arqueo con lo que el comercio ve en su cuenta de Mercado Pago.
+         fee_cents: cobroMP.fee_cents,
+       }) : null]
     );
+    if (cobroMPId !== null) {
+      await client.query(
+        "UPDATE mp_cobros SET sale_id = $2, abandonado = false, status = 'paid', updated_at = now() WHERE id = $1",
+        [cobroMPId, sale.id]
+      );
+    }
     if (hayClubpay && descuentoClubpay > 0) {
       await client.query(
         `INSERT INTO sale_payments
@@ -382,6 +435,23 @@ salesRouter.post("/:id/refund", async (req, res, next) => {
          pago.coupon_provider, pago.coupon_reference]
       );
     }
+    /*
+     * Si se cobró con Mercado Pago, la plata vuelve por Mercado Pago al que
+     * pagó. Antes del COMMIT: si ClubPay no puede devolver, el reembolso no
+     * se hace y el cajero lo ve, en vez de devolver la mercadería y dejar la
+     * plata del otro lado. La referencia es por venta original, así que un
+     * reintento no devuelve dos veces.
+     */
+    const { rows: [cobroOriginal] } = await client.query(
+      "SELECT payment_id, amount_cents, refunded_cents FROM mp_cobros WHERE sale_id = $1",
+      [original.id]
+    );
+    let devolucionMP: Awaited<ReturnType<typeof devolverCobroMP>> | null = null;
+    if (cobroOriginal && Number(cobroOriginal.refunded_cents) < Number(cobroOriginal.amount_cents)) {
+      devolucionMP = await devolverCobroMP(await clubpayKey(req), cobroOriginal.payment_id, {
+        externalReference: `nexopos-${commerceId}-reembolso-venta-${original.id}`,
+      });
+    }
     if (original.clubpay_transaction_id) {
       console.warn(
         `[clubpay] reembolso del ticket #${original.ticket_number}: la transacción ` +
@@ -433,6 +503,7 @@ salesRouter.post("/:id/refund", async (req, res, next) => {
 
     await client.query("COMMIT");
     await audit(commerceId, "sale.refund", "sales", refund.id, { originalId: original.id });
+    if (devolucionMP) await aplicarCobro(commerceId, devolucionMP).catch((e) => console.error("[mercadopago]", e));
     res.status(201).json({ id: refund.id, ticketNumber: Number(refund.ticket_number), total: -original.total });
   } catch (err) {
     await client.query("ROLLBACK");

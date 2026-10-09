@@ -7,6 +7,7 @@ import { sesionAbierta } from "./caja.js";
 import { periodoAbierto, imputarPago } from "./cuenta-corriente.js";
 import { recuperarMovimientos } from "./clubpay-outbox.js";
 import QRCode from "qrcode";
+import { procesarAvisoCobro, olvidarEstadoMP } from "./mercadopago.js";
 import { randomUUID } from "node:crypto";
 import {
   validarQR, aCentavos, aPesos, isMockMode,
@@ -90,6 +91,7 @@ clubpayRouter.put("/api-key", async (req, res, next) => {
       apiKey || null,
       req.auth.commerceId,
     ]);
+    olvidarEstadoMP(req.auth.commerceId);
     await audit(req.auth.commerceId, "clubpay.api_key", "commerces", req.auth.commerceId);
     res.json({ ok: true, configurado: Boolean(apiKey) });
   } catch (err) {
@@ -269,6 +271,25 @@ clubpayWebhookRouter.post("/pago", async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+// ── Un cobro con Mercado Pago cambió ─────────────────────────────────────────
+
+/**
+ * POST /api/clubpay/webhook/cobro
+ *
+ * Misma autenticación que /pago. Del cuerpo sólo se usa el id: el estado se
+ * relee de ClubPay, porque los avisos pueden llegar desordenados.
+ */
+clubpayWebhookRouter.post("/cobro", async (req, res, next) => {
+  try {
+    const apiKey = req.header("X-API-Key") ?? "";
+    if (!apiKey) throw new HttpError(401, "Falta la clave del comercio");
+    await procesarAvisoCobro(apiKey, req.body);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
   }
 });
 

@@ -142,6 +142,20 @@ puede tener una clave por comercio**: por eso la autenticación es por capacidad
 - **Regla:** va con la clave **del comercio**, y eso es lo que impide que un
   token emitido para un comercio abra la tienda de otro.
 
+### Cobros con Mercado Pago (CR-0002)
+- **Dirección:** NexoPOS → ClubPay, y aviso ClubPay → NexoPOS
+- **Métodos:** `GET /pos/payments/status`, `POST /pos/payments`,
+  `GET /pos/payments/{id}`, `POST …/cancel`, `POST …/refunds`.
+  Aviso en `POST /api/clubpay/webhook/cobro`, con la clave del comercio.
+- **Contrato:** `RESPUESTA-COBROS-MERCADOPAGO-DE-CLUBPAY.md`.
+- **Reglas:** el aviso no se cree, se relee el cobro (llegan desordenados);
+  `rejected` no es final y un `cancelled`/`expired` puede terminar `paid`;
+  un pago que no queda en ninguna venta o pedido se devuelve solo.
+- **NexoTienda** no habla con ClubPay: pide el link en
+  `POST /v1/orders/:code/checkout`.
+- **Estado:** construido contra el simulador. Falta la prueba real con plata
+  que exige ClubPay antes de abrirlo a comercios.
+
 ### Emparejar dos pantallas — **pendiente de ClubPay**
 - **Método esperado:** `POST /pos/tienda/emparejar`, `GET …/:request_id`
 - **Estado:** nuestra mitad construida; la de ellos no existe todavía

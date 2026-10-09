@@ -52,13 +52,12 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 | **Libreta en la tienda** | Canje, estado y `linkedAt` construidos. El **emparejar por código** espera que ClubPay construya `/pos/tienda/emparejar`. | ClubPay |
 | **QR de vinculación en el mostrador** | Pedido escrito (`PEDIDO-QR-VINCULACION-A-CLUBPAY.md`). Sin respuesta. | ClubPay |
 | **Resúmenes hacia ClubPay** | Retenidos por `CLUBPAY_STATEMENTS` (default apagado): sin la adjudicación de movimientos del lado de ClubPay, la compra se contaría dos veces. | ClubPay |
-| **Cobro con Mercado Pago** (mostrador y tienda) | Por el vínculo OAuth que el comercio ya hizo en ClubPay. Pedidos escritos: `PEDIDO-COBROS-MERCADOPAGO-A-CLUBPAY.md` y `…-A-NEXOTIENDA.md`. Falta la respuesta de ClubPay (endpoints, comisión, interruptor de autorización) y construir nuestro lado contra simulador. | ClubPay · German (comisión) |
+| **Cobro con Mercado Pago** (mostrador y tienda) | Construido de los dos lados contra simulador (CR-0002). ClubPay lo tiene desplegado con el interruptor apagado y comisión en cero. **Falta la prueba real con plata** (venta de mostrador y de tienda, con devolución) antes de abrirlo a comercios, y que NexoTienda integre el checkout. | German (prueba y comisión) · NexoTienda |
 | **Resúmenes en la tienda** | Esperando la decisión de German. Recomendación escrita: que **no** vayan (ver `RESPUESTA-3-LIBRETA-A-NEXOTIENDA.md`). | German |
 
 ## Pendiente, sin empezar
 
-- Cobro online de pedidos: ver "Cobro con Mercado Pago" arriba. Hasta que
-  esté, un pedido `online` entra igual y queda en `pendiente` para siempre.
+- Cobro online de pedidos: ver "Cobro con Mercado Pago" arriba.
 - Circuito de comprobante de transferencia.
 - Creación de productos desde el ERP (hoy sólo lee y actualiza).
 - Webhooks salientes hacia el ERP.
@@ -105,8 +104,9 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 ## Migraciones
 
-**41 aplicadas, ninguna pendiente.** Corren solas al arrancar el backend. La
-última es `041_campanas_por_producto.sql`.
+**42 aplicadas en local.** Corren solas al arrancar el backend. La última es
+`042_cobros_mercadopago.sql`, que en producción se aplica con el próximo
+deploy.
 
 ## Desarrollo local
 

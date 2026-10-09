@@ -20,6 +20,8 @@ import { exportRouter } from "./modules/export.js";
 import { settingsRouter } from "./modules/settings.js";
 import { cajaRouter } from "./modules/caja.js";
 import { clubpayRouter, clubpayWebhookRouter } from "./modules/clubpay.js";
+import { mercadopagoRouter, mercadopagoSimuladorRouter } from "./modules/mercadopago.js";
+import { configurarSimulador } from "./integrations/clubpay-cobros.js";
 import { disponibilidadRouter } from "./modules/disponibilidad.js";
 import { plataformaRouter } from "./modules/plataforma.js";
 import { v1Router } from "./modules/v1-catalogo.js";
@@ -100,6 +102,11 @@ app.use("/api/b2b-stock", requireAuth, b2bStockRouter);
 // comercio y por eso va antes y sin requireAuth.
 app.use("/api/clubpay/webhook", clubpayWebhookRouter);
 app.use("/api/clubpay", requireAuth, clubpayRouter);
+// El simulador lo abre el comprador desde la tienda, sin sesión: va antes que
+// el router con requireAuth. Sólo responde sin CLUBPAY_API_URL.
+configurarSimulador(config.publicUrl);
+app.use("/api/mercadopago/simulador", mercadopagoSimuladorRouter);
+app.use("/api/mercadopago", requireAuth, mercadopagoRouter);
 
 app.use(errorHandler);
 

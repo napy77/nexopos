@@ -58,7 +58,7 @@ async function calcularResumen(commerceId: number, sessionId: number) {
   ]);
 
   const porMedio: Record<string, { tickets: number; total: number }> = {};
-  for (const m of ["cash", "wallet", "card", "transfer", "account", "coupon"]) porMedio[m] = { tickets: 0, total: 0 };
+  for (const m of ["cash", "wallet", "card", "transfer", "account", "coupon", "mercadopago"]) porMedio[m] = { tickets: 0, total: 0 };
   for (const r of ventas.rows) {
     porMedio[r.payment_method] = { tickets: Number(r.tickets), total: Number(r.total) };
   }

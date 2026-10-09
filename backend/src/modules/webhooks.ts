@@ -18,7 +18,9 @@ const MAX_INTENTOS = 12;
 
 export type EventoPedido =
   | "order.aceptado" | "order.listo" | "order.en_camino"
-  | "order.entregado" | "order.cancelado";
+  | "order.entregado" | "order.cancelado"
+  // El pago con Mercado Pago (ver modules/mercadopago.ts)
+  | "order.pagado" | "order.pago_rechazado" | "order.reembolsado";
 
 /**
  * Encola un aviso. Se llama DENTRO de la transacción que cambia el estado, con
