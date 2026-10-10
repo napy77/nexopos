@@ -52,7 +52,7 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 | **Libreta en la tienda** | Canje, estado y `linkedAt` construidos. El **emparejar por código** espera que ClubPay construya `/pos/tienda/emparejar`. | ClubPay |
 | **QR de vinculación en el mostrador** | Pedido escrito (`PEDIDO-QR-VINCULACION-A-CLUBPAY.md`). Sin respuesta. | ClubPay |
 | **Resúmenes hacia ClubPay** | Retenidos por `CLUBPAY_STATEMENTS` (default apagado): sin la adjudicación de movimientos del lado de ClubPay, la compra se contaría dos veces. | ClubPay |
-| **Cobro con Mercado Pago** (mostrador y tienda) | Construido de los dos lados contra simulador (CR-0002). ClubPay lo tiene desplegado con el interruptor apagado y comisión en cero. **Falta la prueba real con plata** (venta de mostrador y de tienda, con devolución) antes de abrirlo a comercios, y que NexoTienda integre el checkout. | German (prueba y comisión) · NexoTienda |
+| **Cobro con Mercado Pago** (mostrador y tienda) | En producción del lado de ClubPay desde el 09/10; el nuestro, construido con los dos ajustes que pidieron (un solo cobro vivo). **Falta la prueba real con plata**, que suma dos QR de mostrador a la vez: si se pisan, hay que mandar `terminal` en el `POST`. Después, que NexoTienda integre el checkout. | German (comercio de prueba, horario, comisión) · NexoTienda |
 | **Resúmenes en la tienda** | Esperando la decisión de German. Recomendación escrita: que **no** vayan (ver `RESPUESTA-3-LIBRETA-A-NEXOTIENDA.md`). | German |
 
 ## Pendiente, sin empezar

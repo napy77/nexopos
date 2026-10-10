@@ -6,7 +6,7 @@ import { HttpError } from "../middleware/error.js";
 import { requiereClave } from "../middleware/api-key.js";
 import { disponibilidadDe } from "./disponibilidad.js";
 import { PRECIO_EFECTIVO } from "./campanas-precio.js";
-import { disponibilidadMP } from "./mercadopago.js";
+import { disponibilidadMP, aplicarCobro } from "./mercadopago.js";
 import { crearCobroMP, cancelarCobroMP } from "../integrations/clubpay-cobros.js";
 
 /**
@@ -329,14 +329,28 @@ pedidosRouter.post("/orders/:code/checkout", pedidos, async (req, res, next) => 
     if (!disp.tienda) throw new HttpError(409, "Este comercio no está cobrando con Mercado Pago por ahora.");
     const key: string = o.clubpay_api_key ?? "";
 
-    // El link anterior se da de baja: dos links vivos son dos formas de pagar
-    // lo mismo. Si igual se pagan los dos, el segundo se devuelve solo.
+    /*
+     * Un solo link vivo por pedido: el anterior se da de baja ANTES de crear
+     * el nuevo, y si no se puede, no se crea. Dos links vivos son dos formas
+     * de pagar lo mismo; la devolución automática lo cubre, pero tiene que ser
+     * la excepción y no el camino normal.
+     *
+     * Si al cancelar resulta que ya se pagó, el pedido queda pagado con ese y
+     * no hay link nuevo.
+     */
     const { rows: previos } = await pool.query(
       "SELECT payment_id, status FROM mp_cobros WHERE order_id = $1 ORDER BY id", [o.id]
     );
     for (const p of previos.filter((p) => p.status === "pending" || p.status === "rejected")) {
-      await cancelarCobroMP(key, p.payment_id).catch((e) =>
-        console.error("[mercadopago] no se pudo dar de baja el link anterior:", e instanceof Error ? e.message : e));
+      let c;
+      try {
+        c = await cancelarCobroMP(key, p.payment_id);
+      } catch (e) {
+        console.error("[mercadopago] no se pudo dar de baja el link anterior:", e instanceof Error ? e.message : e);
+        throw new HttpError(502, "No pudimos dar de baja el link de pago anterior. Probá de nuevo en un momento.");
+      }
+      await aplicarCobro(commerceId, c);
+      if (c.status === "paid") throw new HttpError(409, "Este pedido ya está pagado.");
     }
 
     const cobro = await crearCobroMP(key, {

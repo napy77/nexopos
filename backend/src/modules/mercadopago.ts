@@ -120,6 +120,7 @@ export const olvidarEstadoMP = (commerceId: number): void => { cache.delete(comm
 export async function aplicarCobro(commerceId: number, cobro: CobroMP): Promise<void> {
   const client = await pool.connect();
   let devolver: { ref: string } | null = null;
+  let darDeBajaOtros: number | null = null;
   try {
     await client.query("BEGIN");
     const { rows: [antes] } = await client.query(
@@ -157,6 +158,7 @@ export async function aplicarCobro(commerceId: number, cobro: CobroMP): Promise<
             [orderId, cobro.payment_id]
           );
           await encolarEvento(client, commerceId, orderId, "order.pagado", await armarOrder(orderId, client));
+          darDeBajaOtros = orderId;
         }
       } else if (cobro.status === "rejected" && antes.status !== "rejected"
                  && ["pendiente", "rechazado"].includes(o.payment_status)) {
@@ -184,6 +186,28 @@ export async function aplicarCobro(commerceId: number, cobro: CobroMP): Promise<
 
   if (devolver) await devolverYAplicar(commerceId, cobro.payment_id, devolver.ref);
   await devolverSiAbandonado(commerceId, cobro.payment_id);
+  if (darDeBajaOtros !== null) await darDeBajaLinks(commerceId, darDeBajaOtros, cobro.payment_id);
+}
+
+/**
+ * El pedido ya se pagó: los otros links que sigan vivos se dan de baja. Si
+ * alguno se paga igual, aplicarCobro ve el pedido pagado por otro y lo
+ * devuelve.
+ */
+async function darDeBajaLinks(commerceId: number, orderId: number, salvo: string): Promise<void> {
+  const { rows } = await pool.query(
+    `SELECT payment_id FROM mp_cobros
+      WHERE order_id = $1 AND payment_id <> $2 AND status IN ('pending','rejected')`,
+    [orderId, salvo]
+  );
+  for (const r of rows) {
+    try {
+      const c = await cancelarCobroMP(await claveDe(commerceId), r.payment_id);
+      await aplicarCobro(commerceId, c);
+    } catch (err) {
+      console.error(`[mercadopago] no se pudo dar de baja ${r.payment_id}:`, err instanceof Error ? err.message : err);
+    }
+  }
 }
 
 /**

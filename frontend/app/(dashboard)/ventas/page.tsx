@@ -101,6 +101,13 @@ export default function VentasPage() {
   const refCobroMP = useRef<{ id: string; total: number } | null>(null);
   /** El pago ya entró y la venta se está emitiendo: no emitirla dos veces */
   const emitiendoMP = useRef(false);
+  /**
+   * El último cobro de Mercado Pago que quedó vivo: creado, y ni cancelado ni
+   * usado en una venta. Mientras exista, no se cobra de otra forma sin darlo
+   * de baja antes; si no, el cliente paga en efectivo, el QR se aprueba igual
+   * y pagó dos veces.
+   */
+  const mpVivo = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const pagaConRef = useRef<HTMLInputElement>(null);
 
@@ -373,6 +380,7 @@ export default function VentasPage() {
         body: JSON.stringify({ total: aCobrar, referencia: ref.id }),
       });
       emitiendoMP.current = false;
+      mpVivo.current = c.paymentId;
       setCobroMP(c);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo generar el QR de Mercado Pago");
@@ -384,23 +392,26 @@ export default function VentasPage() {
    * contesta `paid` y en vez de cerrar se emite la venta. Un pago no se pierde
    * porque el cajero apretó cancelar un segundo después.
    */
-  async function cancelarQrMP() {
+  /** Devuelve true si el QR quedó dado de baja; false si se pagó o falló */
+  async function cancelarQrMP(): Promise<boolean> {
     const c = cobroMP;
-    if (!c) return;
-    if (c.status === "paid") return;
+    if (!c) return true;
+    if (c.status === "paid") return false;
     try {
       const r = await api<{ status: CobroMP["status"] }>(`/api/mercadopago/cobro/${c.paymentId}/cancelar`, { method: "POST" });
       if (r.status === "paid") {
         setCobroMP({ ...c, status: "paid" });
         emitirConMP(c.paymentId);
-        return;
+        return false;
       }
     } catch (err) {
       setMpError(err instanceof Error ? err.message : "No se pudo cancelar el cobro");
-      return;
+      return false;
     }
+    mpVivo.current = null;
     setCobroMP(null);
     refCobroMP.current = null;
+    return true;
   }
 
   async function emitirConMP(paymentId: string) {
@@ -408,6 +419,7 @@ export default function VentasPage() {
     emitiendoMP.current = true;
     const ok = await cobrar(paymentId);
     if (ok) {
+      mpVivo.current = null;
       setCobroMP(null);
       refCobroMP.current = null;
     } else {
@@ -423,6 +435,7 @@ export default function VentasPage() {
     setMpError("");
     try {
       await api(`/api/mercadopago/cobro/${c.paymentId}/devolver`, { method: "POST" });
+      mpVivo.current = null;
       setCobroMP(null);
       refCobroMP.current = null;
       setNotice(`Se le devolvieron ${money(c.monto)} al cliente por Mercado Pago.`);
@@ -622,6 +635,28 @@ export default function VentasPage() {
 
   async function cobrar(mpPaymentId?: string): Promise<boolean> {
     setError("");
+    // Otro medio con un QR de Mercado Pago todavía vivo: primero se da de
+    // baja. Si al cancelar resulta que ya pagó, la venta se cierra con ese
+    // pago y no con el efectivo.
+    if (!mpPaymentId && mpVivo.current) {
+      const vivo = mpVivo.current;
+      try {
+        const r = await api<{ status: CobroMP["status"] }>(`/api/mercadopago/cobro/${vivo}/cancelar`, { method: "POST" });
+        if (r.status === "paid") {
+          setPaymentMethod("mercadopago");
+          setCobroMP((c) => (c ? { ...c, status: "paid" } : c));
+          setError("El cliente ya había pagado con Mercado Pago: la venta se cierra con ese pago.");
+          return emitirConMP(vivo).then(() => false);
+        }
+        mpVivo.current = null;
+        refCobroMP.current = null;
+      } catch (err) {
+        setError(err instanceof Error
+          ? `No se pudo dar de baja el QR de Mercado Pago: ${err.message}. Probá de nuevo antes de cobrar de otra forma.`
+          : "No se pudo dar de baja el QR de Mercado Pago.");
+        return false;
+      }
+    }
     try {
       const sale = await api<{
         id: number; ticketNumber: number; total: number; vuelto: number | null;
@@ -632,10 +667,13 @@ export default function VentasPage() {
           items: lines.filter((l) => l.quantity > 0).map((l) => ({
             productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice,
           })),
-          paymentMethod,
+          // Con un pago de Mercado Pago el medio es ése, elija lo que elija la
+          // pantalla: puede venir de un cancelar que llegó tarde mientras el
+          // cajero ya había tocado Efectivo.
+          paymentMethod: mpPaymentId ? "mercadopago" : paymentMethod,
           customerId: customerId || undefined,
           discount: 0,
-          paidAmount: paymentMethod === "cash" && montoPagado ? montoPagado : undefined,
+          paidAmount: !mpPaymentId && paymentMethod === "cash" && montoPagado ? montoPagado : undefined,
           // Solo el id: el estado y el importe los relee el backend de ClubPay
           mercadopago: mpPaymentId ? { paymentId: mpPaymentId } : undefined,
           // Solo el socio y el beneficio: el importe lo resuelve ClubPay al
@@ -1249,8 +1287,10 @@ export default function VentasPage() {
                 <h2 style={{ margin: "6px 0" }}>El código venció</h2>
                 <p className="muted">El cliente no pagó a tiempo.</p>
                 <div className="toolbar" style={{ justifyContent: "center" }}>
-                  <button onClick={() => { refCobroMP.current = null; mostrarQrMP(); }}>Generar otro</button>
-                  <button className="secondary" onClick={() => { setCobroMP(null); refCobroMP.current = null; }}>Cerrar</button>
+                  {/* Un vencido todavía puede terminar pagado: se cancela igual,
+                      para que si pasa se devuelva solo */}
+                  <button onClick={async () => { if (await cancelarQrMP()) mostrarQrMP(); }}>Generar otro</button>
+                  <button className="secondary" onClick={() => cancelarQrMP()}>Cerrar</button>
                 </div>
               </div>
             ) : (
@@ -1264,7 +1304,8 @@ export default function VentasPage() {
                 {cobroMP.status === "rejected" ? (
                   // No es final: con el mismo QR puede probar otra tarjeta
                   <p className="error" style={{ textAlign: "center" }}>
-                    {cobroMP.error ?? "Mercado Pago rechazó el pago."} Puede probar con otro medio en la app.
+                    {cobroMP.error ?? "Mercado Pago rechazó el pago."} Puede reintentar con otra tarjeta
+                    en su app. Para cobrar de otra forma, cancelá este QR primero.
                   </p>
                 ) : (
                   <p className="muted" style={{ textAlign: "center", margin: "6px 0 0" }}>
