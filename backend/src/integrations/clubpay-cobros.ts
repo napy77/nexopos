@@ -192,8 +192,11 @@ export async function cancelarCobroMP(apiKey: string, paymentId: string): Promis
   if (isMockMode() && !simulandoCobros()) sinClubPay();
   if (isMockMode()) {
     const c = mockTraer(paymentId);
+    // Como ClubPay desde el 11/10: pending, rejected y expired se cancelan;
+    // un pagado o devuelto contesta 409 con el cobro, que acá es devolverlo
+    // tal cual (afuera, el catch de abajo hace lo mismo releyendo).
     const actual = mockActualizar(c);
-    if (actual.status === "pending") c.status = "cancelled";
+    if (["pending", "rejected", "expired"].includes(actual.status)) c.status = "cancelled";
     return mockActualizar(c);
   }
   try {
