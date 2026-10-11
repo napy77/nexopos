@@ -316,6 +316,16 @@ async function emitirNotaDeVenta(
     "INSERT INTO sale_payments (commerce_id, sale_id, method, amount) VALUES ($1,$2,$3,$4)",
     [commerceId, venta.id, metodo, total]
   );
+  // El cobro de Mercado Pago del pedido pasa a ser el de esta nota. Sin esto,
+  // reembolsar la nota devolvía la mercadería y dejaba la plata en Mercado
+  // Pago: el reembolso busca el cobro por la venta, no por el pedido.
+  if (metodo === "mercadopago") {
+    await client.query(
+      `UPDATE mp_cobros SET sale_id = $2, updated_at = now()
+        WHERE order_id = $1 AND status = 'paid' AND sale_id IS NULL`,
+      [pedido.id, venta.id]
+    );
+  }
 
   // Si fue a la libreta, el movimiento sale de esta nota como de cualquier
   // otra venta fiada, y cae en el período abierto del cliente.
