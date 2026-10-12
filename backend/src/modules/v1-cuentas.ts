@@ -180,6 +180,12 @@ cuentasRouter.get("/cuentas/:accountId", cuentas, async (req, res, next) => {
        * comercio no vende fiado por internet".
        */
       onlineEnabled: estado.onlineHabilitado,
+      /*
+       * Si esta persona tiene libreta en este comercio. Hasta CR-0003 una
+       * sesión abierta lo implicaba; desde ahí hay gente identificada sin
+       * libreta, y la tienda no tiene que ofrecerle cargar a la cuenta.
+       */
+      creditEnabled: estado.libreta,
       closingDay: cierre,
       dueDay: vence,
       /** El período en curso, con la fecha de cierre ya resuelta. */

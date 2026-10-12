@@ -269,3 +269,46 @@ Orden:
 
 Lo que puede empezar ya, sin esperar a nadie: el paso 1, la configuración y las reglas (con modo demo para
 el nivel, como el resto de la integración con ClubPay).
+
+---
+
+## Agregado del 12 de octubre: después de leer a ClubPay y primer paso hecho
+
+Leímos `cr-0003-nivel-para-nexopos.md` y las dos respuestas de ClubPay. El nivel, la consulta y el `PUT` del
+número de cliente ya están en producción y **los vamos a usar tal cual**: el `PUT` contesta 200 si se repite el
+mismo número y 409 si se intenta cambiarlo, que es lo que pedíamos en el punto 3. Comparamos el nivel con `>=`.
+
+### Lo que sigue sin respuesta (para ClubPay)
+
+1. **¿Se reusa la relación si la persona ya está vinculada por DNI?** Su respuesta dice «al aceptar, se crea la
+   relación persona ↔ comercio», pero no qué pasa si esa relación ya existe. Es la pregunta más importante del
+   punto 2: si se crea otra, la persona queda partida en dos clientes y sólo una tiene la libreta.
+2. **El inverso de `POST /pos/accounts/:account_id/libreta`.** NexoPOS ya deja cerrar una libreta sin
+   desvincular a la persona (ver abajo); ClubPay necesita enterarse.
+3. **Quién manda el slug.** Siguen con «si llegan los dos, gana el último». Proponemos que, cuando NexoPOS empiece
+   a mandarlo, ClubPay tome el slug de comercio sólo de NexoPOS (punto 8). Y como el bloqueante de su web de alta
+   es que hay un solo comercio con `storefront_slug`, adelantamos ese envío: es lo próximo que construimos.
+
+### Lo que ya está hecho en NexoPOS (sin deployar)
+
+El punto 1 de esta respuesta, que no dependía de nadie:
+
+- **Migración `043_libreta_activa.sql`** (en lugar de la `043_identidad_tienda` que anunciamos: la partimos en
+  pasos). `customers.libreta_activa` nace en `false`, y lo que ya existía quedó en `true`; también suma
+  `customers.origen` y `commerces.identity_rules_enabled` (apagado y todavía sin uso). El índice único
+  `(commerce_id, clubpay_account_id)` queda para el paso del canje, después de revisar que en producción no haya
+  repetidos: una migración que falla deja el servidor sin arrancar.
+- El alta en el mostrador sigue abriendo la libreta, como siempre.
+- **Sin libreta no se fía**: ni en el mostrador ni desde la tienda.
+- La ficha del cliente tiene «Abrir libreta / Cerrar libreta». Cerrarla no borra la deuda ni frena los pagos.
+
+**Para NexoTienda**, todo agregado:
+
+- `GET /v1/cuentas/:accountId` suma `creditEnabled`. Con `false`, no ofrecer cargar a la cuenta.
+- `POST /v1/orders` suma dos `code`: `libreta_no_activa` (409) y `falta_cuenta` (400, `cuenta_corriente` sin
+  `accountId`). El segundo era un agujero viejo: se podía pedir a la cuenta con sólo nombre y teléfono, y al
+  entregarlo salía una venta «a cuenta» que no le anotaba la deuda a nadie.
+
+Y uno que no se ve pero importa para lo que viene: **al entregar un pedido, la deuda se anota sólo si se pagó a
+la cuenta**. Antes alcanzaba con que el pedido tuviera cliente; con CR-0003, un pedido pagado en efectivo también
+va a traer quién lo hizo, y se le habría cobrado dos veces.

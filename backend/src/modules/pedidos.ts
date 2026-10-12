@@ -337,7 +337,11 @@ async function emitirNotaDeVenta(
 
   // Si fue a la libreta, el movimiento sale de esta nota como de cualquier
   // otra venta fiada, y cae en el período abierto del cliente.
-  if (pedido.customer_id) {
+  //
+  // Se mira la forma de pago y no sólo que haya cliente: con CR-0003 un pedido
+  // pagado en efectivo también trae quién lo hizo, y anotarle la deuda sería
+  // cobrarle dos veces.
+  if (pedido.payment_method === "cuenta_corriente" && pedido.customer_id) {
     const customerId = Number(pedido.customer_id);
     const periodo = await periodoAbierto(client as never, commerceId, customerId);
     const { rows: [mov] } = await client.query(

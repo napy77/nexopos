@@ -301,6 +301,10 @@ salesRouter.post("/", async (req, res, next) => {
        * Volver a habilitarlo es un toque en la ficha, sin salir de acá.
        */
       const credito = await estadoCredito(client, commerceId, body.customerId);
+      if (!credito.libreta) {
+        throw new HttpError(409,
+          "Este cliente no tiene libreta. Se puede cobrar de otra forma, o habilitársela desde su ficha.");
+      }
       if (credito.pausado) {
         throw new HttpError(409,
           "La cuenta corriente de este cliente está pausada. Se puede cobrar de otra forma, o reactivarla desde su ficha.");

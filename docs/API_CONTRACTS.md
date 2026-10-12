@@ -109,7 +109,7 @@ POST /v1/cuentas/canjear   { token, storeId }
 
 GET  /v1/cuentas/:accountId?storeId=
   → { accountId, storeId, displayName, balanceCents, limitCents,
-      availableCents, paused, onlineEnabled, closingDay, dueDay,
+      availableCents, paused, onlineEnabled, creditEnabled, closingDay, dueDay,
       currentPeriod: { from, to, dueDate }, linkedAt }
 ```
 
@@ -121,6 +121,10 @@ GET  /v1/cuentas/:accountId?storeId=
   la sesión murió.
 - **`paused` y `onlineEnabled` son cosas distintas.** "No podés cargar" no es lo
   mismo que "este comercio no vende fiado por internet".
+- **`creditEnabled` (CR-0003): una sesión ya no es una libreta.** Desde que las
+  personas se pueden identificar en la tienda, hay cuentas a las que el comercio
+  nunca les fió. Con `creditEnabled: false` no se ofrece cargar a la cuenta.
+  `paused` es "por ahora no"; `creditEnabled: false` es "nunca se le abrió".
 - **No existe `vinculo_ambiguo`.** El `external_id` es el id de la fila, dos
   fichas duplicadas son dos filas y sólo una está vinculada: el canje resuelve
   siempre a una.
@@ -182,6 +186,8 @@ estable: **el texto se puede reescribir, el `code` no**. Hoy en `/v1/orders`:
 | `pedido_cancelado` | `/checkout` de un pedido cancelado |
 | `link_anterior_vivo` | 502: no se pudo dar de baja el link anterior |
 | `pago_lo_confirma_mercadopago` | `/payment` sobre un pedido `online` |
+| `falta_cuenta` | 400: `cuenta_corriente` sin `accountId` |
+| `libreta_no_activa` | `cuenta_corriente` con una cuenta que no tiene libreta |
 
 ## 11. Cómo se rompe un contrato sin romperlo
 

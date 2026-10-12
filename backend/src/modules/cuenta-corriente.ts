@@ -270,6 +270,12 @@ export interface EstadoCredito {
   pausado: boolean;
   /** El comercio habilitó la compra a cuenta desde la tienda online */
   onlineHabilitado: boolean;
+  /**
+   * El comerciante le dio libreta a esta persona. Distinto de `pausado`: la
+   * pausa es "por ahora no", esto es "nunca se le abrió". Un cliente que se
+   * identificó en la tienda existe sin libreta (CR-0003).
+   */
+  libreta: boolean;
   saldo: number;
 }
 
@@ -290,7 +296,7 @@ export async function estadoCredito(
   customerId: number
 ): Promise<EstadoCredito> {
   const { rows } = await db.query(
-    `SELECT c.balance, c.credit_limit, c.credit_paused, co.online_credit_enabled
+    `SELECT c.balance, c.credit_limit, c.credit_paused, c.libreta_activa, co.online_credit_enabled
        FROM customers c JOIN commerces co ON co.id = c.commerce_id
       WHERE c.id = $1 AND c.commerce_id = $2`,
     [customerId, commerceId]
@@ -305,6 +311,7 @@ export async function estadoCredito(
     disponible: limite === null ? null : Math.round((limite - saldo) * 100) / 100,
     pausado: r.credit_paused,
     onlineHabilitado: r.online_credit_enabled,
+    libreta: r.libreta_activa,
   };
 }
 

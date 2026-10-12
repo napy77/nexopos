@@ -7,6 +7,8 @@ interface Customer {
   id: number; name: string; doc_number: string | null; phone: string | null;
   email: string | null; balance: string;
   clubpay_status?: string | null;
+  libreta_activa?: boolean;
+  origen?: "mostrador" | "tienda";
 }
 interface Tx { id: number; type: string; amount: string; note: string | null; created_at: string }
 
@@ -296,6 +298,8 @@ export default function ClientesPage() {
               setSelected({ ...selected, clubpay_status: status });
               load();
             }} />
+            <Libreta cliente={selected} onCambio={(activa) =>
+              setSelected({ ...selected, libreta_activa: activa })} />
             <form action={registerPayment} className="toolbar">
               <input name="amount" type="number" step="0.01" min="0.01" placeholder="Monto del pago" required style={{ width: 140 }} />
               <select name="paymentMethod" defaultValue="cash" title="Con qué pagó (importa para el arqueo de caja)">
@@ -387,6 +391,62 @@ function ClubPayVinculo({
       )}
       <button type="button" className="ghost" onClick={consultar} disabled={cargando}>
         {cargando ? "Consultando…" : estado ? "Volver a preguntar" : "Proponer vinculación"}
+      </button>
+      {error && <span style={{ color: "var(--danger)", fontSize: 12 }}>{error}</span>}
+    </div>
+  );
+}
+
+/**
+ * Si este cliente puede comprar a cuenta.
+ *
+ * Hasta CR-0003 todo cliente tenía libreta porque sólo los daba de alta el
+ * comerciante. Ahora también aparecen personas que se identificaron en la
+ * tienda, y a ésas nadie les fió nunca: la libreta se la abre el comerciante,
+ * con un toque y a sabiendas.
+ */
+function Libreta({
+  cliente,
+  onCambio,
+}: {
+  cliente: Customer;
+  onCambio: (activa: boolean) => void;
+}) {
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+  if (cliente.libreta_activa === undefined) return null;
+  const activa = cliente.libreta_activa;
+
+  async function cambiar() {
+    setGuardando(true);
+    setError("");
+    try {
+      const r = await api<{ libreta: boolean }>(`/api/customers/${cliente.id}/credito`, {
+        method: "PUT",
+        body: JSON.stringify({ libretaActiva: !activa }),
+      });
+      onCambio(r.libreta);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 12px", flexWrap: "wrap" }}>
+      <span className={`badge ${activa ? "ok" : ""}`}>
+        {activa ? "Tiene libreta" : "Sin libreta"}
+      </span>
+      <span className="muted" style={{ fontSize: 12 }}>
+        {activa
+          ? "Puede comprar a cuenta. Cerrarla no borra lo que debe."
+          : cliente.origen === "tienda"
+            ? "Se identificó en la tienda online. Puede comprar, pero no a cuenta."
+            : "No puede comprar a cuenta."}
+      </span>
+      <button type="button" className="ghost" onClick={cambiar} disabled={guardando}>
+        {guardando ? "Guardando…" : activa ? "Cerrar libreta" : "Abrir libreta"}
       </button>
       {error && <span style={{ color: "var(--danger)", fontSize: 12 }}>{error}</span>}
     </div>

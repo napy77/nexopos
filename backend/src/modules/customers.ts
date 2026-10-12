@@ -112,8 +112,10 @@ customersRouter.post("/", async (req, res, next) => {
     const {
       rows: [customer],
     } = await pool.query(
-      `INSERT INTO customers (commerce_id, name, doc_number, phone, email)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      // Dar de alta en el mostrador es abrirle la libreta: así fue siempre, y
+      // es el comerciante el que lo hace, con la persona delante.
+      `INSERT INTO customers (commerce_id, name, doc_number, phone, email, libreta_activa, origen)
+       VALUES ($1, $2, $3, $4, $5, true, 'mostrador') RETURNING *`,
       [req.auth.commerceId, body.name, body.docNumber ?? null, body.phone ?? null, body.email ?? null]
     );
     await audit(req.auth.commerceId, "customer.create", "customers", customer.id);
@@ -260,7 +262,7 @@ customersRouter.get("/:id/transactions", async (req, res, next) => {
     // desaparece de la ficha.
     const { rows: customers } = await pool.query(
       `SELECT id, name, doc_number, phone, email, balance,
-              clubpay_status, clubpay_checked_at
+              clubpay_status, clubpay_checked_at, libreta_activa, origen
        FROM customers WHERE id = $1 AND commerce_id = $2`,
       [Number(req.params.id), req.auth.commerceId]
     );
@@ -358,6 +360,11 @@ const creditoSchema = z.object({
   /** null saca el límite. Sin límite es el default: así funciona el cuaderno. */
   creditLimit: z.coerce.number().nonnegative().nullable().optional(),
   creditPaused: z.boolean().optional(),
+  /**
+   * Abrir o cerrar la libreta. Cerrarla no borra la deuda ni frena los pagos:
+   * sólo deja de aceptar compras nuevas a cuenta.
+   */
+  libretaActiva: z.boolean().optional(),
 });
 
 /**
@@ -374,10 +381,11 @@ customersRouter.put("/:id/credito", async (req, res, next) => {
     const { rowCount } = await pool.query(
       `UPDATE customers SET
          credit_limit = CASE WHEN $3::boolean THEN $4 ELSE credit_limit END,
-         credit_paused = COALESCE($5, credit_paused)
+         credit_paused = COALESCE($5, credit_paused),
+         libreta_activa = COALESCE($6::boolean, libreta_activa)
        WHERE id = $1 AND commerce_id = $2`,
       [id, req.auth.commerceId, body.creditLimit !== undefined,
-       body.creditLimit ?? null, body.creditPaused ?? null]
+       body.creditLimit ?? null, body.creditPaused ?? null, body.libretaActiva ?? null]
     );
     if (rowCount === 0) throw new HttpError(404, "Cliente no encontrado");
     await audit(req.auth.commerceId, "customer.credito", "customers", id, body);

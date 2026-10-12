@@ -134,6 +134,11 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
     if (!body.accountId && !body.contact) {
       throw new HttpError(400, "Falta el nombre y el teléfono de quien compra.");
     }
+    // Sin cuenta, un pedido a la libreta salía como venta "a cuenta" de nadie:
+    // al entregarlo no se le anotaba la deuda a ninguna persona.
+    if (body.paymentMethod === "cuenta_corriente" && !body.accountId) {
+      throw new HttpError(400, "Para comprar a la cuenta corriente hay que entrar con la cuenta.", "falta_cuenta");
+    }
 
     const { rows: comercios } = await client.query(
       `SELECT id, nexotienda_enabled, pay_on_delivery_enabled, transfer_enabled,
@@ -176,14 +181,23 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
     let customerId: number | null = null;
     if (body.accountId) {
       const { rows: cuentas } = await client.query(
-        `SELECT id, balance, credit_limit, credit_paused FROM customers
+        `SELECT id, balance, credit_limit, credit_paused, libreta_activa FROM customers
           WHERE id = $1 AND commerce_id = $2`,
         [Number(body.accountId.replace(/^CLI-/, "")), commerceId]
       );
       const cuenta = cuentas[0];
       if (!cuenta) throw new HttpError(404, "Esa cuenta corriente no existe en este comercio.");
-      if (cuenta.credit_paused) {
-        throw new HttpError(409, "La cuenta corriente está pausada. Se puede pagar de otra forma.");
+      if (body.paymentMethod === "cuenta_corriente") {
+        // Una sesión de la tienda ya no quiere decir libreta: desde CR-0003 la
+        // persona se puede identificar sin que el comercio le haya fiado nunca.
+        if (!cuenta.libreta_activa) {
+          throw new HttpError(409,
+            "Este comercio todavía no te abrió una cuenta corriente. Se puede pagar de otra forma.",
+            "libreta_no_activa");
+        }
+        if (cuenta.credit_paused) {
+          throw new HttpError(409, "La cuenta corriente está pausada. Se puede pagar de otra forma.");
+        }
       }
       customerId = Number(cuenta.id);
     }
