@@ -229,7 +229,15 @@ pedidosPosRouter.post("/:id/cancelar", async (req, res, next) => {
       [id]
     );
     let devolucion: Awaited<ReturnType<typeof devolverCobroMP>> | null = null;
-    if (pago.payment_status === "pagado" && pago.payment_id) {
+    // Sólo se devuelve un cobro que pasó por ClubPay. Un `payment_id` que no
+    // está en mp_cobros no es plata que podamos devolver: los pedidos que el
+    // sandbox de NexoTienda marcó pagados en septiembre (pay_sbx_…) dejaban
+    // al comercio sin poder cancelarlos.
+    const { rows: [cobroDelPedido] } = pago.payment_id
+      ? await client.query(
+          "SELECT 1 FROM mp_cobros WHERE payment_id = $1 AND order_id = $2", [pago.payment_id, id])
+      : { rows: [] };
+    if (pago.payment_status === "pagado" && cobroDelPedido) {
       devolucion = await devolverCobroMP(pago.clubpay_api_key ?? "", pago.payment_id, {
         externalReference: `nexopos-${commerceId}-pedido-${pago.code}-cancelado`,
       });
