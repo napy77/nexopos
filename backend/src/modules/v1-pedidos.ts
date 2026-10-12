@@ -157,7 +157,7 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
     // `online` es Mercado Pago. Hasta acá entraba aunque nadie pudiera
     // cobrarlo, y el pedido quedaba pendiente para siempre.
     if (body.paymentMethod === "online" && !(await disponibilidadMP(commerceId)).tienda) {
-      throw new HttpError(409, "Este comercio no está cobrando con Mercado Pago por ahora. Elegí otra forma de pago.");
+      throw new HttpError(409, "Este comercio no está cobrando con Mercado Pago por ahora. Elegí otra forma de pago.", "mp_no_disponible");
     }
 
     // La franja tiene que ser suya, y el reparto necesita dirección
@@ -321,12 +321,12 @@ pedidosRouter.post("/orders/:code/checkout", pedidos, async (req, res, next) => 
       [code]
     );
     if (!o) throw new HttpError(404, "No existe ese pedido");
-    if (o.payment_method !== "online") throw new HttpError(409, "Este pedido no se paga con Mercado Pago.");
-    if (o.status === "cancelado") throw new HttpError(409, "Este pedido está cancelado.");
-    if (o.payment_status === "pagado") throw new HttpError(409, "Este pedido ya está pagado.");
+    if (o.payment_method !== "online") throw new HttpError(409, "Este pedido no se paga con Mercado Pago.", "no_es_mercadopago");
+    if (o.status === "cancelado") throw new HttpError(409, "Este pedido está cancelado.", "pedido_cancelado");
+    if (o.payment_status === "pagado") throw new HttpError(409, "Este pedido ya está pagado.", "ya_pagado");
     const commerceId = Number(o.commerce_id);
     const disp = await disponibilidadMP(commerceId);
-    if (!disp.tienda) throw new HttpError(409, "Este comercio no está cobrando con Mercado Pago por ahora.");
+    if (!disp.tienda) throw new HttpError(409, "Este comercio no está cobrando con Mercado Pago por ahora.", "mp_no_disponible");
     const key: string = o.clubpay_api_key ?? "";
 
     /*
@@ -347,10 +347,10 @@ pedidosRouter.post("/orders/:code/checkout", pedidos, async (req, res, next) => 
         c = await cancelarCobroMP(key, p.payment_id);
       } catch (e) {
         console.error("[mercadopago] no se pudo dar de baja el link anterior:", e instanceof Error ? e.message : e);
-        throw new HttpError(502, "No pudimos dar de baja el link de pago anterior. Probá de nuevo en un momento.");
+        throw new HttpError(502, "No pudimos dar de baja el link de pago anterior. Probá de nuevo en un momento.", "link_anterior_vivo");
       }
       await aplicarCobro(commerceId, c);
-      if (c.status === "paid") throw new HttpError(409, "Este pedido ya está pagado.");
+      if (c.status === "paid") throw new HttpError(409, "Este pedido ya está pagado.", "ya_pagado");
     }
 
     const cobro = await crearCobroMP(key, {
@@ -370,7 +370,7 @@ pedidosRouter.post("/orders/:code/checkout", pedidos, async (req, res, next) => 
         WHERE id = $1 AND payment_status = 'rechazado'`,
       [o.id]
     );
-    if (!cobro.checkout_url) throw new HttpError(502, "ClubPay no devolvió el link de pago.");
+    if (!cobro.checkout_url) throw new HttpError(502, "ClubPay no devolvió el link de pago.", "sin_link");
     res.status(201).json({ checkoutUrl: cobro.checkout_url, expiresAt: cobro.expires_at });
   } catch (err) {
     next(err);
@@ -389,7 +389,7 @@ pedidosRouter.post("/orders/:code/payment", pedidos, async (req, res, next) => {
       "SELECT payment_method FROM orders WHERE code = $1", [String(req.params.code).toUpperCase()]
     );
     if (metodo?.payment_method === "online") {
-      throw new HttpError(409, "Los pedidos con Mercado Pago se marcan pagados solos, cuando Mercado Pago acredita.");
+      throw new HttpError(409, "Los pedidos con Mercado Pago se marcan pagados solos, cuando Mercado Pago acredita.", "pago_lo_confirma_mercadopago");
     }
     const { rows } = await pool.query(
       `UPDATE orders SET payment_status = 'pagado', payment_id = $2, updated_at = now()

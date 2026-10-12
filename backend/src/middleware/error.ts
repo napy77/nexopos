@@ -2,7 +2,13 @@ import type { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  /**
+   * `code` es para otros sistemas: un identificador estable al lado del
+   * mensaje. El mensaje está escrito para una persona y se puede reescribir;
+   * quien decide algo leyendo el texto se rompe sin aviso el día que lo
+   * mejoramos.
+   */
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
@@ -14,7 +20,7 @@ export function errorHandler(
   _next: NextFunction
 ): void {
   if (err instanceof HttpError) {
-    res.status(err.status).json({ error: err.message });
+    res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
     return;
   }
   if (err instanceof ZodError) {

@@ -168,7 +168,22 @@ GET /api/erp/v1/ventas?desde=ISO  → { ventas, hasta, hay_mas }
 - `hasta` es la marca para la próxima llamada; `hay_mas` dice si quedó cola.
 - Un precio escrito por el ERP queda **manual** y los márgenes no lo recalculan.
 
-## 10. Cómo se rompe un contrato sin romperlo
+## 10. Errores: `error` para personas, `code` para sistemas
+
+Toda respuesta de error trae `error`, el texto escrito para quien lo va a leer.
+Cuando otro sistema necesita decidir algo según el error, viene además `code`,
+estable: **el texto se puede reescribir, el `code` no**. Hoy en `/v1/orders`:
+
+| `code` | Cuándo |
+|---|---|
+| `ya_pagado` | pedir `/checkout` de un pedido pagado |
+| `mp_no_disponible` | el comercio no cobra con Mercado Pago |
+| `no_es_mercadopago` | `/checkout` de un pedido que no es `online` |
+| `pedido_cancelado` | `/checkout` de un pedido cancelado |
+| `link_anterior_vivo` | 502: no se pudo dar de baja el link anterior |
+| `pago_lo_confirma_mercadopago` | `/payment` sobre un pedido `online` |
+
+## 11. Cómo se rompe un contrato sin romperlo
 
 Cuando hay que cambiar una forma que otro sistema ya consume, **conviven las
 dos** hasta que el otro equipo confirme que desplegó:
