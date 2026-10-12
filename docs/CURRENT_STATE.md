@@ -52,13 +52,15 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 | **Libreta en la tienda** | Canje, estado y `linkedAt` construidos. El **emparejar por código** espera que ClubPay construya `/pos/tienda/emparejar`. | ClubPay |
 | **QR de vinculación en el mostrador** | Pedido escrito (`PEDIDO-QR-VINCULACION-A-CLUBPAY.md`). Sin respuesta. | ClubPay |
 | **Resúmenes hacia ClubPay** | Retenidos por `CLUBPAY_STATEMENTS` (default apagado): sin la adjudicación de movimientos del lado de ClubPay, la compra se contaría dos veces. | ClubPay |
-| **Cobro con Mercado Pago** (mostrador y tienda) | En producción de los tres lados: ClubPay, NexoPOS y NexoTienda (que borró su sandbox). **Falta la prueba real con plata**, que suma dos QR de mostrador a la vez (si se pisan, mandar `terminal` en el `POST`). NexoTienda pide una instancia de prueba con el simulador; mientras tanto, local. | German (comercio de prueba, horario, comisión, instancia) |
+| **Cobro con Mercado Pago** (mostrador y tienda) | En producción de los tres lados. NexoTienda lo probó de punta a punta contra nuestro simulador (11/10) sin observaciones. **Falta la prueba real con plata** con ClubPay —mostrador, tienda, devolución y dos QR de mostrador a la vez (si se pisan, mandar `terminal` en el `POST`)— y definir la comisión antes de abrirlo. | German (comercio de prueba, horario, comisión) |
 | **Resúmenes en la tienda** | Esperando la decisión de German. Recomendación escrita: que **no** vayan (ver `RESPUESTA-3-LIBRETA-A-NEXOTIENDA.md`). | German |
 
 ## Pendiente, sin empezar
 
 - Cobro online de pedidos: ver "Cobro con Mercado Pago" arriba.
-- Circuito de comprobante de transferencia.
+- Circuito de comprobante de transferencia. Borrador acordado con NexoTienda:
+  `POST /v1/orders/:code/comprobante`, el pedido en `pendiente` hasta que el
+  comercio lo marque pagado. Espera que German lo priorice.
 - Creación de productos desde el ERP (hoy sólo lee y actualiza).
 - Webhooks salientes hacia el ERP.
 - Calculadora de costo de recetas y cadencia de reposición (ideas viejas, sin
