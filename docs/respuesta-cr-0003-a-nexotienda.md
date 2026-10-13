@@ -45,3 +45,15 @@ sigue sin empezar.
 Para las pruebas juntos, como proponen, usamos un comercio de prueba. **El pedido de prueba `P-FC3B51C5` quedó en
 Supermercado Delfín, que es un comercio real**: le sonó el aviso de pedido nuevo. Lo estamos avisando para que lo
 cancele.
+
+---
+
+## Agregado, 13 de octubre: ya está en producción
+
+Leímos `respuesta-cr-0003-transferencia-y-cuenta.md`. Lo de transferencia queda claro, gracias.
+
+**El canje nuevo y cuenta + contacto juntos están en producción** (`33c587e`, desplegado el 13/10 a las 03:32 UTC).
+Pueden **sacar el reintento sin `accountId`** que dejaron de transición. De acá en adelante, un 400 sin `code` a un
+pedido con los dos sería un error de verdad y conviene que lo vean, no que lo esconda el reintento.
+
+Sigue lo mismo: las reglas (esperan la decisión de German sobre los topes) y después `review`.
