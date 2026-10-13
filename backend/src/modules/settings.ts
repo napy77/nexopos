@@ -4,6 +4,7 @@ import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { isMockMode } from "../integrations/clubpay.js";
 import { formaDelSlug, sugerirSlug } from "../lib/slug.js";
+import { marcarSync, enTransaccion } from "./clubpay-sync.js";
 
 export const settingsRouter = Router();
 
@@ -282,7 +283,13 @@ settingsRouter.put("/nexotienda", async (req, res, next) => {
       }
     }
 
-    const { rows } = await pool.query(
+    const { rows } = await enTransaccion(async (c) => {
+      // Publicar o despublicar le cambia a ClubPay si muestra el botón de la
+      // tienda; el resto de esta pantalla no le importa.
+      if (Boolean(antes.nexotienda_enabled) !== nuevo.habilitada) {
+        await marcarSync(c, "tienda", commerceId, commerceId);
+      }
+      return c.query(
       `UPDATE commerces SET
          nexotienda_enabled = $2, pay_on_delivery_enabled = $3,
          transfer_enabled = $4, transfer_alias = $5, transfer_holder = $6,
@@ -293,7 +300,8 @@ settingsRouter.put("/nexotienda", async (req, res, next) => {
       [commerceId, nuevo.habilitada, nuevo.contraEntrega, nuevo.transferencia,
        nuevo.alias, nuevo.titular, nuevo.clubpay, nuevo.cuentaCorriente,
        nuevo.retiro, nuevo.envioPropio, nuevo.muestraSinStock]
-    );
+      );
+    });
     await audit(commerceId, "settings.nexotienda", "commerces", commerceId, nuevo);
     res.json(armarTienda(rows[0], await regionesDe(commerceId)));
   } catch (err) {
@@ -388,6 +396,9 @@ settingsRouter.put("/tienda-slug", async (req, res, next) => {
       );
     }
     await client.query("UPDATE commerces SET slug = $2 WHERE id = $1", [commerceId, slug]);
+    // ClubPay arma con esto el "Ir a la tienda" y sabe de qué comercio es
+    // cada subdominio en su web de alta.
+    await marcarSync(client, "tienda", commerceId, commerceId);
     await client.query("COMMIT");
     await audit(commerceId, "settings.slug", "commerces", commerceId, { anterior, slug });
     res.json({ slug, direccion: `https://${slug}.nexotienda.app`, anterior });

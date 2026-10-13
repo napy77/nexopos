@@ -9,6 +9,7 @@ import { clubpayKey } from "./clubpay.js";
 import { vincularCliente } from "../integrations/clubpay.js";
 import { encolarMovimiento, refrescarVinculacion } from "./clubpay-outbox.js";
 import { periodoAbierto, imputarPago, pilaDe, estadoCredito, ritmoDePago } from "./cuenta-corriente.js";
+import { marcarSync, enTransaccion } from "./clubpay-sync.js";
 
 export const customersRouter = Router();
 
@@ -378,7 +379,8 @@ customersRouter.put("/:id/credito", async (req, res, next) => {
   try {
     const body = creditoSchema.parse(req.body);
     const id = Number(req.params.id);
-    const { rowCount } = await pool.query(
+    const { rowCount } = await enTransaccion(async (c) => {
+      const r = await c.query(
       `UPDATE customers SET
          credit_limit = CASE WHEN $3::boolean THEN $4 ELSE credit_limit END,
          credit_paused = COALESCE($5, credit_paused),
@@ -386,7 +388,13 @@ customersRouter.put("/:id/credito", async (req, res, next) => {
        WHERE id = $1 AND commerce_id = $2`,
       [id, req.auth.commerceId, body.creditLimit !== undefined,
        body.creditLimit ?? null, body.creditPaused ?? null, body.libretaActiva ?? null]
-    );
+      );
+      // La libreta se espeja en la app de ClubPay; el límite y la pausa no.
+      if (r.rowCount && body.libretaActiva !== undefined) {
+        await marcarSync(c, "libreta", req.auth.commerceId, id);
+      }
+      return r;
+    });
     if (rowCount === 0) throw new HttpError(404, "Cliente no encontrado");
     await audit(req.auth.commerceId, "customer.credito", "customers", id, body);
     res.json(await estadoCredito(pool, req.auth.commerceId, id));

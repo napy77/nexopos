@@ -3,6 +3,7 @@ import { pool } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { config } from "../config.js";
 import { statementId } from "./cuenta-corriente.js";
+import { despacharSync, marcarSync } from "./clubpay-sync.js";
 import {
   aCentavos,
   empujarMovimiento,
@@ -166,6 +167,7 @@ export function iniciarOutbox(): void {
   }
   setInterval(() => {
     despacharPendientes().catch((err) => console.error("[clubpay] outbox:", err));
+    despacharSync().catch((err) => console.error("[clubpay] tienda y libretas:", err));
   }, 15_000).unref();
 
   // Y cada minuto se fija si alguno de los que estaban esperando ya aceptó.
@@ -262,6 +264,9 @@ export async function refrescarVinculacion(
     // Recién aceptada: lo que se vendió mientras esperábamos no se había
     // encolado, y sin esto no lo vería nunca.
     if (!vinculacionAceptada(cliente.clubpay_status) && vinculacionAceptada(r.status)) {
+      // Recién ahora ClubPay tiene dónde anotar si tiene libreta. Si el
+      // comerciante la cerró mientras esperaba, allá nacería abierta.
+      await marcarSync(pool, "libreta", commerceId, customerId);
       const recuperados = await recuperarMovimientos(commerceId, customerId);
       if (recuperados > 0) {
         console.log(`[clubpay] CLI-${customerId} aceptó: se recuperaron ${recuperados} movimientos`);

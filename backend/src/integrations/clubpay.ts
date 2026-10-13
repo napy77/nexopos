@@ -72,7 +72,12 @@ export const RECORTE_TEXTO: Record<string, string> = {
 
 export const isMockMode = (): boolean => !config.clubpay.apiUrl;
 
-export async function api<T>(path: string, apiKey: string, body: unknown): Promise<T> {
+export async function api<T>(
+  path: string,
+  apiKey: string,
+  body: unknown,
+  method: "POST" | "PUT" | "DELETE" = "POST"
+): Promise<T> {
   if (!apiKey) {
     throw new HttpError(400, "Este comercio todavía no tiene configurado ClubPay.");
   }
@@ -80,9 +85,9 @@ export async function api<T>(path: string, apiKey: string, body: unknown): Promi
   let res: Response;
   try {
     res = await fetch(`${config.clubpay.apiUrl}${path}`, {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     });
   } catch (err) {
@@ -99,7 +104,7 @@ export async function api<T>(path: string, apiKey: string, body: unknown): Promi
       // al cliente: se muestran tal cual, sin traducir ni acortar.
       mensaje = data.error ?? data.message ?? mensaje;
     } catch { /* cuerpo no JSON */ }
-    console.error(`[clubpay] POST ${path} → ${res.status}: ${crudo.slice(0, 400)}`);
+    console.error(`[clubpay] ${method} ${path} → ${res.status}: ${crudo.slice(0, 400)}`);
 
     if (res.status === 401) {
       throw new HttpError(400, "La clave de ClubPay del comercio es inválida. Revisá la configuración.");
@@ -548,6 +553,44 @@ export async function empujarResumen(apiKey: string, resumen: ResumenCuenta): Pr
     return;
   }
   await api<unknown>("/pos/account/statements", apiKey, resumen);
+}
+
+// ── Lo que ClubPay espeja de nosotros (CR-0003) ─────────────────────────────
+
+/**
+ * La dirección de la tienda del comercio y si está publicada.
+ *
+ * Desde el primer envío, ClubPay deja de tomar el slug de ese comercio de
+ * Nexo B2B: el registro único de slugs es nuestro (tabla `slugs`), y que gane
+ * el último dejaba que un aviso atrasado pisara el nuevo.
+ */
+export async function enviarTienda(
+  apiKey: string,
+  tienda: { slug: string; publicada: boolean }
+): Promise<void> {
+  if (isMockMode()) {
+    console.log(`[clubpay:mock] tienda → ${tienda.slug} publicada=${tienda.publicada}`);
+    return;
+  }
+  await api<unknown>("/pos/storefront", apiKey, {
+    storefront_slug: tienda.slug,
+    storefront_published: tienda.publicada,
+  }, "PUT");
+}
+
+/**
+ * Abre o cierra la libreta en ClubPay. Para ellos es sólo qué mostrar en la
+ * app: no frena movimientos ni pagos, porque la cuenta corriente es nuestra.
+ */
+export async function espejarLibreta(apiKey: string, accountId: string, activa: boolean): Promise<void> {
+  if (isMockMode()) {
+    console.log(`[clubpay:mock] libreta ${accountId} → ${activa ? "abierta" : "cerrada"}`);
+    return;
+  }
+  await api<unknown>(
+    `/pos/accounts/${encodeURIComponent(accountId)}/libreta`, apiKey, undefined,
+    activa ? "POST" : "DELETE"
+  );
 }
 
 // ── Handoff: la persona salta de ClubPay a la tienda ────────────────────────

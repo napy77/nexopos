@@ -6,6 +6,7 @@ import { HttpError } from "../middleware/error.js";
 import { sesionAbierta } from "./caja.js";
 import { periodoAbierto, imputarPago } from "./cuenta-corriente.js";
 import { recuperarMovimientos } from "./clubpay-outbox.js";
+import { marcarSync, enTransaccion } from "./clubpay-sync.js";
 import QRCode from "qrcode";
 import { procesarAvisoCobro, olvidarEstadoMP } from "./mercadopago.js";
 import { randomUUID } from "node:crypto";
@@ -87,10 +88,15 @@ const keySchema = z.object({ apiKey: z.string().trim() });
 clubpayRouter.put("/api-key", async (req, res, next) => {
   try {
     const { apiKey } = keySchema.parse(req.body);
-    await pool.query("UPDATE commerces SET clubpay_api_key = $1 WHERE id = $2", [
-      apiKey || null,
-      req.auth.commerceId,
-    ]);
+    await enTransaccion(async (c) => {
+      await c.query("UPDATE commerces SET clubpay_api_key = $1 WHERE id = $2", [
+        apiKey || null,
+        req.auth.commerceId,
+      ]);
+      // Con la clave recién cargada, ClubPay se entera de la tienda que ya
+      // tenía. Sin clave no hay a quién avisarle y el envío se descarta solo.
+      if (apiKey) await marcarSync(c, "tienda", req.auth.commerceId, req.auth.commerceId);
+    });
     olvidarEstadoMP(req.auth.commerceId);
     await audit(req.auth.commerceId, "clubpay.api_key", "commerces", req.auth.commerceId);
     res.json({ ok: true, configurado: Boolean(apiKey) });
@@ -356,6 +362,8 @@ clubpayWebhookRouter.post("/vinculacion", async (req, res, next) => {
     // Aceptó: lo que se le vendió mientras esperábamos no se había encolado,
     // porque no se le mandan movimientos a quien todavía no dijo que sí.
     if (body.status === "vinculada") {
+      // Ver refrescarVinculacion: allá la libreta nace abierta.
+      await marcarSync(pool, "libreta", commerceId, customerId);
       const recuperados = await recuperarMovimientos(commerceId, customerId);
       if (recuperados > 0) {
         console.log(`[clubpay] CLI-${customerId} aceptó: se recuperaron ${recuperados} movimientos`);

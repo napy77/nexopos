@@ -312,3 +312,28 @@ El punto 1 de esta respuesta, que no dependía de nadie:
 Y uno que no se ve pero importa para lo que viene: **al entregar un pedido, la deuda se anota sólo si se pagó a
 la cuenta**. Antes alcanzaba con que el pedido tuviera cliente; con CR-0003, un pedido pagado en efectivo también
 va a traer quién lo hizo, y se le habría cobrado dos veces.
+
+---
+
+## Segundo agregado, 13 de octubre: leída la respuesta de ClubPay, slug y libreta hechos
+
+Leímos `respuesta-cr-0003-nexopos.md`. Quedan cerradas las tres preguntas: una relación por persona y comercio
+(es un `UNIQUE` de su base), la libreta como espejo con `POST`/`DELETE`, y el slug sólo desde NexoPOS.
+
+**Hecho en NexoPOS (sin deployar):**
+
+- **Slug:** se manda con `PUT /pos/storefront` cuando el comerciante elige o cambia la dirección y cuando publica
+  o despublica. Despublicada va con su slug y `storefront_published: false`, no con los dos en `null`: el slug
+  sigue siendo suyo. **Si el comercio todavía no eligió dirección, no se manda nada**, para no apagar con un
+  `null` una tienda que ClubPay tenga cargada desde Nexo B2B. Al deployar, los comercios que ya tienen dirección y
+  clave de ClubPay se mandan solos una vez.
+- **Libreta:** «Abrir / Cerrar libreta» en la ficha llama a `POST`/`DELETE …/libreta`. Si la persona acepta la
+  vinculación después de que el comerciante le cerró la libreta, se manda el cierre en ese momento: del lado de
+  ClubPay habría nacido abierta. A los clientes sin vínculo aceptado no se les manda nada.
+- Si ClubPay no contesta, se reintenta (1, 5, 15 y 60 minutos, después cada 6 horas, durante unos dos días) y se
+  manda el estado del momento, no la secuencia de cambios. **Un 409 de slug se deja de reintentar** y queda
+  anotado para avisarles, como pidieron. **El 404 se reintenta**, porque es lo que contesta ClubPay mientras no
+  despliega estas rutas.
+
+**Orden de deploy:** da igual cuál va primero. Si NexoPOS deploya antes, los avisos esperan reintentando y
+salen solos cuando ClubPay despliega, siempre que sea dentro de los dos días; si no, hay que volver a marcarlos.

@@ -156,6 +156,20 @@ puede tener una clave por comercio**: por eso la autenticación es por capacidad
 - **Estado:** construido contra el simulador. Falta la prueba real con plata
   que exige ClubPay antes de abrirlo a comercios.
 
+### Tienda y libreta espejadas (CR-0003)
+- **Dirección:** NexoPOS → ClubPay
+- **Métodos:** `PUT /pos/storefront` (slug y si está publicada) y
+  `POST`/`DELETE /pos/accounts/{account_id}/libreta`.
+- **Contrato:** `respuesta-cr-0003-nexopos.md` de ClubPay.
+- **Reglas:** es estado, no eventos: tabla `clubpay_sync` con una fila por
+  cosa desactualizada, marcada en la misma transacción que el cambio, y el
+  envío lee el estado del momento (`modules/clubpay-sync.ts`). Desde nuestro
+  primer `PUT`, ClubPay ignora el slug que le mande NexoB2B para ese comercio.
+  Sin slug elegido no se manda nada. Un 409 de slug es un dato viejo de ClubPay:
+  queda en `clubpay_sync.ultimo_error` y hay que avisarles.
+- **Estado:** construido y probado contra un ClubPay falso. ClubPay tiene las
+  rutas hechas, sin desplegar al 13/10.
+
 ### Emparejar dos pantallas — **pendiente de ClubPay**
 - **Método esperado:** `POST /pos/tienda/emparejar`, `GET …/:request_id`
 - **Estado:** nuestra mitad construida; la de ellos no existe todavía
