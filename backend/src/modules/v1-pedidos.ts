@@ -46,7 +46,10 @@ const nuevoPedidoSchema = z.object({
   address: z.string().trim().max(300).optional(),
   paymentMethod: z.enum(["efectivo_entrega", "online", "cuenta_corriente"]),
   notes: z.string().trim().max(500).optional(),
-  /** Compra a la libreta. Esa cuenta se abrió en el mostrador, nunca acá. */
+  /**
+   * Quién compra, si entró con ClubPay (`CLI-<n>`). Obligatoria para comprar a
+   * la libreta; con las otras formas de pago va junto con `contact`.
+   */
   accountId: z.string().optional(),
   /**
    * El total que la pantalla le mostró al comprador al apretar el botón.
@@ -128,10 +131,13 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
     const body = nuevoPedidoSchema.parse(req.body);
     const commerceId = Number(body.storeId);
 
-    if (body.accountId && body.contact) {
-      throw new HttpError(400, "Un pedido va con cuenta corriente o con contacto, no con los dos.");
-    }
-    if (!body.accountId && !body.contact) {
+    /*
+     * Cuenta y contacto pueden venir juntos (CR-0003): una persona identificada
+     * en ClubPay paga en efectivo, y el comercio igual necesita su teléfono para
+     * avisarle, porque ClubPay no nos lo da. Sólo a la libreta alcanza con la
+     * cuenta, que el comercio abrió en el mostrador y ya tiene sus datos.
+     */
+    if (body.paymentMethod !== "cuenta_corriente" && !body.contact) {
       throw new HttpError(400, "Falta el nombre y el teléfono de quien compra.");
     }
     // Sin cuenta, un pedido a la libreta salía como venta "a cuenta" de nadie:
@@ -176,8 +182,8 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
       throw new HttpError(400, "Para el reparto hace falta la dirección.");
     }
 
-    // La cuenta corriente se abre en el mostrador: acá solo se usa una que ya
-    // existe, que no esté pausada y que tenga disponible.
+    // Con cualquier forma de pago, la cuenta tiene que ser de este comercio.
+    // A la libreta, además, tiene que tenerla abierta y no pausada.
     let customerId: number | null = null;
     if (body.accountId) {
       const { rows: cuentas } = await client.query(
@@ -186,7 +192,7 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
         [Number(body.accountId.replace(/^CLI-/, "")), commerceId]
       );
       const cuenta = cuentas[0];
-      if (!cuenta) throw new HttpError(404, "Esa cuenta corriente no existe en este comercio.");
+      if (!cuenta) throw new HttpError(404, "Esa cuenta no existe en este comercio.");
       if (body.paymentMethod === "cuenta_corriente") {
         // Una sesión de la tienda ya no quiere decir libreta: desde CR-0003 la
         // persona se puede identificar sin que el comercio le haya fiado nunca.

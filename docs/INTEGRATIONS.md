@@ -141,6 +141,12 @@ puede tener una clave por comercio**: por eso la autenticación es por capacidad
 - **Método:** `POST /pos/tienda/sessions` con el token que trae NexoTienda
 - **Regla:** va con la clave **del comercio**, y eso es lo que impide que un
   token emitido para un comercio abra la tienda de otro.
+- **Cuentas nacidas en la tienda (CR-0003):** llegan con `external_id: null`.
+  Se crea la ficha sin libreta y se le asigna el número con
+  `PUT /pos/accounts/{account_id}`; si falla, el próximo canje la encuentra por
+  la cuenta y reintenta. Sólo se reusa una ficha que nació en la tienda: una del
+  mostrador con esa cuenta es de una vinculación que la persona rechazó, y se
+  desasocia.
 
 ### Cobros con Mercado Pago (CR-0002)
 - **Dirección:** NexoPOS → ClubPay, y aviso ClubPay → NexoPOS

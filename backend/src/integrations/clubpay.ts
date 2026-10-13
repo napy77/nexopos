@@ -597,8 +597,14 @@ export async function espejarLibreta(apiKey: string, accountId: string, activa: 
 
 export interface SesionTienda {
   account_id: string;
-  external_id: string;
+  /**
+   * Nuestro `CLI-<n>`. Llega en null cuando la persona se identificó por
+   * primera vez desde la tienda (CR-0003): el número se lo damos nosotros.
+   */
+  external_id: string | null;
   persona?: string | null;
+  verification_level?: number;
+  email_verified?: boolean;
 }
 
 /**
@@ -618,12 +624,35 @@ export interface SesionTienda {
 export async function canjearTokenTienda(apiKey: string, token: string): Promise<SesionTienda> {
   if (isMockMode()) {
     // En demo, el token es el external_id: alcanza para probar el circuito
-    // entero sin ClubPay, y un token que no empieza con CLI- se rechaza.
+    // entero sin ClubPay. `TIENDA-<algo>` es alguien que se identificó por
+    // primera vez desde la tienda y llega sin número. Lo demás se rechaza.
+    if (token.startsWith("TIENDA-")) {
+      return { account_id: `acc_mock_${token}`, external_id: null, persona: "Compradora Nueva",
+               verification_level: 1, email_verified: true };
+    }
     if (!token.startsWith("CLI-")) throw new HttpError(401, "Token inválido o vencido");
     return { account_id: `acc_mock_${token}`, external_id: token, persona: "Germán Yovan" };
   }
   return saltoAClubPay("el token de entrada", () =>
     api<SesionTienda>("/pos/tienda/sessions", apiKey, { token }));
+}
+
+/**
+ * Le pone nuestro número de cliente a una cuenta que nació en la tienda.
+ *
+ * El mismo número otra vez contesta 200, así que se puede reintentar en cada
+ * canje hasta que entre. Otro número a una cuenta que ya tiene uno: 409, y no
+ * se cambia, porque movimientos y resúmenes se emparejan por él.
+ */
+export async function asignarNumeroCliente(
+  apiKey: string, accountId: string, externalId: string
+): Promise<void> {
+  if (isMockMode()) {
+    console.log(`[clubpay:mock] número ${externalId} → ${accountId}`);
+    return;
+  }
+  await api<unknown>(`/pos/accounts/${encodeURIComponent(accountId)}`, apiKey,
+    { external_id: externalId }, "PUT");
 }
 
 // ── Emparejar dos pantallas ─────────────────────────────────────────────────

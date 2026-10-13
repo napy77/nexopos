@@ -91,6 +91,11 @@ Estados (CHECK en la base): `recibido`, `aceptado`, `listo`, `en_camino`,
 `entregado`, `cancelado`.
 
 Pago: `efectivo_entrega`, `online`, `cuenta_corriente`.
+
+Quién compra (CR-0003): `accountId` (`CLI-<n>`) y `contact` ({ name, phone })
+**pueden ir juntos**. `contact` es obligatorio salvo con `cuenta_corriente`;
+`accountId` es obligatorio con `cuenta_corriente`. La cuenta tiene que ser del
+comercio del pedido, con cualquier forma de pago.
 Estado de pago: `no_aplica`, `pendiente`, `pagado`, `rechazado`.
 
 Eventos del webhook hacia NexoTienda: `order.aceptado`, `order.listo`,
@@ -115,6 +120,9 @@ GET  /v1/cuentas/:accountId?storeId=
 
 - **`storeId` es obligatorio en el canje.** Sin él no sabemos con qué clave de
   ClubPay preguntar.
+- **Una persona que entra por primera vez desde la tienda** (CR-0003) llega de
+  ClubPay sin número de cliente: el canje le crea la ficha **sin libreta**, le
+  pone su `CLI-<n>` en ClubPay y contesta igual que siempre.
 - **`linkedAt` es la única revocación que existe.** Se mueve cuando el vínculo
   cambia de estado o de cuenta, y **no** en una consulta de rutina. NexoTienda
   guarda el valor al abrir la sesión y lo compara contra el actual: si cambió,

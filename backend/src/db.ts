@@ -30,6 +30,10 @@ export async function runMigrations(): Promise<void> {
     if (applied.has(file)) continue;
     const sql = readFileSync(path.join(migrationsDir, file), "utf8");
     const client = await pool.connect();
+    // Lo que una migración avisa con RAISE WARNING —que no pudo hacer algo y
+    // siguió— tiene que llegar al log del arranque, o nadie se entera.
+    const avisar = (n: { message?: string }) => console.warn(`[db] ${file}: ${n.message}`);
+    client.on("notice", avisar);
     try {
       await client.query("BEGIN");
       await client.query(sql);
@@ -40,6 +44,7 @@ export async function runMigrations(): Promise<void> {
       await client.query("ROLLBACK");
       throw err;
     } finally {
+      client.off("notice", avisar);
       client.release();
     }
   }

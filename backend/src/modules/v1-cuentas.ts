@@ -4,8 +4,10 @@ import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { requiereClave } from "../middleware/api-key.js";
 import {
-  canjearTokenTienda, pedirEmparejamiento, estadoEmparejamiento,
+  canjearTokenTienda, pedirEmparejamiento, estadoEmparejamiento, asignarNumeroCliente,
+  type SesionTienda,
 } from "../integrations/clubpay.js";
+import { enTransaccion } from "./clubpay-sync.js";
 import { estadoCredito, cicloDe, vencimientoDe } from "./cuenta-corriente.js";
 import { hoy } from "../lib/fechas.js";
 
@@ -78,8 +80,11 @@ cuentasRouter.post("/cuentas/canjear", cuentas, async (req, res, next) => {
       throw new HttpError(409, "Este comercio todavía no tiene configurado ClubPay.");
     }
 
-    const sesion = await canjearTokenTienda(String(com.clubpay_api_key), body.token);
-    const customerId = idDeRef(sesion.external_id);
+    const apiKey = String(com.clubpay_api_key);
+    const sesion = await canjearTokenTienda(apiKey, body.token);
+    const customerId = sesion.external_id
+      ? idDeRef(sesion.external_id)
+      : await clienteNacidoEnLaTienda(commerceId, apiKey, sesion);
     if (!Number.isInteger(customerId)) throw new HttpError(502, "ClubPay devolvió una referencia que no entendemos");
 
     const { rows: [cliente] } = await pool.query(
@@ -118,6 +123,66 @@ cuentasRouter.post("/cuentas/canjear", cuentas, async (req, res, next) => {
     next(err);
   }
 });
+
+/**
+ * La persona se identificó por primera vez desde la tienda (CR-0003): ClubPay
+ * nos manda su cuenta sin número de cliente, y el número lo ponemos nosotros.
+ *
+ * Nace **sin libreta**. Identificarse con un correo no es que el comercio le
+ * fíe: eso lo decide el comerciante después, desde la ficha.
+ *
+ * Se busca primero por la cuenta de ClubPay, porque el `PUT` del número puede
+ * haber fallado en un canje anterior. Pero sólo se reusa una ficha que nació
+ * en la tienda. ClubPay reusa la misma cuenta cuando la persona rechazó una
+ * vinculación del mostrador —el DNI estaba mal tipeado y la ficha era de otro—,
+ * y esa ficha vieja tiene la deuda de otra persona: devolverla le abriría a
+ * alguien la libreta de un desconocido. Esa se desasocia y se crea una nueva.
+ */
+async function clienteNacidoEnLaTienda(
+  commerceId: number, apiKey: string, sesion: SesionTienda
+): Promise<number> {
+  const customerId = await enTransaccion(async (c) => {
+    // Dos canjes a la vez de la misma persona —doble toque, dos pestañas— no
+    // tienen que crear dos fichas.
+    await c.query("SELECT pg_advisory_xact_lock(hashtext($1))",
+      [`canje:${commerceId}:${sesion.account_id}`]);
+
+    const { rows: [previa] } = await c.query(
+      `SELECT id, origen FROM customers WHERE commerce_id = $1 AND clubpay_account_id = $2`,
+      [commerceId, sesion.account_id]
+    );
+    if (previa?.origen === "tienda") return Number(previa.id);
+    if (previa) {
+      await c.query(
+        `UPDATE customers SET clubpay_account_id = NULL, clubpay_linked_at = now() WHERE id = $1`,
+        [previa.id]
+      );
+      console.warn(`[clubpay] ${sesion.account_id} volvió sin número: CLI-${previa.id} deja de ser suyo`);
+    }
+
+    const { rows: [nuevo] } = await c.query(
+      `INSERT INTO customers (commerce_id, name, libreta_activa, origen,
+                              clubpay_status, clubpay_account_id, clubpay_linked_at, clubpay_checked_at)
+       VALUES ($1, $2, false, 'tienda', 'vinculada', $3, now(), now()) RETURNING id`,
+      [commerceId, sesion.persona?.trim() || "Cliente de la tienda", sesion.account_id]
+    );
+    return Number(nuevo.id);
+  });
+
+  /*
+   * El número va después de la transacción y su falla no corta el canje: la
+   * ficha ya existe acá, y el próximo canje la encuentra por la cuenta y
+   * vuelve a intentar. Mientras tanto ClubPay no tiene con qué emparejar
+   * movimientos, pero una ficha sin libreta no tiene movimientos que mandar.
+   */
+  try {
+    await asignarNumeroCliente(apiKey, sesion.account_id, refDeCliente(customerId));
+  } catch (err) {
+    console.warn(`[clubpay] no se pudo asignar CLI-${customerId} a ${sesion.account_id}:`,
+      err instanceof Error ? err.message : err);
+  }
+  return customerId;
+}
 
 // ── El estado, que se pregunta en cada operación ────────────────────────────
 

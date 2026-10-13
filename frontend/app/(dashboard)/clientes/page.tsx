@@ -369,6 +369,19 @@ function ClubPayVinculo({
     }
   }
 
+  // Entró desde la tienda: el vínculo lo hizo la persona en ClubPay, sin DNI.
+  // No hay nada que proponer ni que volver a preguntar.
+  if (cliente.origen === "tienda") {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "4px 0 12px", flexWrap: "wrap" }}>
+        <span className="badge ok">Entró con ClubPay</span>
+        <span className="muted" style={{ fontSize: 12 }}>
+          Se identificó en la tienda online con su cuenta de ClubPay.
+        </span>
+      </div>
+    );
+  }
+
   if (!cliente.doc_number) {
     return (
       <p className="muted" style={{ fontSize: 13, margin: "4px 0 12px" }}>
@@ -441,9 +454,7 @@ function Libreta({
       <span className="muted" style={{ fontSize: 12 }}>
         {activa
           ? "Puede comprar a cuenta. Cerrarla no borra lo que debe."
-          : cliente.origen === "tienda"
-            ? "Se identificó en la tienda online. Puede comprar, pero no a cuenta."
-            : "No puede comprar a cuenta."}
+          : "No puede comprar a cuenta."}
       </span>
       <button type="button" className="ghost" onClick={cambiar} disabled={guardando}>
         {guardando ? "Guardando…" : activa ? "Cerrar libreta" : "Abrir libreta"}
