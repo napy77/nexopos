@@ -53,7 +53,7 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 | **QR de vinculación en el mostrador** | Pedido escrito (`PEDIDO-QR-VINCULACION-A-CLUBPAY.md`). Sin respuesta. | ClubPay |
 | **Resúmenes hacia ClubPay** | Retenidos por `CLUBPAY_STATEMENTS` (default apagado): sin la adjudicación de movimientos del lado de ClubPay, la compra se contaría dos veces. | ClubPay |
 | **Cobro con Mercado Pago** (mostrador y tienda) | En producción de los tres lados. NexoTienda lo probó de punta a punta contra nuestro simulador (11/10) sin observaciones. **Falta la prueba real con plata** con ClubPay —mostrador, tienda, devolución y dos QR de mostrador a la vez (si se pisan, mandar `terminal` en el `POST`)— y definir la comisión antes de abrirlo. | German (comercio de prueba, horario, comisión) |
-| **CR-0003 identidad en pedidos de la tienda** | Respuesta y agregado en `respuesta-cr-0003-identidad.md`. **Hecho:** `libreta_activa` (sin libreta no se fía en el mostrador ni en la tienda), interruptor `identity_rules_enabled` (apagado, sin uso), y el slug y la libreta espejados en ClubPay (`clubpay_sync`), en producción desde el 13/10. ClubPay confirmó una relación por persona y comercio. **Bloque A (en producción desde el 13/10):** cuenta + contacto juntos en los pedidos y canje de cuentas nacidas en la tienda. NexoTienda ya manda los dos juntos. **Sigue:** bloque B (reglas, `orderRules`, rechazos con `code`, bloqueo, límite y pausa en la ficha), que espera la decisión de German sobre los topes; después el C (`review`). | NexoPOS, German |
+| **CR-0003 identidad en pedidos de la tienda** | Respuesta y agregado en `respuesta-cr-0003-identidad.md`. **Hecho:** `libreta_activa` (sin libreta no se fía en el mostrador ni en la tienda), interruptor `identity_rules_enabled` (apagado, sin uso), y el slug y la libreta espejados en ClubPay (`clubpay_sync`), en producción desde el 13/10. ClubPay confirmó una relación por persona y comercio. **Bloque A (en producción desde el 13/10):** cuenta + contacto juntos en los pedidos y canje de cuentas nacidas en la tienda. NexoTienda ya manda los dos juntos. **Bloque B (sin deployar):** reglas por comercio en Configuración → Tienda con los topes de ejemplo que aprobó German el 13/10, `orderRules`, rechazos con `code`, `review` y marca en Pedidos, bloqueo, límite y pausa del fiado en la ficha. **Sigue:** probarlo de punta a punta con NexoTienda en un comercio de prueba, cuando ClubPay tenga la web de alta. | NexoPOS, NexoTienda, ClubPay |
 | **Resúmenes en la tienda** | Esperando la decisión de German. Recomendación escrita: que **no** vayan (ver `RESPUESTA-3-LIBRETA-A-NEXOTIENDA.md`). | German |
 
 ## Pendiente, sin empezar
@@ -107,8 +107,8 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 ## Migraciones
 
-**45 aplicadas, en local y en producción.** Corren solas al arrancar el
-backend. Si `045_cuenta_clubpay_unica.sql` encuentra cuentas de ClubPay
+**46 aplicadas en local, 45 en producción.** Corren solas al arrancar el
+backend. `046_reglas_pedidos.sql` se aplica con el próximo deploy. Si `045_cuenta_clubpay_unica.sql` encuentra cuentas de ClubPay
 repetidas no crea el índice y lo avisa en el log del arranque.
 
 ## Desarrollo local

@@ -634,6 +634,8 @@ export default function ConfiguracionPage() {
           )}
         </div>
 
+        <ReglasPedidos onError={setError} />
+
         <ClavesApi onError={setError} />
 
         <StockB2B onError={setError} />
@@ -1040,6 +1042,162 @@ function ClavesApi({ onError }: { onError: (m: string) => void }) {
  * La tarjeta no aparece si no hay catálogo propio importado: ofrecer un
  * interruptor que no puede hacer nada es peor que no ofrecerlo.
  */
+interface ReglaNivel {
+  level: number; pickupCash: boolean; deliveryCash: boolean;
+  maxTotal: number | null; maxItems: number | null;
+}
+interface Reglas {
+  enabled: boolean; levels: ReglaNivel[];
+  reviewThreshold: number; deliveryCashRequiresPickups: number;
+}
+
+const NIVEL_TEXTO = [
+  "Sin cuenta de ClubPay",
+  "Con correo verificado",
+  "Con celular verificado (próximamente)",
+  "Con DNI verificado (próximamente)",
+];
+
+/**
+ * Qué pide el comercio para tomar pedidos que se pagan en mano (CR-0003).
+ *
+ * Un correo verificado prueba que alguien tiene una casilla, no quién es: lo
+ * que protege de un pedido falso de cincuenta productos son los topes, y mirar
+ * antes de armar el primer pedido grande de alguien nuevo. Los valores vienen
+ * cargados con un ejemplo y el comerciante los ajusta.
+ */
+function ReglasPedidos({ onError }: { onError: (m: string) => void }) {
+  const [reglas, setReglas] = useState<Reglas | null>(null);
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    api<Reglas>("/api/reglas-pedidos").then(setReglas).catch(() => setReglas(null));
+  }, []);
+
+  async function guardar(cambio: Partial<Reglas> & { restaurar?: boolean }) {
+    setGuardando(true);
+    onError("");
+    try {
+      setReglas(await api<Reglas>("/api/reglas-pedidos", { method: "PUT", body: JSON.stringify(cambio) }));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  function cambiarNivel(n: ReglaNivel, cambio: Partial<ReglaNivel>) {
+    guardar({ levels: [{ ...n, ...cambio }] });
+  }
+
+  /** Vacío es "sin tope": lo que se lee en la pantalla, se guarda */
+  const numero = (v: string): number | null => (v.trim() === "" ? null : Number(v));
+
+  if (!reglas) return null;
+
+  return (
+    <div className="card" style={{ minWidth: 340 }}>
+      <h2>Pedidos que se pagan en mano</h2>
+      <p className="muted" style={{ fontSize: 12 }}>
+        Para los pedidos de la tienda que se pagan al retirar o al recibir. Con Mercado Pago
+        se paga antes de que armes nada, así que esto no lo toca.
+      </p>
+
+      <Switch label="Pedir que se identifiquen con ClubPay"
+        ayuda={reglas.enabled
+          ? "Quien no cumple lo de abajo no puede elegir pagar en mano: la tienda le pide identificarse o pagar de otra forma."
+          : "Apagado: cualquiera puede pedir y pagar en mano, como hasta ahora."}
+        on={reglas.enabled} disabled={guardando}
+        set={(v) => guardar({ enabled: v })} />
+
+      {reglas.enabled && (
+        <>
+          {/*
+            Un bloque por nivel y no una tabla: la tarjeta es angosta y cinco
+            columnas no entran sin esconder la última detrás de un scroll.
+          */}
+          {reglas.levels.map((n) => {
+            const habilitado = n.pickupCash || n.deliveryCash;
+            return (
+              // El key con los valores hace que los campos se refresquen al
+              // restaurar el ejemplo: son inputs sin controlar.
+              <div key={`${n.level}-${n.maxTotal}-${n.maxItems}`}
+                style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
+                <strong style={{ fontSize: 13 }}>{NIVEL_TEXTO[n.level]}</strong>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 12, marginTop: 4 }}>
+                  <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <input type="checkbox" checked={n.pickupCash} disabled={guardando}
+                      onChange={(ev) => cambiarNivel(n, { pickupCash: ev.target.checked })} />
+                    paga al retirar
+                  </label>
+                  <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <input type="checkbox" checked={n.deliveryCash} disabled={guardando}
+                      onChange={(ev) => cambiarNivel(n, { deliveryCash: ev.target.checked })} />
+                    paga al recibir
+                  </label>
+                </div>
+                {habilitado && (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 12, marginTop: 4 }}>
+                    <span>hasta $</span>
+                    <input type="number" min="1" defaultValue={n.maxTotal ?? ""} placeholder="sin tope"
+                      style={{ width: 100 }}
+                      onBlur={(ev) => {
+                        const v = numero(ev.target.value);
+                        if (v !== n.maxTotal) cambiarNivel(n, { maxTotal: v });
+                      }} />
+                    <span>y hasta</span>
+                    <input type="number" min="1" defaultValue={n.maxItems ?? ""} placeholder="sin tope"
+                      style={{ width: 80 }}
+                      onBlur={(ev) => {
+                        const v = numero(ev.target.value);
+                        if (v !== n.maxItems) cambiarNivel(n, { maxItems: v });
+                      }} />
+                    <span>productos distintos</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <div key={`${reglas.reviewThreshold}-${reglas.deliveryCashRequiresPickups}`}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", margin: "8px 0 2px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12 }}>Avisarme antes de armar el primer pedido de alguien nuevo si pasa de $</span>
+              <input type="number" min="0" defaultValue={reglas.reviewThreshold} style={{ width: 90 }}
+                onBlur={(ev) => {
+                  const v = Number(ev.target.value);
+                  if (ev.target.value !== "" && v !== reglas.reviewThreshold) guardar({ reviewThreshold: v });
+                }} />
+            </div>
+            <p className="muted" style={{ fontSize: 11, margin: "0 0 8px" }}>
+              Ese pedido te aparece marcado para que lo mires antes de aceptarlo.
+            </p>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12 }}>Para pagar al recibir el reparto, antes tiene que haber retirado</span>
+              <input type="number" min="0" max="20" defaultValue={reglas.deliveryCashRequiresPickups}
+                style={{ width: 50 }}
+                onBlur={(ev) => {
+                  const v = Number(ev.target.value);
+                  if (ev.target.value !== "" && v !== reglas.deliveryCashRequiresPickups) {
+                    guardar({ deliveryCashRequiresPickups: v });
+                  }
+                }} />
+              <span style={{ fontSize: 12 }}>pedido(s) en el local</span>
+            </div>
+            <p className="muted" style={{ fontSize: 11, margin: "2px 0 8px" }}>
+              Así el primer contacto es cara a cara. A tus clientes del mostrador esto no les aplica.
+            </p>
+          </div>
+
+          <button type="button" className="ghost" disabled={guardando}
+            onClick={() => guardar({ restaurar: true })}>
+            Volver a los valores de ejemplo
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function StockB2B({ onError }: { onError: (m: string) => void }) {
   const [estado, setEstado] = useState<{
     activo: boolean; productosPropios: number;

@@ -263,7 +263,8 @@ customersRouter.get("/:id/transactions", async (req, res, next) => {
     // desaparece de la ficha.
     const { rows: customers } = await pool.query(
       `SELECT id, name, doc_number, phone, email, balance,
-              clubpay_status, clubpay_checked_at, libreta_activa, origen
+              clubpay_status, clubpay_checked_at, libreta_activa, origen,
+              tienda_bloqueada, bloqueo_motivo
        FROM customers WHERE id = $1 AND commerce_id = $2`,
       [Number(req.params.id), req.auth.commerceId]
     );
@@ -366,6 +367,10 @@ const creditoSchema = z.object({
    * sólo deja de aceptar compras nuevas a cuenta.
    */
   libretaActiva: z.boolean().optional(),
+  /** No tomarle pedidos de la tienda online. Sólo en este comercio. */
+  tiendaBloqueada: z.boolean().optional(),
+  /** Para el comerciante; el comprador no lo ve. */
+  bloqueoMotivo: z.string().trim().max(200).nullable().optional(),
 });
 
 /**
@@ -384,10 +389,13 @@ customersRouter.put("/:id/credito", async (req, res, next) => {
       `UPDATE customers SET
          credit_limit = CASE WHEN $3::boolean THEN $4 ELSE credit_limit END,
          credit_paused = COALESCE($5, credit_paused),
-         libreta_activa = COALESCE($6::boolean, libreta_activa)
+         libreta_activa = COALESCE($6::boolean, libreta_activa),
+         tienda_bloqueada = COALESCE($7::boolean, tienda_bloqueada),
+         bloqueo_motivo = CASE WHEN $8::boolean THEN $9 ELSE bloqueo_motivo END
        WHERE id = $1 AND commerce_id = $2`,
       [id, req.auth.commerceId, body.creditLimit !== undefined,
-       body.creditLimit ?? null, body.creditPaused ?? null, body.libretaActiva ?? null]
+       body.creditLimit ?? null, body.creditPaused ?? null, body.libretaActiva ?? null,
+       body.tiendaBloqueada ?? null, body.bloqueoMotivo !== undefined, body.bloqueoMotivo ?? null]
       );
       // La libreta se espeja en la app de ClubPay; el límite y la pausa no.
       if (r.rowCount && body.libretaActiva !== undefined) {
@@ -397,7 +405,13 @@ customersRouter.put("/:id/credito", async (req, res, next) => {
     });
     if (rowCount === 0) throw new HttpError(404, "Cliente no encontrado");
     await audit(req.auth.commerceId, "customer.credito", "customers", id, body);
-    res.json(await estadoCredito(pool, req.auth.commerceId, id));
+    const { rows: [b] } = await pool.query(
+      "SELECT tienda_bloqueada, bloqueo_motivo FROM customers WHERE id = $1", [id]
+    );
+    res.json({
+      ...(await estadoCredito(pool, req.auth.commerceId, id)),
+      tiendaBloqueada: b.tienda_bloqueada, bloqueoMotivo: b.bloqueo_motivo,
+    });
   } catch (err) {
     next(err);
   }

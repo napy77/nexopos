@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { reglasDe, orderRulesPublico } from "./reglas-pedidos.js";
 import { disponibilidadMP } from "./mercadopago.js";
 import { isMockMode } from "../integrations/clubpay.js";
 import { pool } from "../db.js";
@@ -166,6 +167,12 @@ async function armarStore(fila: Record<string, unknown>) {
     acceptsMercadoPago: Boolean(fila.clubpay_pay_enabled) && (Boolean(fila.clubpay_api_key) || isMockMode())
       ? (await disponibilidadMP(Number(id))).tienda : false,
     allowsCredit: Boolean(fila.online_credit_enabled),
+    /**
+     * Qué pide este comercio para pagar en mano (CR-0003). La tienda mira el
+     * nivel 0 para decidir si pide identificarse; los topes los hace cumplir
+     * el rechazo de POST /v1/orders, no esto, que puede estar un rato viejo.
+     */
+    orderRules: orderRulesPublico(await reglasDe(Number(id))),
     /*
      * Si false, los productos sin stock NO vienen en la lista: los filtramos
      * acá. Va igual en la respuesta para que la tienda sepa por qué no están,

@@ -9,7 +9,10 @@ interface Customer {
   clubpay_status?: string | null;
   libreta_activa?: boolean;
   origen?: "mostrador" | "tienda";
+  tienda_bloqueada?: boolean;
+  bloqueo_motivo?: string | null;
 }
+interface Credito { limite: number | null; pausado: boolean; saldo: number; disponible: number | null }
 interface Tx { id: number; type: string; amount: string; note: string | null; created_at: string }
 
 interface FichaDup {
@@ -64,6 +67,7 @@ export default function ClientesPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selected, setSelected] = useState<Customer | null>(null);
   const [txs, setTxs] = useState<Tx[]>([]);
+  const [credito, setCredito] = useState<Credito | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [duplicados, setDuplicados] = useState<GrupoDuplicado[]>([]);
   const [verDuplicados, setVerDuplicados] = useState(false);
@@ -92,11 +96,12 @@ export default function ClientesPage() {
   async function select(c: Customer) {
     setSelected(c);
     setEditando(false);
-    const data = await api<{ customer: Customer; transactions: Tx[] }>(
+    const data = await api<{ customer: Customer; transactions: Tx[]; credito: Credito }>(
       `/api/customers/${c.id}/transactions`
     );
     setSelected(data.customer);
     setTxs(data.transactions);
+    setCredito(data.credito);
   }
 
   async function createCustomer(form: FormData) {
@@ -300,6 +305,11 @@ export default function ClientesPage() {
             }} />
             <Libreta cliente={selected} onCambio={(activa) =>
               setSelected({ ...selected, libreta_activa: activa })} />
+            {selected.libreta_activa && credito && (
+              <LimiteYPausa key={`limite-${selected.id}`} clienteId={selected.id} credito={credito} onCambio={setCredito} />
+            )}
+            <BloqueoTienda key={`bloqueo-${selected.id}`} cliente={selected} onCambio={(bloqueada, motivo) =>
+              setSelected({ ...selected, tienda_bloqueada: bloqueada, bloqueo_motivo: motivo })} />
             <form action={registerPayment} className="toolbar">
               <input name="amount" type="number" step="0.01" min="0.01" placeholder="Monto del pago" required style={{ width: 140 }} />
               <select name="paymentMethod" defaultValue="cash" title="Con qué pagó (importa para el arqueo de caja)">
@@ -459,6 +469,104 @@ function Libreta({
       <button type="button" className="ghost" onClick={cambiar} disabled={guardando}>
         {guardando ? "Guardando…" : activa ? "Cerrar libreta" : "Abrir libreta"}
       </button>
+      {error && <span style={{ color: "var(--danger)", fontSize: 12 }}>{error}</span>}
+    </div>
+  );
+}
+
+/**
+ * Hasta cuánto fiarle y si por ahora no.
+ *
+ * Sin límite es el default, porque así funciona el cuaderno. Desde que se
+ * puede fiar por la tienda (CR-0003), un límite es lo único que frena una
+ * compra grande a la libreta que el comerciante no está viendo.
+ */
+function LimiteYPausa({ clienteId, credito, onCambio }: {
+  clienteId: number; credito: Credito; onCambio: (c: Credito) => void;
+}) {
+  const [error, setError] = useState("");
+
+  async function guardar(cambio: { creditLimit?: number | null; creditPaused?: boolean }) {
+    setError("");
+    try {
+      onCambio(await api<Credito>(`/api/customers/${clienteId}/credito`, {
+        method: "PUT", body: JSON.stringify(cambio),
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    }
+  }
+
+  return (
+    <div key={`${credito.limite}`}
+      style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 12px", flexWrap: "wrap" }}>
+      <span style={{ fontSize: 13 }}>Fiarle hasta $</span>
+      <input type="number" min="0" defaultValue={credito.limite ?? ""} placeholder="sin límite"
+        style={{ width: 100 }}
+        onBlur={(ev) => {
+          const v = ev.target.value.trim() === "" ? null : Number(ev.target.value);
+          if (v !== credito.limite) guardar({ creditLimit: v });
+        }} />
+      {credito.disponible !== null && (
+        <span className="muted" style={{ fontSize: 12 }}>Le quedan {money(credito.disponible)}</span>
+      )}
+      <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+        <input type="checkbox" checked={credito.pausado}
+          onChange={(ev) => guardar({ creditPaused: ev.target.checked })} />
+        Pausar el fiado por ahora
+      </label>
+      {error && <span style={{ color: "var(--danger)", fontSize: 12 }}>{error}</span>}
+    </div>
+  );
+}
+
+/**
+ * No tomarle pedidos de la tienda online. Sólo en este comercio: no hay lista
+ * compartida entre comercios, a propósito. El comprador ve un mensaje neutro,
+ * no que lo bloquearon, y el motivo queda para el comerciante.
+ */
+function BloqueoTienda({ cliente, onCambio }: {
+  cliente: Customer; onCambio: (bloqueada: boolean, motivo: string | null) => void;
+}) {
+  const [motivo, setMotivo] = useState(cliente.bloqueo_motivo ?? "");
+  const [error, setError] = useState("");
+  const bloqueada = Boolean(cliente.tienda_bloqueada);
+
+  async function cambiar(nuevo: boolean) {
+    setError("");
+    try {
+      const r = await api<{ tiendaBloqueada: boolean; bloqueoMotivo: string | null }>(
+        `/api/customers/${cliente.id}/credito`,
+        { method: "PUT", body: JSON.stringify({ tiendaBloqueada: nuevo, bloqueoMotivo: motivo.trim() || null }) }
+      );
+      onCambio(r.tiendaBloqueada, r.bloqueoMotivo);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    }
+  }
+
+  // Sólo tiene sentido para quien puede pedir por la tienda con su cuenta
+  if (cliente.origen !== "tienda" && !bloqueada) return null;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 12px", flexWrap: "wrap" }}>
+      {bloqueada ? (
+        <>
+          <span className="badge warn">No le tomás pedidos online</span>
+          {cliente.bloqueo_motivo && (
+            <span className="muted" style={{ fontSize: 12 }}>{cliente.bloqueo_motivo}</span>
+          )}
+          <button type="button" className="ghost" onClick={() => cambiar(false)}>Volver a tomarle pedidos</button>
+        </>
+      ) : (
+        <>
+          <input value={motivo} onChange={(ev) => setMotivo(ev.target.value)}
+            placeholder="Motivo, solo para vos (opcional)" style={{ width: 220 }} />
+          <button type="button" className="ghost" onClick={() => cambiar(true)}>
+            No tomarle más pedidos online
+          </button>
+        </>
+      )}
       {error && <span style={{ color: "var(--danger)", fontSize: 12 }}>{error}</span>}
     </div>
   );

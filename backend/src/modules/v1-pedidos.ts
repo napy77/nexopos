@@ -8,6 +8,7 @@ import { disponibilidadDe } from "./disponibilidad.js";
 import { PRECIO_EFECTIVO } from "./campanas-precio.js";
 import { disponibilidadMP, aplicarCobro } from "./mercadopago.js";
 import { crearCobroMP, cancelarCobroMP } from "../integrations/clubpay-cobros.js";
+import { reglasDe, identidadDe, evaluarPedido, type Cuenta } from "./reglas-pedidos.js";
 
 /**
  * Los pedidos de la tienda online.
@@ -115,6 +116,12 @@ export async function armarOrder(orderId: number, db: { query: typeof pool.query
     readyEstimate: o.ready_estimate ?? undefined,
     cancelReason: o.cancel_reason ?? undefined,
     cancelledBy: o.cancelled_by ?? undefined,
+    /**
+     * El comerciante lo tiene que mirar antes de aceptarlo (CR-0003). La tienda
+     * dice "va a confirmar tu pedido" y no muestra el motivo. Sólo mientras no
+     * lo aceptó: después ya lo miró.
+     */
+    ...(o.review_reason && o.status === "recibido" ? { review: { reason: o.review_reason } } : {}),
   };
 }
 
@@ -148,7 +155,7 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
 
     const { rows: comercios } = await client.query(
       `SELECT id, nexotienda_enabled, pay_on_delivery_enabled, transfer_enabled,
-              clubpay_pay_enabled, online_credit_enabled
+              clubpay_pay_enabled, online_credit_enabled, clubpay_api_key
          FROM commerces WHERE id = $1`,
       [commerceId]
     );
@@ -185,14 +192,24 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
     // Con cualquier forma de pago, la cuenta tiene que ser de este comercio.
     // A la libreta, además, tiene que tenerla abierta y no pausada.
     let customerId: number | null = null;
+    let cuentaPedido: Cuenta | null = null;
     if (body.accountId) {
       const { rows: cuentas } = await client.query(
-        `SELECT id, balance, credit_limit, credit_paused, libreta_activa FROM customers
+        `SELECT id, balance, credit_limit, credit_paused, libreta_activa,
+                origen, clubpay_account_id, tienda_bloqueada FROM customers
           WHERE id = $1 AND commerce_id = $2`,
         [Number(body.accountId.replace(/^CLI-/, "")), commerceId]
       );
       const cuenta = cuentas[0];
       if (!cuenta) throw new HttpError(404, "Esa cuenta no existe en este comercio.");
+      // Con cualquier forma de pago y con las reglas prendidas o no: bloquear
+      // es una decisión del comerciante sobre esta persona. El texto no le
+      // cuenta que la bloquearon.
+      if (cuenta.tienda_bloqueada) {
+        throw new HttpError(409,
+          "Este comercio no está tomando pedidos online de esta cuenta. Comunicate con el comercio.",
+          "cuenta_bloqueada");
+      }
       if (body.paymentMethod === "cuenta_corriente") {
         // Una sesión de la tienda ya no quiere decir libreta: desde CR-0003 la
         // persona se puede identificar sin que el comercio le haya fiado nunca.
@@ -206,7 +223,23 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
         }
       }
       customerId = Number(cuenta.id);
+      cuentaPedido = {
+        id: customerId, origen: cuenta.origen, clubpayAccountId: cuenta.clubpay_account_id,
+      };
     }
+
+    /*
+     * Las reglas de identidad, sólo para el efectivo y sólo si el comerciante
+     * las prendió. El nivel se le pregunta a ClubPay acá, antes de abrir la
+     * transacción: no tiene sentido tener filas tomadas esperando la red.
+     */
+    const reglas = await reglasDe(commerceId, client);
+    const aplicanReglas = reglas.enabled && body.paymentMethod === "efectivo_entrega";
+    const identidad = aplicanReglas
+      ? await identidadDe(comercio.clubpay_api_key ?? null, cuentaPedido)
+      : { level: null, sinRespuesta: false };
+    const ofreceMP = aplicanReglas && Boolean(comercio.clubpay_pay_enabled)
+      && (await disponibilidadMP(commerceId)).tienda;
 
     await client.query("BEGIN");
 
@@ -250,6 +283,15 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
     const fee = slot.kind === "reparto" ? Number(slot.fee) : 0;
     const total = Math.round((subtotal + fee) * 100) / 100;
 
+    // Con el total ya calculado por nosotros, no con el que vio la tienda.
+    const { review } = aplicanReglas
+      ? await evaluarPedido(client, {
+          reglas, commerceId, cuenta: cuentaPedido, identidad,
+          slotKind: slot.kind, total, renglones: lineas.length,
+          ofreceMP,
+        })
+      : { review: null };
+
     // El cobro online todavía no está: un pedido que dice "pendiente" sin
     // forma de cobrarlo sería una promesa vacía.
     const paymentStatus = body.paymentMethod === "online" ? "pendiente" : "no_aplica";
@@ -257,12 +299,14 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
     const { rows: [orden] } = await client.query(
       `INSERT INTO orders (commerce_id, code, customer_id, contact_name, contact_phone,
                            slot_id, slot_label, slot_kind, address, notes,
-                           payment_method, payment_status, subtotal, fee, total)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+                           payment_method, payment_status, subtotal, fee, total,
+                           verification_level, review_reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
       [commerceId, nuevoCodigo(), customerId,
        body.contact?.name ?? null, body.contact?.phone ?? null,
        slot.id, slot.label, slot.kind, body.address ?? null, body.notes ?? null,
-       body.paymentMethod, paymentStatus, subtotal, fee, total]
+       body.paymentMethod, paymentStatus, subtotal, fee, total,
+       identidad.level, review]
     );
     for (const l of lineas) {
       await client.query(

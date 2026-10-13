@@ -96,6 +96,16 @@ Quién compra (CR-0003): `accountId` (`CLI-<n>`) y `contact` ({ name, phone })
 **pueden ir juntos**. `contact` es obligatorio salvo con `cuenta_corriente`;
 `accountId` es obligatorio con `cuenta_corriente`. La cuenta tiene que ser del
 comercio del pedido, con cualquier forma de pago.
+
+**Reglas de identidad (CR-0003).** Si el comercio las prendió, un pedido con
+`efectivo_entrega` se evalúa con el nivel de verificación que **NexoPOS le
+pregunta a ClubPay** en ese momento (la tienda no lo manda). Mercado Pago y la
+libreta no pasan por estas reglas. Quien el comerciante dio de alta en el
+mostrador cuenta como nivel 3 y no tiene revisión ni requisito de retiros.
+`GET /v1/stores/:slug` y `/v1/hosts/:sub` publican `orderRules`
+(`{ enabled: false }` si están apagadas). El pedido trae
+`review: { reason }` mientras está `recibido` y el comerciante tiene que
+mirarlo antes de aceptar.
 Estado de pago: `no_aplica`, `pendiente`, `pagado`, `rechazado`.
 
 Eventos del webhook hacia NexoTienda: `order.aceptado`, `order.listo`,
@@ -196,6 +206,12 @@ estable: **el texto se puede reescribir, el `code` no**. Hoy en `/v1/orders`:
 | `pago_lo_confirma_mercadopago` | `/payment` sobre un pedido `online` |
 | `falta_cuenta` | 400: `cuenta_corriente` sin `accountId` |
 | `libreta_no_activa` | `cuenta_corriente` con una cuenta que no tiene libreta |
+| `cuenta_bloqueada` | el comercio bloqueó esa cuenta en su tienda (cualquier forma de pago) |
+| `requiere_cuenta` | pago en mano sin `accountId`; trae `requiredLevel` |
+| `nivel_insuficiente` | la cuenta no llega al nivel; trae `requiredLevel` y `currentLevel` (sin datos si ningún nivel lo permite) |
+| `excede_tope_productos` | más renglones que el tope del nivel; trae `maxItems` |
+| `excede_tope_monto` | total sobre el tope del nivel; trae `maxTotalCents` |
+| `reparto_requiere_historial` | pago al recibir sin retiros previos entregados; trae `requiredPickups` |
 
 ## 11. Cómo se rompe un contrato sin romperlo
 

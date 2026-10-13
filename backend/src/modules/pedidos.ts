@@ -48,6 +48,7 @@ pedidosPosRouter.get("/", async (req, res, next) => {
       `SELECT o.id, o.code, o.status, o.total, o.slot_label, o.slot_kind, o.address,
               o.payment_method, o.payment_status, o.ready_estimate, o.notes,
               o.contact_name, o.contact_phone, o.created_at, o.cancel_reason,
+              o.review_reason, o.verification_level, c.origen AS customer_origen,
               c.name AS customer_name,
               (SELECT json_agg(json_build_object('name', l.name, 'quantity', l.quantity,
                                                  'unitPrice', l.unit_price) ORDER BY l.id)

@@ -162,6 +162,14 @@ puede tener una clave por comercio**: por eso la autenticación es por capacidad
 - **Estado:** construido contra el simulador. Falta la prueba real con plata
   que exige ClubPay antes de abrirlo a comercios.
 
+### Nivel de verificación al recibir un pedido (CR-0003)
+- **Dirección:** NexoPOS → ClubPay
+- **Método:** `GET /pos/accounts/{account_id}`, sólo para pedidos en efectivo de
+  comercios con las reglas prendidas, antes de abrir la transacción del pedido.
+- **Reglas:** 404 = cuenta desvinculada = nivel 0. Sin respuesta: el pedido
+  entra con nivel 1 y marcado `identidad_no_disponible` para que el comerciante
+  lo mire; perder la venta por la red es peor.
+
 ### Tienda y libreta espejadas (CR-0003)
 - **Dirección:** NexoPOS → ClubPay
 - **Métodos:** `PUT /pos/storefront` (slug y si está publicada) y

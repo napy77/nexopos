@@ -8,7 +8,16 @@ export class HttpError extends Error {
    * quien decide algo leyendo el texto se rompe sin aviso el día que lo
    * mejoramos.
    */
-  constructor(public status: number, message: string, public code?: string) {
+  constructor(
+    public status: number,
+    message: string,
+    public code?: string,
+    /**
+     * Datos al lado del `code` para que el otro sistema arme su propio texto
+     * —un tope, un nivel—. Se suman al JSON tal cual.
+     */
+    public extra?: Record<string, unknown>
+  ) {
     super(message);
   }
 }
@@ -20,7 +29,9 @@ export function errorHandler(
   _next: NextFunction
 ): void {
   if (err instanceof HttpError) {
-    res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+    res.status(err.status).json({
+      error: err.message, ...(err.code ? { code: err.code } : {}), ...(err.extra ?? {}),
+    });
     return;
   }
   if (err instanceof ZodError) {

@@ -637,6 +637,29 @@ export async function canjearTokenTienda(apiKey: string, token: string): Promise
     api<SesionTienda>("/pos/tienda/sessions", apiKey, { token }));
 }
 
+export interface CuentaClubPay {
+  account_id: string;
+  external_id: string | null;
+  status: string;
+  verification_level: number;
+  email_verified?: boolean;
+  libreta_activa?: boolean;
+}
+
+/**
+ * El nivel de verificación de una cuenta, en el momento del pedido: la persona
+ * pudo haber verificado el correo después de entrar. 404 si la cuenta ya no
+ * está vinculada o no es de este comercio.
+ */
+export async function consultarCuenta(apiKey: string, accountId: string): Promise<CuentaClubPay> {
+  if (isMockMode()) {
+    // En demo: una cuenta cuyo id termina en -N0 es de nivel 0; el resto, 1.
+    return { account_id: accountId, external_id: null, status: "vinculada",
+             verification_level: accountId.endsWith("-N0") ? 0 : 1, email_verified: true };
+  }
+  return apiGet<CuentaClubPay>(`/pos/accounts/${encodeURIComponent(accountId)}`, apiKey);
+}
+
 /**
  * Le pone nuestro número de cliente a una cuenta que nació en la tienda.
  *

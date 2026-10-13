@@ -57,3 +57,38 @@ Pueden **sacar el reintento sin `accountId`** que dejaron de transición. De ac�
 pedido con los dos sería un error de verdad y conviene que lo vean, no que lo esconda el reintento.
 
 Sigue lo mismo: las reglas (esperan la decisión de German sobre los topes) y después `review`.
+
+---
+
+## Agregado, 13 de octubre: las reglas y `review` (sus puntos 1, 2 y 4)
+
+Hecho y probado en local, **sin deployar todavía**; les avisamos cuando esté en producción.
+
+**`orderRules`** en `GET /v1/stores/:slug` y en `GET /v1/hosts/:sub`, con la forma que confirmaron. Apagado va
+`{ "enabled": false }`. Arranca apagado en todos los comercios: lo prende cada comerciante en Configuración → Tienda.
+Los valores de ejemplo que aprobó German:
+
+| Nivel | Paga al retirar | Paga al recibir | Hasta | Productos distintos |
+|---|---|---|---|---|
+| 0 | no | no | — | — |
+| 1 | sí | sí, con 1 retiro previo | $40.000 | 15 |
+| 2 | sí | sí | $80.000 | 30 |
+| 3 | sí | sí | $160.000 | sin tope |
+
+**Rechazos** con los `code` y los datos de su tabla. Un detalle: `nivel_insuficiente` puede venir **sin
+`requiredLevel`** cuando ningún nivel permite pagar en mano en esa franja (el comerciante lo apagó para todos).
+
+**Los `error` están escritos para el comprador** y se pueden mostrar tal cual. Ofrecen Mercado Pago como salida
+**sólo si ese comercio lo cobra**; si no, no lo mencionan.
+
+**`review: { reason }`** en `GET /v1/orders/:code` y en la respuesta del alta, **mientras el pedido está en
+`recibido`**. Cuando el comerciante lo acepta deja de venir: ya lo miró.
+
+Dos cosas que conviene que sepan:
+
+- **Quien el comerciante dio de alta en el mostrador** (por ejemplo, con la libreta) cuenta como nivel 3 y no pasa por
+  la revisión ni por el requisito de retiros: lo conoce en persona.
+- **El bloqueo vale con cualquier forma de pago y con las reglas prendidas o apagadas**: es una decisión del
+  comerciante sobre esa persona. El `code` es `cuenta_bloqueada`.
+
+Para probarlo juntos: cuando ClubPay tenga la web de alta, prendemos las reglas en un comercio de prueba y les avisamos.

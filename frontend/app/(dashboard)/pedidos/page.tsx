@@ -24,7 +24,19 @@ interface Pedido {
   contact_name: string | null; contact_phone: string | null;
   customer_name: string | null; created_at: string; cancel_reason: string | null;
   lines: Linea[] | null;
+  review_reason: "cuenta_nueva_monto_alto" | "identidad_no_disponible" | null;
+  verification_level: number | null;
+  customer_origen: "mostrador" | "tienda" | null;
 }
+
+/**
+ * Por qué un pedido pide que lo mires antes de aceptarlo (CR-0003). Lo lee el
+ * comerciante, no el comprador: a la tienda sólo le llega que se va a revisar.
+ */
+const REVISION: Record<string, string> = {
+  cuenta_nueva_monto_alto: "Es el primer pedido de esta persona y es grande. Llamala antes de armarlo.",
+  identidad_no_disponible: "No pudimos comprobar su cuenta de ClubPay al recibirlo. Confirmá con la persona antes de armarlo.",
+};
 
 const ESTADO: Record<string, { texto: string; clase: string }> = {
   recibido: { texto: "Sin aceptar", clase: "warn" },
@@ -157,6 +169,14 @@ function Tarjeta({ p, trabajando, onAccion }: {
         {p.slot_label}{p.address ? ` · ${p.address}` : ""} · {PAGO[p.payment_method] ?? p.payment_method}
         {p.contact_phone ? ` · ${p.contact_phone}` : ""}
       </p>
+      {p.customer_origen === "tienda" && (
+        <p className="muted" style={{ fontSize: 12, margin: "2px 0" }}>Se identificó con ClubPay</p>
+      )}
+      {p.review_reason && p.status === "recibido" && (
+        <p className="badge warn" style={{ display: "block", fontSize: 12, margin: "4px 0" }}>
+          Mirá antes de aceptar: {REVISION[p.review_reason]}
+        </p>
+      )}
       {p.notes && <p style={{ fontSize: 13, margin: "2px 0" }}>📝 {p.notes}</p>}
 
       <table style={{ fontSize: 13, margin: "6px 0" }}>
@@ -205,7 +225,13 @@ function Tarjeta({ p, trabajando, onAccion }: {
               <input value={tiempo} onChange={(e) => setTiempo(e.target.value)}
                 placeholder="o escribilo" style={{ width: 130 }} />
               <button type="button" disabled={!tiempo.trim() || trabajando}
-                onClick={() => onAccion(p.id, "aceptar", { readyEstimate: tiempo })}>
+                onClick={() => {
+                  // Un toque más, sólo para los marcados: el que acepta sin leer
+                  // es justo el caso del pedido falso de cincuenta productos.
+                  if (p.review_reason && !window.confirm(
+                    `${REVISION[p.review_reason]}\n\n¿Lo aceptás igual?`)) return;
+                  onAccion(p.id, "aceptar", { readyEstimate: tiempo });
+                }}>
                 Aceptar
               </button>
             </>
