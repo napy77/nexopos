@@ -7,7 +7,7 @@ es parte de terminar un cambio.**
 
 ## En producción
 
-`https://nexopos.app` · último commit desplegado: **`57a64bd`**
+`https://nexopos.app` · último commit desplegado: **`a9eb1a4`**
 (verificable en `GET /health`, que devuelve el commit y cuándo arrancó).
 
 Comercios reales en uso conocidos: **Jure Hnos**, **Rivera Hogar** (mayorista y
@@ -53,7 +53,7 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 | **QR de vinculación en el mostrador** | Pedido escrito (`PEDIDO-QR-VINCULACION-A-CLUBPAY.md`). Sin respuesta. | ClubPay |
 | **Resúmenes hacia ClubPay** | Retenidos por `CLUBPAY_STATEMENTS` (default apagado): sin la adjudicación de movimientos del lado de ClubPay, la compra se contaría dos veces. | ClubPay |
 | **Cobro con Mercado Pago** (mostrador y tienda) | En producción de los tres lados. NexoTienda lo probó de punta a punta contra nuestro simulador (11/10) sin observaciones. **Falta la prueba real con plata** con ClubPay —mostrador, tienda, devolución y dos QR de mostrador a la vez (si se pisan, mandar `terminal` en el `POST`)— y definir la comisión antes de abrirlo. | German (comercio de prueba, horario, comisión) |
-| **CR-0003 identidad en pedidos de la tienda** | Respuesta y agregado en `respuesta-cr-0003-identidad.md`. **Hecho:** `libreta_activa` (sin libreta no se fía en el mostrador ni en la tienda), interruptor `identity_rules_enabled` (apagado, sin uso), y el slug y la libreta espejados en ClubPay (`clubpay_sync`). ClubPay confirmó una relación por persona y comercio. **Sigue:** el canje de cuentas nacidas en la tienda, y las reglas y topes; los topes esperan que German los apruebe (consulta en la respuesta). | NexoPOS, German |
+| **CR-0003 identidad en pedidos de la tienda** | Respuesta y agregado en `respuesta-cr-0003-identidad.md`. **Hecho:** `libreta_activa` (sin libreta no se fía en el mostrador ni en la tienda), interruptor `identity_rules_enabled` (apagado, sin uso), y el slug y la libreta espejados en ClubPay (`clubpay_sync`), en producción desde el 13/10. ClubPay confirmó una relación por persona y comercio. **Sigue:** el canje de cuentas nacidas en la tienda, y las reglas y topes; los topes esperan que German los apruebe (consulta en la respuesta). | NexoPOS, German |
 | **Resúmenes en la tienda** | Esperando la decisión de German. Recomendación escrita: que **no** vayan (ver `RESPUESTA-3-LIBRETA-A-NEXOTIENDA.md`). | German |
 
 ## Pendiente, sin empezar
@@ -107,9 +107,8 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 ## Migraciones
 
-**44 aplicadas en local.** Corren solas al arrancar el backend. Las últimas son
-`043_libreta_activa.sql` y `044_clubpay_sync.sql`, que en producción se aplican
-con el próximo deploy.
+**44 aplicadas, en local y en producción.** Corren solas al arrancar el
+backend. La última es `044_clubpay_sync.sql`.
 
 ## Desarrollo local
 
