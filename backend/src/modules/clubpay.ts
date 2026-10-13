@@ -11,7 +11,7 @@ import QRCode from "qrcode";
 import { procesarAvisoCobro, olvidarEstadoMP } from "./mercadopago.js";
 import { randomUUID } from "node:crypto";
 import {
-  validarQR, aCentavos, aPesos, isMockMode,
+  validarQR, aCentavos, aPesos, isMockMode, apiGet,
   crearCharge, consultarCharge, cancelarCharge, RECORTE_TEXTO,
 } from "../integrations/clubpay.js";
 
@@ -84,10 +84,54 @@ clubpayRouter.get("/estado", async (req, res, next) => {
 
 const keySchema = z.object({ apiKey: z.string().trim() });
 
+/**
+ * Las claves de ClubPay son `pos_` y 48 caracteres hexadecimales. El formato se
+ * pide un poco más flojo —letras y números, 16 o más— para no rechazar una
+ * clave buena el día que ClubPay cambie cómo las genera.
+ */
+const FORMA_CLAVE = /^pos_[A-Za-z0-9]{16,}$/;
+
+/**
+ * Antes de guardar, que la clave sea una clave y que ClubPay la reconozca.
+ *
+ * Una clave mala no falla al guardarla: falla después, en silencio, en tres
+ * lugares a la vez —descuentos, cobros con Mercado Pago y el aviso de la
+ * tienda—. Ya pasó: Rivera Hogar tuvo guardado un texto que no era una clave,
+ * y se supo recién cuando ClubPay rechazó el slug.
+ */
+async function validarClave(apiKey: string, commerceId: number): Promise<void> {
+  if (!FORMA_CLAVE.test(apiKey)) {
+    throw new HttpError(400,
+      "Eso no parece una clave de ClubPay: empiezan con pos_ y siguen con letras y números. " +
+      "Se la pide el comercio a ClubPay; no es el usuario ni la contraseña.");
+  }
+
+  // Los avisos que llegan de ClubPay buscan el comercio por la clave: con la
+  // misma en dos comercios, un cobro de uno se acreditaría en el otro.
+  const { rows } = await pool.query(
+    "SELECT name FROM commerces WHERE clubpay_api_key = $1 AND id <> $2", [apiKey, commerceId]
+  );
+  if (rows[0]) throw new HttpError(409, "Esa clave de ClubPay ya está cargada en otro comercio.");
+
+  if (isMockMode()) return;
+  try {
+    await apiGet("/pos/payments/status", apiKey);
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 401) {
+      throw new HttpError(400, "ClubPay no reconoce esa clave. Revisá que esté completa y que sea la de este comercio.");
+    }
+    // Si ClubPay no contesta, la clave se guarda igual: no poder comprobarla
+    // no es motivo para no dejar trabajar al comercio. Un rechazo posterior
+    // queda a la vista en el log.
+    console.warn("[clubpay] no se pudo comprobar la clave al guardarla:", err instanceof Error ? err.message : err);
+  }
+}
+
 /** PUT /api/clubpay/api-key — la clave que ClubPay le dio al comercio */
 clubpayRouter.put("/api-key", async (req, res, next) => {
   try {
     const { apiKey } = keySchema.parse(req.body);
+    if (apiKey) await validarClave(apiKey, req.auth.commerceId);
     await enTransaccion(async (c) => {
       await c.query("UPDATE commerces SET clubpay_api_key = $1 WHERE id = $2", [
         apiKey || null,
