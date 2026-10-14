@@ -92,3 +92,13 @@ Dos cosas que conviene que sepan:
   comerciante sobre esa persona. El `code` es `cuenta_bloqueada`.
 
 Para probarlo juntos: cuando ClubPay tenga la web de alta, prendemos las reglas en un comercio de prueba y les avisamos.
+
+---
+
+## Agregado, 13 de octubre: las reglas ya están en producción
+
+`orderRules`, los rechazos con `code` y `review` están en producción (`ffa77ff`, desplegado el 13/10 a las 12:48
+UTC). Con esto está todo lo que pidieron en `cr-0003-lo-que-falta.md`.
+
+Hoy **todos los comercios tienen las reglas apagadas** (`{ "enabled": false }`), así que la tienda se sigue viendo
+como siempre. Para probar juntos usamos un comercio de prueba, cuando ClubPay tenga la web de alta: les avisamos.
