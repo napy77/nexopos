@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, money } from "@/lib/api";
-import { loadPrintSettings, printTicket, openTicketPdf, printQrClubPay } from "@/lib/print";
+import { loadPrintSettings, printTicket, openTicketPdf, printQrCobro } from "@/lib/print";
 import { leerCodigoBalanza, buscarPorPlu, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
 import { Foto } from "@/lib/foto";
 import { centavosAPesos, type ClubPayValidacion, type ClubPayOferta, type ClubPayElegido, type ClubPayCobro, type ClubPayCobroEstado } from "@/lib/clubpay";
@@ -46,6 +46,8 @@ const METHOD_LABEL: Record<string, string> = {
 type CobroMP = {
   paymentId: string;
   qrDataUrl: string;
+  /** Hasta cuándo vale el QR; va impreso si se imprime */
+  expiresAt?: string | null;
   monto: number;
   status: "pending" | "paid" | "rejected" | "expired" | "cancelled" | "refunded";
   error?: string | null;
@@ -1258,7 +1260,7 @@ export default function VentasPage() {
                     y el papel que tiene el cliente dejaría de servir.
                   */}
                   <button className="secondary" onClick={() =>
-                    printQrClubPay({ qrDataUrl: cobro.qr_data_url, total: money(total), venceA: cobro.expires_at })
+                    printQrCobro({ medio: "clubpay", qrDataUrl: cobro.qr_data_url, total: money(total), venceA: cobro.expires_at })
                       .catch(() => setClubpayError("No se pudo imprimir el código"))}>
                     🖨 Imprimir
                   </button>
@@ -1324,6 +1326,17 @@ export default function VentasPage() {
                 )}
                 {mpError && <p className="error" style={{ textAlign: "center" }}>{mpError}</p>}
                 <div className="toolbar" style={{ justifyContent: "center", marginTop: 12 }}>
+                  {/*
+                    Imprimir no libera la caja: la ventana sigue esperando el
+                    pago, y el ticket sale solo cuando entra. Cerrarla cancelaría
+                    el cobro y el papel dejaría de servir.
+                  */}
+                  <button className="secondary" onClick={() =>
+                    printQrCobro({ medio: "mercadopago", qrDataUrl: cobroMP.qrDataUrl,
+                                   total: money(cobroMP.monto), venceA: cobroMP.expiresAt ?? null })
+                      .catch(() => setMpError("No se pudo imprimir el código"))}>
+                    🖨 Imprimir
+                  </button>
                   <button className="secondary" onClick={() => cancelarQrMP()}>Cancelar</button>
                 </div>
               </>

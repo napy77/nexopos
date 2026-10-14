@@ -16,7 +16,7 @@ comercio a la vez), **Supermercado Delfín**.
 ## Funciona
 
 **Mostrador** — punto de venta, tickets, reembolsos, caja con arqueo, medios de
-pago, descuentos de ClubPay por QR (el comercio muestra el QR, o lo imprime en la ticketera, y el socio escanea).
+pago, descuentos de ClubPay y cobro con Mercado Pago por QR (se muestra en pantalla o se imprime en la ticketera, y el cliente escanea).
 
 **Stock y productos** — catálogo de B2B, recepción de compras, alta manual,
 importación del catálogo propio (con costo y stock), ajustes, productos propios
@@ -52,7 +52,7 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 | **Libreta en la tienda** | Canje, estado y `linkedAt` construidos. El **emparejar por código** espera que ClubPay construya `/pos/tienda/emparejar`. | ClubPay |
 | **QR de vinculación en el mostrador** | Pedido escrito (`PEDIDO-QR-VINCULACION-A-CLUBPAY.md`). Sin respuesta. | ClubPay |
 | **Resúmenes hacia ClubPay** | Retenidos por `CLUBPAY_STATEMENTS` (default apagado): sin la adjudicación de movimientos del lado de ClubPay, la compra se contaría dos veces. | ClubPay |
-| **Cobro con Mercado Pago** (mostrador y tienda) | En producción de los tres lados. NexoTienda lo probó de punta a punta contra nuestro simulador (11/10) sin observaciones. **Falta la prueba real con plata** con ClubPay —mostrador, tienda, devolución y dos QR de mostrador a la vez (si se pisan, mandar `terminal` en el `POST`)— y definir la comisión antes de abrirlo. | German (comercio de prueba, horario, comisión) |
+| **Cobro con Mercado Pago** (mostrador y tienda) | En producción de los tres lados. **Probado con plata real en el mostrador el 14/10** (German: «de punta a punta, funciona OK»). *PENDIENTE DE VALIDAR:* si esa prueba cubrió también la tienda, la devolución y dos QR de mostrador a la vez (si se pisan, mandar `terminal` en el `POST`), y la comisión, que hoy es cero. | German |
 | **CR-0003 identidad en pedidos de la tienda** | Respuesta y agregado en `respuesta-cr-0003-identidad.md`. **Hecho:** `libreta_activa` (sin libreta no se fía en el mostrador ni en la tienda), interruptor `identity_rules_enabled` (apagado, sin uso), y el slug y la libreta espejados en ClubPay (`clubpay_sync`), en producción desde el 13/10. ClubPay confirmó una relación por persona y comercio. **Bloque A (en producción desde el 13/10):** cuenta + contacto juntos en los pedidos y canje de cuentas nacidas en la tienda. NexoTienda ya manda los dos juntos. **Bloque B (en producción desde el 13/10, reglas apagadas en todos los comercios):** reglas por comercio en Configuración → Tienda con los topes de ejemplo que aprobó German el 13/10, `orderRules`, rechazos con `code`, `review` y marca en Pedidos, bloqueo, límite y pausa del fiado en la ficha. **Sigue:** probarlo de punta a punta con NexoTienda en un comercio de prueba, cuando ClubPay tenga la web de alta. | NexoPOS, NexoTienda, ClubPay |
 | **Resúmenes en la tienda** | Esperando la decisión de German. Recomendación escrita: que **no** vayan (ver `RESPUESTA-3-LIBRETA-A-NEXOTIENDA.md`). | German |
 

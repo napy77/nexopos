@@ -64,24 +64,40 @@ async function printDesdeApi(path: string): Promise<void> {
 const escapar = (t: string): string =>
   t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+/** Lo que cambia entre el papel de ClubPay y el de Mercado Pago */
+const PAPEL_QR = {
+  clubpay: {
+    titulo: "Descuento para socios ClubPay",
+    instruccion: "Escaneá este código con la app ClubPay",
+  },
+  mercadopago: {
+    titulo: "Pagá con Mercado Pago",
+    instruccion: "Escaneá este código con Mercado Pago o cualquier billetera que lea QR",
+  },
+} as const;
+
 /**
- * El QR del descuento de ClubPay, en papel, para la caja donde la pantalla no
- * da hacia el cliente: se corta, se le da, y lo escanea con la app.
+ * El QR de un cobro en papel —el descuento de ClubPay o el pago con Mercado
+ * Pago— para la caja donde la pantalla no da hacia el cliente: se corta, se le
+ * da, y lo escanea con su teléfono.
  *
  * Se arma acá y no en el backend porque el QR ya está dibujado en la pantalla
- * y el cobro no se guarda en ningún lado: vive tres minutos. Los márgenes y el
+ * y vive unos minutos. Los márgenes y el
  * ancho siguen a `estilosImpresion` de backend/src/modules/ticket-render.ts,
  * para que salga igual que un ticket.
  *
  * El papel dice hasta qué hora sirve. Un QR impreso parece que vale para
- * siempre, y éste vence a los tres minutos: el cliente que lo guarda en el
+ * siempre, y éste vence a los pocos minutos: el cliente que lo guarda en el
  * bolsillo y lo escanea en la vereda tiene que saber por qué no anda.
  */
-export async function printQrClubPay(datos: {
+export async function printQrCobro(datos: {
+  medio: keyof typeof PAPEL_QR;
   qrDataUrl: string;
   total: string;
-  venceA: string;
+  /** Si no se sabe, el papel no promete una hora */
+  venceA: string | null;
 }, settings?: PrintSettings): Promise<void> {
+  const papel = PAPEL_QR[datos.medio];
   const { width } = settings ?? loadPrintSettings();
   const esTermica = width !== "auto";
   const contenido = width === "80mm" ? "72mm" : width === "58mm" ? "50mm" : "100%";
@@ -90,9 +106,9 @@ export async function printQrClubPay(datos: {
   try {
     comercio = JSON.parse(localStorage.getItem("nexopos_commerce") ?? "{}").name ?? "";
   } catch { /* sin nombre, sale igual */ }
-  const hora = new Date(datos.venceA).toLocaleTimeString("es-AR", {
+  const hora = datos.venceA ? new Date(datos.venceA).toLocaleTimeString("es-AR", {
     hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/Argentina/Cordoba",
-  });
+  }) : null;
 
   return printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>
     @page { size: ${esTermica ? `${width} auto` : "auto"}; margin: ${esTermica ? "0" : "10mm"}; }
@@ -107,14 +123,14 @@ export async function printQrClubPay(datos: {
     .vence { font-weight: 700; margin-top: 6px; }
   </style></head><body>
     <div class="comercio">${escapar(comercio)}</div>
-    <div>Descuento para socios ClubPay</div>
+    <div>${papel.titulo}</div>
     <div class="sep"></div>
-    <div>Escaneá este código con la app ClubPay</div>
+    <div>${papel.instruccion}</div>
     <img src="${datos.qrDataUrl}" alt="">
     <div>Total de la compra</div>
     <div class="total">${escapar(datos.total)}</div>
     <div class="sep"></div>
-    <div class="vence">Vale hasta las ${hora}</div>
+    ${hora ? `<div class="vence">Vale hasta las ${hora}</div>` : ""}
     <div>Si se vence, pedí otro en la caja.</div>
   </body></html>`);
 }
