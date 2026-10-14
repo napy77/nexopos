@@ -16,7 +16,7 @@ comercio a la vez), **Supermercado Delfín**.
 ## Funciona
 
 **Mostrador** — punto de venta, tickets, reembolsos, caja con arqueo, medios de
-pago, descuentos de ClubPay por QR (el comercio muestra el QR, el socio escanea).
+pago, descuentos de ClubPay por QR (el comercio muestra el QR, o lo imprime en la ticketera, y el socio escanea).
 
 **Stock y productos** — catálogo de B2B, recepción de compras, alta manual,
 importación del catálogo propio (con costo y stock), ajustes, productos propios

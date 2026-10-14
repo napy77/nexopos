@@ -58,8 +58,69 @@ export async function printCierreCaja(sessionId: number, settings?: PrintSetting
 async function printDesdeApi(path: string): Promise<void> {
   const res = await fetch(path, { headers: { Authorization: `Bearer ${getToken()}` } });
   if (!res.ok) throw new Error("No se pudo generar el documento para imprimir");
-  const html = await res.text();
+  return printHtml(await res.text());
+}
 
+const escapar = (t: string): string =>
+  t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+
+/**
+ * El QR del descuento de ClubPay, en papel, para la caja donde la pantalla no
+ * da hacia el cliente: se corta, se le da, y lo escanea con la app.
+ *
+ * Se arma acá y no en el backend porque el QR ya está dibujado en la pantalla
+ * y el cobro no se guarda en ningún lado: vive tres minutos. Los márgenes y el
+ * ancho siguen a `estilosImpresion` de backend/src/modules/ticket-render.ts,
+ * para que salga igual que un ticket.
+ *
+ * El papel dice hasta qué hora sirve. Un QR impreso parece que vale para
+ * siempre, y éste vence a los tres minutos: el cliente que lo guarda en el
+ * bolsillo y lo escanea en la vereda tiene que saber por qué no anda.
+ */
+export async function printQrClubPay(datos: {
+  qrDataUrl: string;
+  total: string;
+  venceA: string;
+}, settings?: PrintSettings): Promise<void> {
+  const { width } = settings ?? loadPrintSettings();
+  const esTermica = width !== "auto";
+  const contenido = width === "80mm" ? "72mm" : width === "58mm" ? "50mm" : "100%";
+  const lado = width === "58mm" ? "40mm" : "50mm";
+  let comercio = "";
+  try {
+    comercio = JSON.parse(localStorage.getItem("nexopos_commerce") ?? "{}").name ?? "";
+  } catch { /* sin nombre, sale igual */ }
+  const hora = new Date(datos.venceA).toLocaleTimeString("es-AR", {
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/Argentina/Cordoba",
+  });
+
+  return printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>
+    @page { size: ${esTermica ? `${width} auto` : "auto"}; margin: ${esTermica ? "0" : "10mm"}; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: ${esTermica ? "4mm 2mm" : "0"}; width: ${contenido};
+           font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+           font-size: 12px; line-height: 1.35; color: #000; background: #fff; text-align: center; }
+    .comercio { font-size: 15px; font-weight: 700; }
+    .sep { border-top: 1px solid #000; margin: 6px 0; }
+    img { width: ${lado}; height: ${lado}; image-rendering: pixelated; margin: 4px auto; display: block; }
+    .total { font-size: 17px; font-weight: 700; }
+    .vence { font-weight: 700; margin-top: 6px; }
+  </style></head><body>
+    <div class="comercio">${escapar(comercio)}</div>
+    <div>Descuento para socios ClubPay</div>
+    <div class="sep"></div>
+    <div>Escaneá este código con la app ClubPay</div>
+    <img src="${datos.qrDataUrl}" alt="">
+    <div>Total de la compra</div>
+    <div class="total">${escapar(datos.total)}</div>
+    <div class="sep"></div>
+    <div class="vence">Vale hasta las ${hora}</div>
+    <div>Si se vence, pedí otro en la caja.</div>
+  </body></html>`);
+}
+
+/** Monta el HTML en un iframe oculto y lo manda a la impresora. */
+async function printHtml(html: string): Promise<void> {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
   iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";

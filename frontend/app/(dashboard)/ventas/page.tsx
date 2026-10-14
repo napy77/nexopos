@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, money } from "@/lib/api";
-import { loadPrintSettings, printTicket, openTicketPdf } from "@/lib/print";
+import { loadPrintSettings, printTicket, openTicketPdf, printQrClubPay } from "@/lib/print";
 import { leerCodigoBalanza, buscarPorPlu, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
 import { Foto } from "@/lib/foto";
 import { centavosAPesos, type ClubPayValidacion, type ClubPayOferta, type ClubPayElegido, type ClubPayCobro, type ClubPayCobroEstado } from "@/lib/clubpay";
@@ -1252,6 +1252,16 @@ export default function VentasPage() {
                   Esperando que confirme en su teléfono…
                 </p>
                 <div className="toolbar" style={{ justifyContent: "center", marginTop: 12 }}>
+                  {/*
+                    Para la caja donde la pantalla no da hacia el cliente. La
+                    ventana queda abierta a propósito: cerrarla cancela el cobro,
+                    y el papel que tiene el cliente dejaría de servir.
+                  */}
+                  <button className="secondary" onClick={() =>
+                    printQrClubPay({ qrDataUrl: cobro.qr_data_url, total: money(total), venceA: cobro.expires_at })
+                      .catch(() => setClubpayError("No se pudo imprimir el código"))}>
+                    🖨 Imprimir
+                  </button>
                   <button className="secondary" onClick={() => cerrarQrCobro()}>Cancelar</button>
                 </div>
               </>
