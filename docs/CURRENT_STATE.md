@@ -41,6 +41,12 @@ precio fijo) y orden manual arrastrando. Sólo afectan la tienda online.
 **API para ERP** — `/api/erp/v1`, con claves por comercio y documentación
 pública en `/docs/api`.
 
+**Sitio institucional** — `/` es el sitio público de nexopos.app (antes
+redirigía a la caja). Dos botones: **Ingresar** (`/login`) y **Crear cuenta
+gratis**, que lleva al alta de NexoB2B (`/comercio/registro`, configurable con
+`NEXT_PUBLIC_NEXOB2B_REGISTRO_URL`). Con sesión abierta el botón pasa a ser
+«Ir a mi caja». Sólo anuncia lo que está en "Funciona".
+
 **Detector de clientes duplicados** — por teléfono normalizado primero,
 documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
@@ -90,6 +96,10 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 ## Cambios recientes que conviene conocer
 
+- **20/10: `/` dejó de mandar a la caja** y es el sitio institucional. El
+   login sigue en `/login`. La tarjeta «Activar cuenta» de NexoB2B apunta a la
+   raíz de nexopos.app, así que el comerciante ahora pasa por el sitio y toca
+   «Ingresar».
 0. **El sync de fichas estuvo trabado del 6 de julio al 23 de septiembre**
    (CR-0001, causa en NexoB2B). Resincronizado el 23/9: 72.051 fichas en 145
    páginas, `hay_mas=false`, 10.489 líneas actualizadas. Respuesta en

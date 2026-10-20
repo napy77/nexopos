@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { NEXOB2B_REGISTRO_URL } from "@/lib/sitio";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -62,7 +64,15 @@ export default function LoginPage() {
               {loading ? "Ingresando…" : "Ingresar"}
             </button>
           </form>
+          <p className="muted login-alta">
+            ¿Todavía no tenés cuenta?{" "}
+            <a href={NEXOB2B_REGISTRO_URL}>Creala gratis en NexoB2B</a> y activá NexoPOS
+            desde tu perfil.
+          </p>
         </div>
+        <p className="login-volver">
+          <Link href="/">← Volver a nexopos.app</Link>
+        </p>
       </div>
     </div>
   );

@@ -408,3 +408,5 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .login-box .card { padding: 28px; }
 .login-box input { width: 100%; margin-bottom: 12px; }
 .login-box button { width: 100%; }
+.login-alta { text-align: center; font-size: 13px; margin: 16px 0 0; }
+.login-volver { text-align: center; font-size: 13px; margin-top: 14px; }
