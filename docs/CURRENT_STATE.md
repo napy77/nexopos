@@ -99,7 +99,8 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 - **20/10: `/` dejó de mandar a la caja** y es el sitio institucional. El
    login sigue en `/login`. La tarjeta «Activar cuenta» de NexoB2B apunta a la
    raíz de nexopos.app, así que el comerciante ahora pasa por el sitio y toca
-   «Ingresar».
+   «Ingresar». Pedido a NexoB2B para que apunte a `/login`:
+   `PEDIDO-ACTIVAR-NEXOPOS-A-NEXOB2B.md` (sin respuesta todavía).
 0. **El sync de fichas estuvo trabado del 6 de julio al 23 de septiembre**
    (CR-0001, causa en NexoB2B). Resincronizado el 23/9: 72.051 fichas en 145
    páginas, `hay_mas=false`, 10.489 líneas actualizadas. Respuesta en
