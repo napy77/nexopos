@@ -179,7 +179,10 @@ PUT /api/v1/pos/stock
 ## 9. API para ERP
 
 ```
-GET /api/erp/v1/productos
+GET  /api/erp/v1/productos
+POST /api/erp/v1/productos   { productos: [{ ean?, nombre?, precio_centavos?, costo_centavos?,
+                                              stock?, stock_minimo?, unidad? }] }  → 202 { importacion_id }
+GET  /api/erp/v1/importaciones/:id  → { estado, resumen, errores }
 PUT /api/erp/v1/precios      { precio_centavos, costo_centavos? }
 PUT /api/erp/v1/stock        { modo: "absoluto" | "ajuste" }
 GET /api/erp/v1/ventas?desde=ISO  → { ventas, hasta, hay_mas }
@@ -189,6 +192,12 @@ GET /api/erp/v1/ventas?desde=ISO  → { ventas, hasta, hay_mas }
 - Un reembolso viene con **cantidades negativas**, no como un registro aparte.
 - `hasta` es la marca para la próxima llamada; `hay_mas` dice si quedó cola.
 - Un precio escrito por el ERP queda **manual** y los márgenes no lo recalculan.
+- **El alta masiva es el mismo motor que el CSV de la pantalla**
+  (`modules/importacion.ts`): por EAN busca lo del comercio, después lo que ya
+  está en NexoPOS, después el catálogo de NexoB2B; si no está, producto propio
+  con el `nombre`. El `stock` **reemplaza**; un campo que no viene no borra. Se
+  analiza en segundo plano (miles de consultas a NexoB2B no entran en el minuto
+  de nginx) y se aplica todo junto, sin vista previa.
 
 ## 10. Errores: `error` para personas, `code` para sistemas
 

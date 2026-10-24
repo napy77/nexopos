@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { requiereClaveErp } from "../middleware/erp-key.js";
+import { iniciarImportacion, estadoImportacion, type FilaCruda } from "./importacion.js";
 
 /**
  * La API para el sistema del comercio: su ERP, Odoo, o lo que use.
@@ -88,6 +89,60 @@ async function resolver(
   // Dos coincidencias es un EAN repetido: no se adivina cuál es.
   return rows.length === 1 ? Number(rows[0].product_id) : null;
 }
+
+const altaSchema = z.object({
+  productos: z.array(z.object({
+    ean: z.string().optional(),
+    nombre: z.string().optional(),
+    unidad: z.string().optional(),
+    precio_centavos: z.coerce.number().int().positive().optional(),
+    costo_centavos: z.coerce.number().int().nonnegative().optional(),
+    stock: z.coerce.number().nonnegative().optional(),
+    stock_minimo: z.coerce.number().nonnegative().optional(),
+  })).min(1).max(5000),
+});
+
+/**
+ * POST /api/erp/v1/productos — alta masiva, de hasta cinco mil.
+ *
+ * Es el mismo motor que el CSV de la pantalla (modules/importacion.ts): busca
+ * cada EAN en lo que el comercio ya tiene, después en el catálogo de NexoB2B,
+ * y si no está lo da de alta como producto propio. El stock reemplaza.
+ *
+ * Contesta 202 con un id y sigue en segundo plano: buscar dos mil fichas en
+ * NexoB2B tarda más de lo que una conexión aguanta abierta. El ERP pregunta
+ * en qué quedó con GET /importaciones/:id. A diferencia de la pantalla, no
+ * hay vista previa: se aplica sola cuando termina de analizar.
+ */
+erpRouter.post("/productos", async (req, res, next) => {
+  try {
+    const { productos } = altaSchema.parse(req.body);
+    const filas: FilaCruda[] = productos.map((p) => ({
+      ean: p.ean, nombre: p.nombre, unidad: p.unidad, precio: p.precio_centavos,
+      costo: p.costo_centavos, stock: p.stock, stock_minimo: p.stock_minimo,
+    }));
+    const id = await iniciarImportacion(req.erp!.commerceId, filas, {
+      origen: "api", enCentavos: true, autoAplicar: true,
+    });
+    res.status(202).json({ importacion_id: String(id), estado: "analizando" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /api/erp/v1/importaciones/:id — en qué quedó un alta masiva */
+erpRouter.get("/importaciones/:id", async (req, res, next) => {
+  try {
+    const e = await estadoImportacion(Number(req.params.id), req.erp!.commerceId, true);
+    if (e.origen !== "api") throw new HttpError(404, "No existe esa importación");
+    res.json({
+      importacion_id: e.id, estado: e.estado, total: e.total, procesadas: e.procesadas,
+      resumen: e.resumen, error: e.error, errores: e.errores,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 const preciosSchema = z.object({
   precios: z.array(referenciaSchema.and(z.object({

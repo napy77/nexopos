@@ -62,6 +62,7 @@
 }
 .doc .verbo.get { background: var(--success); }
 .doc .verbo.put { background: var(--warning); }
+.doc .verbo.post { background: var(--primary); }
 
 .doc .bloque { position: relative; margin: 12px 0; }
 .doc .bloque pre {

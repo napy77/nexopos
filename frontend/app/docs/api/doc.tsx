@@ -41,6 +41,7 @@ const SECCIONES = [
   ["clave", "La clave"],
   ["convenciones", "Convenciones"],
   ["productos", "Leer el catálogo"],
+  ["alta", "Dar de alta productos"],
   ["precios", "Escribir precios"],
   ["stock", "Escribir stock"],
   ["ventas", "Leer las ventas"],
@@ -88,8 +89,9 @@ export function Doc() {
         <main>
           <h1>Conectá tu sistema con NexoPOS</h1>
           <p className="entrada">
-            Si el comercio usa un ERP, Odoo o un sistema propio, puede leer su catálogo,
-            escribir precios y stock, y leer lo que se vendió en el mostrador — sin que
+            Si el comercio usa un ERP, Odoo o un sistema propio, puede dar de alta sus
+            productos de a miles, leer su catálogo, escribir precios y stock, y leer lo que
+            se vendió en el mostrador — sin que
             nadie tenga que cargar nada a mano en la pantalla del POS.
           </p>
 
@@ -205,6 +207,69 @@ export function Doc() {
               venta</strong>: no se puede cobrar en el mostrador ni aparece en la tienda
               online hasta que tenga uno. Es lo que pasa, por ejemplo, con un catálogo
               recién importado.
+            </p>
+          </section>
+
+          <section id="alta">
+            <h2>Dar de alta productos</h2>
+            <p className="firma"><span className="verbo post">POST</span> /productos</p>
+            <p>
+              Hasta 5000 por llamada. Es lo mismo que subir un CSV desde NexoPOS
+              (Productos → Integración API): los dos usan el mismo motor y terminan igual.
+            </p>
+            <Codigo lang="json">{`{
+  "productos": [
+    { "ean": "7790070507341", "precio_centavos": 399900, "costo_centavos": 199950,
+      "stock": 12, "stock_minimo": 2 },
+    { "nombre": "Tarta de verdura", "precio_centavos": 550000, "stock": 4 }
+  ]
+}`}</Codigo>
+            <p>Cada producto termina en una de estas cosas:</p>
+            <ul>
+              <li><strong>Ya lo tenés</strong> (mismo EAN; sin EAN, mismo nombre): se le
+                cambian precio, costo y stock.</li>
+              <li><strong>Está en el catálogo de Nexo B2B</strong>: entra con su ficha —nombre,
+                foto, rubro—. El nombre que mandes no se usa.</li>
+              <li><strong>No está en ningún lado</strong>: se crea como producto propio del
+                comercio con el <code>nombre</code> que mandaste, sin foto.</li>
+              <li><strong>Error</strong>: un EAN que no está en Nexo B2B y sin nombre, un número
+                que no se entiende, o el mismo producto dos veces en la misma llamada.</li>
+            </ul>
+            <p>
+              Hace falta <code>ean</code> o <code>nombre</code>; lo demás es opcional, y lo que
+              no mandes <strong>no se borra</strong>: queda lo que había. El{" "}
+              <code>stock</code> <strong>reemplaza</strong> (es la carga inicial: lo que hay),
+              así que mandar lo mismo dos veces no duplica nada. Para el día a día, usá{" "}
+              <a href="#stock"><code>PUT /stock</code></a> con <code>ajuste</code>.
+            </p>
+            <p>
+              <code>precio_centavos</code> es el precio de venta y nunca se calcula: sin él, el
+              producto se carga pero no se vende ni sale en la tienda online.
+            </p>
+
+            <h3>Contesta enseguida y sigue en segundo plano</h3>
+            <p>
+              Buscar miles de fichas en Nexo B2B tarda unos minutos, más de lo que una conexión
+              aguanta abierta. Por eso la respuesta es un <code>202</code> con un número:
+            </p>
+            <Codigo lang="json">{`{ "importacion_id": "41", "estado": "analizando" }`}</Codigo>
+            <p className="firma"><span className="verbo get">GET</span> /importaciones/:id</p>
+            <Codigo lang="json">{`{
+  "importacion_id": "41",
+  "estado": "aplicada",
+  "total": 2000, "procesadas": 2000,
+  "resumen": { "actualizar": 3, "vincular": 0, "crear_b2b": 1850,
+               "crear_propio": 120, "error": 27, "sinPrecio": 0 },
+  "error": null,
+  "errores": [ { "fila": 14, "ean": "7799999999998", "nombre": "",
+                 "motivo": "El EAN 7799999999998 no está en el catálogo de NexoB2B y la fila no tiene nombre para darlo de alta como propio." } ]
+}`}</Codigo>
+            <p>
+              Preguntá cada unos segundos hasta que <code>estado</code> sea{" "}
+              <code>aplicada</code> o <code>error</code>. Antes de eso no se escribió nada, y
+              se aplica <strong>todo junto</strong>: no hay importaciones a medias. Las filas
+              con error se saltean y vienen en <code>errores</code>, con el número de fila (la
+              posición en tu lista, empezando en 1).
             </p>
           </section>
 
@@ -354,17 +419,13 @@ export function Doc() {
             </p>
             <ul>
               <li>
-                <strong>Crear productos desde la API.</strong> Hoy entran desde el catálogo
-                de Nexo B2B o se crean en el POS.
-              </li>
-              <li>
                 <strong>Webhooks hacia tu sistema.</strong> Hoy tenés que preguntar por{" "}
                 <code>/ventas</code>.
               </li>
             </ul>
             <p>
-              Si necesitás alguna de las dos, escribinos: las dos son el paso siguiente
-              natural y saber que hacen falta cambia el orden.
+              Si lo necesitás, escribinos: es el paso siguiente natural y saber que hace
+              falta cambia el orden.
             </p>
           </section>
 

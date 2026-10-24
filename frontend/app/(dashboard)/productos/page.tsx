@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, money } from "@/lib/api";
 
@@ -431,6 +432,8 @@ export default function ProductosPage() {
           title="Si tu negocio también es mayorista en NexoB2B, trae tu propio catálogo">
           {importando ? "Importando…" : "Importar mi catálogo"}
         </button>
+        {/* Para cargar de a miles: CSV o el ERP del comercio */}
+        <Link href="/productos/integracion"><button type="button" className="secondary">Integración API</button></Link>
       </div>
       {error && <p className="error">{error}</p>}
 

@@ -38,8 +38,14 @@ de cambio de estado, esconder lo que no hay.
 **Campañas** — tandas de ofertas con descuento **por producto** (porcentaje o
 precio fijo) y orden manual arrastrando. Sólo afectan la tienda online.
 
+**Alta masiva de productos** — Productos → Integración API: CSV con vista
+previa (lee Excel en Windows-1252 y con punto y coma), y `POST /api/erp/v1/productos`
+con el mismo motor. Por EAN toma la ficha de NexoB2B; si no está, producto
+propio. El stock reemplaza. Se analiza en segundo plano (tabla `importaciones`).
+
 **API para ERP** — `/api/erp/v1`, con claves por comercio y documentación
-pública en `/docs/api`.
+pública en `/docs/api`. Lee y da de alta productos, escribe precios y stock,
+lee ventas.
 
 **Sitio institucional** — `/` es el sitio público de nexopos.app (antes
 redirigía a la caja). Dos botones: **Ingresar** (`/login`) y **Crear cuenta
@@ -68,7 +74,6 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 - Circuito de comprobante de transferencia. Borrador acordado con NexoTienda:
   `POST /v1/orders/:code/comprobante`, el pedido en `pendiente` hasta que el
   comercio lo marque pagado. Espera que German lo priorice.
-- Creación de productos desde el ERP (hoy sólo lee y actualiza).
 - Webhooks salientes hacia el ERP.
 - Calculadora de costo de recetas y cadencia de reposición (ideas viejas, sin
   compromiso con nadie).
@@ -118,8 +123,8 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 ## Migraciones
 
-**46 aplicadas, en local y en producción.** Corren solas al arrancar el
-backend. La última es `046_reglas_pedidos.sql`. Si `045_cuenta_clubpay_unica.sql` encuentra cuentas de ClubPay
+**47 aplicadas en local, 46 en producción.** Corren solas al arrancar el
+backend. `047_importaciones.sql` se aplica con el próximo deploy. Si `045_cuenta_clubpay_unica.sql` encuentra cuentas de ClubPay
 repetidas no crea el índice y lo avisa en el log del arranque.
 
 ## Desarrollo local

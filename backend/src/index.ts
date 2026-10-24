@@ -19,6 +19,7 @@ import { reportsRouter } from "./modules/reports.js";
 import { exportRouter } from "./modules/export.js";
 import { settingsRouter } from "./modules/settings.js";
 import { reglasRouter } from "./modules/reglas-pedidos.js";
+import { importacionRouter, cerrarInterrumpidas } from "./modules/importacion.js";
 import { cajaRouter } from "./modules/caja.js";
 import { clubpayRouter, clubpayWebhookRouter } from "./modules/clubpay.js";
 import { mercadopagoRouter, mercadopagoSimuladorRouter } from "./modules/mercadopago.js";
@@ -75,6 +76,7 @@ app.use("/api/reports", requireAuth, reportsRouter);
 app.use("/api/export", requireAuth, exportRouter);
 app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/reglas-pedidos", requireAuth, reglasRouter);
+app.use("/api/importaciones", requireAuth, importacionRouter);
 app.use("/api/caja", requireAuth, cajaRouter);
 app.use("/api/disponibilidad", requireAuth, disponibilidadRouter);
 app.use("/api/pedidos", requireAuth, pedidosPosRouter);
@@ -114,6 +116,7 @@ app.use(errorHandler);
 
 async function main() {
   await runMigrations();
+  await cerrarInterrumpidas();
 
   // Sincronizar nombres de taxonomía (pasillo/rubro/subrubro) al iniciar y cada 12 h
   refreshProductTaxonomy()
