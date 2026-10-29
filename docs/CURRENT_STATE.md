@@ -66,7 +66,7 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 | **Resúmenes hacia ClubPay** | Retenidos por `CLUBPAY_STATEMENTS` (default apagado): sin la adjudicación de movimientos del lado de ClubPay, la compra se contaría dos veces. | ClubPay |
 | **Cobro con Mercado Pago** (mostrador y tienda) | En producción de los tres lados. **Probado con plata real en el mostrador el 14/10** (German: «de punta a punta, funciona OK»). *PENDIENTE DE VALIDAR:* si esa prueba cubrió también la tienda, la devolución y dos QR de mostrador a la vez (si se pisan, mandar `terminal` en el `POST`), y la comisión, que hoy es cero. | German |
 | **CR-0003 identidad en pedidos de la tienda** | Respuesta y agregado en `respuesta-cr-0003-identidad.md`. **Hecho:** `libreta_activa` (sin libreta no se fía en el mostrador ni en la tienda), interruptor `identity_rules_enabled` (apagado, sin uso), y el slug y la libreta espejados en ClubPay (`clubpay_sync`), en producción desde el 13/10. ClubPay confirmó una relación por persona y comercio. **Bloque A (en producción desde el 13/10):** cuenta + contacto juntos en los pedidos y canje de cuentas nacidas en la tienda. NexoTienda ya manda los dos juntos. **Bloque B (en producción desde el 13/10, reglas apagadas en todos los comercios):** reglas por comercio en Configuración → Tienda con los topes de ejemplo que aprobó German el 13/10, `orderRules`, rechazos con `code`, `review` y marca en Pedidos, bloqueo, límite y pausa del fiado en la ficha. **Sigue:** probarlo de punta a punta con NexoTienda en un comercio de prueba, cuando ClubPay tenga la web de alta. | NexoPOS, NexoTienda, ClubPay |
-| **Entrada sin contraseña desde B2B (`/entrar`, modo soporte)** | Construida y probada en local en modo mock el 28/10 (entrada, franja, Salir, recarga 410, vencido 410, suspendido 403, operador en ventas y caja). **Falta:** deploy, aplicar a mano el bloque `/entrar` de nginx (sin access log) y que B2B pruebe desde su admin. Respuesta en `RESPUESTA-ENTRAR-A-NEXOB2B.md`. *PENDIENTE DE VALIDAR:* el cierre de la pestaña con `window.opener` (el navegador de pruebas no abre ventanas hijas) y el canje real contra `nexob2b.app`. | German, NexoB2B |
+| **Entrada sin contraseña desde B2B (`/entrar`, modo soporte)** | Construida y probada en local en modo mock el 28/10 (entrada, franja, Salir, recarga 410, vencido 410, suspendido 403, operador en ventas y caja). **Desplegado el 28/10** con el bloque `/entrar` de nginx aplicado (verificado: `no-referrer` y sin línea en el access log). **Falta:** que B2B pruebe desde su admin. Respuesta en `RESPUESTA-ENTRAR-A-NEXOB2B.md`. *PENDIENTE DE VALIDAR:* el cierre de la pestaña con `window.opener` (el navegador de pruebas no abre ventanas hijas) y el canje real contra `nexob2b.app`. | German, NexoB2B |
 | **Resúmenes en la tienda** | Esperando la decisión de German. Recomendación escrita: que **no** vayan (ver `RESPUESTA-3-LIBRETA-A-NEXOTIENDA.md`). | German |
 
 ## Pendiente, sin empezar
@@ -124,9 +124,9 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 ## Migraciones
 
-**48 en el repo, 46 en producción.** Corren solas al arrancar el
-backend. `047_importaciones.sql` y `048_operado_por_soporte.sql` se aplican con
-el próximo deploy. Si `045_cuenta_clubpay_unica.sql` encuentra cuentas de ClubPay
+**48 en el repo y en producción.** Corren solas al arrancar el
+backend. `047_importaciones.sql` y `048_operado_por_soporte.sql` entraron con el
+deploy del 28/10. Si `045_cuenta_clubpay_unica.sql` encuentra cuentas de ClubPay
 repetidas no crea el índice y lo avisa en el log del arranque.
 
 ## Desarrollo local
