@@ -1,7 +1,8 @@
 import { Router } from "express";
 import type { PoolClient } from "pg";
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { pool } from "../db.js";
+import { randomUUID } from "node:crypto";
+import { pool, audit } from "../db.js";
+import { operador } from "../middleware/auth.js";
 import { HttpError } from "../middleware/error.js";
 import { ajustarStockB2B, isMockMode, type ResultadoStockB2B } from "../integrations/nexob2b.js";
 import { requierePlataforma } from "./plataforma.js";
@@ -246,41 +247,6 @@ export function iniciarStockB2B(): void {
 export const b2bStockWebhookRouter = Router();
 
 /**
- * POST /api/nexob2b/stock/:token
- *
- * Lo llama NexoB2B cuando el stock de una presentación propia cambió por algo
- * que no fuimos nosotros: un despacho, una carga del ERP, un ajuste en el
- * portal. Nunca por una venta del mostrador, que es la que mandamos nosotros:
- * el eco volvería a descontar lo mismo dos veces.
- *
- * Se autentica de dos formas, y las dos conviven a propósito:
- *
- * - El token de la URL, que alcanza solo. Fue lo primero que hubo, porque del
- *   otro lado se configuraba una URL y nada más.
- * - `X-Nexob2b-Secret`, que NexoB2B agregó después. Es mejor: un secreto en
- *   una URL termina en los logs del proxy y en el portapapeles del que la
- *   pegue.
- *
- * El secreto no se exige por existir, sino por haber funcionado al menos una
- * vez. Si se exigiera desde que el comerciante lo genera acá, y del otro lado
- * todavía no lo cargó nadie, todos los avisos rebotarían con 401: el que
- * prendió el interruptor se cortaría el circuito a sí mismo, que es justo lo
- * que no puede pasar. Así que el primer aviso que llegue firmado y correcto
- * enciende la exigencia, y de ahí en más no se afloja. Regenerar la apaga:
- * un secreto nuevo que allá no cargaron es la misma situación del principio.
- *
- * La comparación es de tiempo constante. Un `===` sobre un secreto contesta
- * más rápido cuando los primeros caracteres no coinciden, y eso se mide.
- *
- * `stock` es la cantidad RESULTANTE, no un delta: es el número a escribir. Por
- * eso el movimiento guarda la diferencia contra lo que teníamos, que es lo que
- * el comerciante necesita leer cuando revisa el historial.
- *
- * Contesta 200 aunque un ítem no exista acá. NexoB2B manda esto best-effort y
- * sin reintentos; un 4xx no le haría reintentar y sí llenaría sus logs de un
- * error que no es suyo —que el comercio todavía no importó ese producto—.
- */
-/**
  * Aplica lo que NexoB2B dice que quedó. `stock` es el total resultante, no un
  * delta: es el número a escribir. El movimiento guarda la diferencia contra lo
  * que teníamos, que es lo que el comerciante necesita leer en el historial.
@@ -296,19 +262,24 @@ async function aplicarStockDeB2B(
     let aplicados = 0;
     const desconocidos: string[] = [];
     for (const raw of items) {
-      const item = raw as { presentacion_id?: unknown; stock?: unknown };
+      const item = raw as { presentacion_id?: unknown; pmp_id?: unknown; stock?: unknown };
       const presentacionId = String(item?.presentacion_id ?? "");
+      const pmpId = String(item?.pmp_id ?? "");
       const stock = Number(item?.stock);
-      if (!presentacionId || !Number.isFinite(stock)) continue;
+      if ((!presentacionId && !pmpId) || !Number.isFinite(stock)) continue;
 
+      // nexob2b_id guarda la presentación (pp_) si el producto entró por la
+      // importación del catálogo propio, o el listing (pmp_) si entró por una
+      // recepción de compra. NexoB2B manda los dos; se busca por cualquiera.
       const { rows: [linea] } = await client.query(
         `SELECT s.product_id, s.quantity
            FROM stock_items s JOIN products p ON p.id = s.product_id
-          WHERE s.commerce_id = $1 AND p.nexob2b_id = $2 AND s.b2b_propio
+          WHERE s.commerce_id = $1 AND p.nexob2b_id IN ($2::text, $3::text) AND s.b2b_propio
+          LIMIT 1
           FOR UPDATE OF s`,
-        [commerceId, presentacionId]
+        [commerceId, presentacionId || null, pmpId || null]
       );
-      if (!linea) { desconocidos.push(presentacionId); continue; }
+      if (!linea) { desconocidos.push(presentacionId || pmpId); continue; }
 
       const delta = stock - Number(linea.quantity);
       if (delta === 0) continue;
@@ -348,12 +319,20 @@ const origenDe = (body: unknown): string => {
 };
 
 /**
- * POST /api/nexob2b/stock — la puerta de plataforma, sin nada por comercio.
+ * POST /api/nexob2b/stock — lo que despachó el mayorista, por la puerta de
+ * plataforma.
  *
- * Es la que debería usarse. La de abajo, con un token y un secreto por
- * comercio, obliga a que alguien copie dos valores de una pantalla a otra por
- * cada negocio que quiera esto. Con uno funciona; con veinte es un trabajo, y
- * uno donde equivocarse no avisa.
+ * Lo llama NexoB2B cuando el stock de una presentación propia cambió por algo
+ * que no fuimos nosotros: un despacho, una carga del ERP, un ajuste en el
+ * portal. Nunca por una venta del mostrador: el eco descontaría dos veces.
+ *
+ * Hubo antes una puerta por comercio (`/stock/:token`, con un secreto), que
+ * obligaba a copiar dos valores a NexoB2B por cada negocio —y el portal del
+ * comercio no tiene dónde pegarlos—. Nunca recibió un aviso en producción y se
+ * sacó el 28/10 (migración 049).
+ *
+ * Contesta 200 aunque un ítem no exista acá: es que el comercio todavía no lo
+ * importó, no un error de NexoB2B.
  *
  * Acá no hay nada que generar ni que pegar: NexoB2B ya tiene la clave de
  * plataforma —la misma con la que verifica los slugs— y nos dice de qué
@@ -387,57 +366,6 @@ b2bStockWebhookRouter.post("/", requierePlataforma, async (req, res, next) => {
   }
 });
 
-/**
- * POST /api/nexob2b/stock/:token — la puerta por comercio.
- *
- * Queda mientras NexoB2B siga mandando por acá. No se saca todavía porque
- * sacarla antes de que migren corta los avisos de los comercios que ya la
- * tienen cargada, y eso no se nota hasta que un stock deja de moverse.
- */
-b2bStockWebhookRouter.post("/:token", async (req, res, next) => {
-  try {
-    const { rows: [comercio] } = await pool.query(
-      `SELECT id, b2b_stock_sync, b2b_webhook_secret, b2b_webhook_secret_ok_at
-         FROM commerces WHERE b2b_webhook_token = $1`,
-      [String(req.params.token)]
-    );
-    if (!comercio) throw new HttpError(404, "Token desconocido");
-
-    if (comercio.b2b_webhook_secret) {
-      const firmado = mismoSecreto(req.get("x-nexob2b-secret"), String(comercio.b2b_webhook_secret));
-      if (firmado && !comercio.b2b_webhook_secret_ok_at) {
-        // Llegó el primero bien firmado: de acá en adelante es obligatorio.
-        await pool.query(
-          "UPDATE commerces SET b2b_webhook_secret_ok_at = now() WHERE id = $1 AND b2b_webhook_secret_ok_at IS NULL",
-          [comercio.id]
-        );
-      }
-      if (!firmado) {
-        if (comercio.b2b_webhook_secret_ok_at) throw new HttpError(401, "Secreto inválido");
-        // Todavía sin confirmar: vale el token de la URL. Pero si vino un
-        // header y no coincide, eso no es "todavía no lo cargaron": es un
-        // secreto viejo del otro lado, y conviene que se vea en el log.
-        if (req.get("x-nexob2b-secret")) {
-          console.warn(`[b2b-stock] comercio ${comercio.id}: llegó un aviso con un secreto que no coincide`);
-        }
-      }
-    }
-    if (!comercio.b2b_stock_sync) {
-      // Apagado no es un error: el comerciante lo apagó a propósito y NexoB2B
-      // no tiene por qué enterarse ni reintentar.
-      res.json({ ok: true, aplicados: 0, motivo: "sincronización apagada" });
-      return;
-    }
-
-    const { aplicados, noEncontrados } = await aplicarStockDeB2B(
-      comercio.id, itemsDe(req.body), origenDe(req.body)
-    );
-    res.json({ ok: true, aplicados, no_encontrados: noEncontrados });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // ── Configuración ───────────────────────────────────────────────────────────
 
 export const b2bStockRouter = Router();
@@ -447,12 +375,16 @@ b2bStockRouter.get("/", async (req, res, next) => {
   try {
     const commerceId = req.auth.commerceId;
     const { rows: [c] } = await pool.query(
-      `SELECT b2b_stock_sync, b2b_webhook_token, b2b_webhook_secret, b2b_webhook_secret_ok_at
-         FROM commerces WHERE id = $1`,
+      "SELECT b2b_stock_sync FROM commerces WHERE id = $1",
       [commerceId]
     );
     const { rows: [n] } = await pool.query(
       "SELECT COUNT(*)::int AS propios FROM stock_items WHERE commerce_id = $1 AND b2b_propio",
+      [commerceId]
+    );
+    const { rows: [u] } = await pool.query(
+      `SELECT MAX(created_at) AS ultimo FROM stock_movements
+        WHERE commerce_id = $1 AND type = 'b2b'`,
       [commerceId]
     );
     const { rows: [p] } = await pool.query(
@@ -466,11 +398,9 @@ b2bStockRouter.get("/", async (req, res, next) => {
       // Sin catálogo propio importado no hay nada que sincronizar, y mostrar el
       // interruptor sería ofrecer algo que no va a hacer nada.
       productosPropios: n.propios,
-      webhookUrl: c?.b2b_webhook_token ? urlDelWebhook(String(c.b2b_webhook_token)) : null,
-      webhookSecret: c?.b2b_webhook_secret ?? null,
-      // Si todavía no llegó ninguno firmado, el secreto no se exige: la
-      // pantalla lo dice, para que el comerciante sepa que falta un paso allá.
-      secretoConfirmado: Boolean(c?.b2b_webhook_secret_ok_at),
+      // Si NexoB2B avisó alguna vez. Sin esto, un interruptor prendido con la
+      // otra mitad muerta se ve igual que uno que anda.
+      ultimoAvisoB2B: u?.ultimo ?? null,
       pendientes: p.pendientes,
       ultimoError: p.ultimo_error ?? null,
       modoMock: isMockMode(),
@@ -480,79 +410,19 @@ b2bStockRouter.get("/", async (req, res, next) => {
   }
 });
 
-/**
- * PUT /api/b2b-stock — prender o apagar.
- *
- * Al prender se genera el token si no existía. No se borra al apagar: el
- * comerciante que apaga para probar algo y vuelve a prender no tiene que ir a
- * reconfigurar la URL en NexoB2B.
- */
+/** PUT /api/b2b-stock — prender o apagar. */
 b2bStockRouter.put("/", async (req, res, next) => {
   try {
-    const commerceId = req.auth.commerceId;
-    const activo = Boolean(req.body?.activo);
     const { rows: [c] } = await pool.query(
-      `UPDATE commerces
-          SET b2b_stock_sync = $2,
-              b2b_webhook_token = COALESCE(b2b_webhook_token, $3),
-              b2b_webhook_secret = COALESCE(b2b_webhook_secret, $4)
-        WHERE id = $1
-        RETURNING b2b_stock_sync, b2b_webhook_token, b2b_webhook_secret`,
-      [commerceId, activo,
-       activo ? randomBytes(32).toString("hex") : null,
-       activo ? randomBytes(32).toString("hex") : null]
+      "UPDATE commerces SET b2b_stock_sync = $2 WHERE id = $1 RETURNING b2b_stock_sync",
+      [req.auth.commerceId, Boolean(req.body?.activo)]
     );
-    res.json({
-      activo: Boolean(c.b2b_stock_sync),
-      webhookUrl: c.b2b_webhook_token ? urlDelWebhook(String(c.b2b_webhook_token)) : null,
-      webhookSecret: c.b2b_webhook_secret ?? null,
-    });
+    // Quién lo prendió importa: el 28/10 apareció prendido en un comercio que
+    // tenía que estar apagado, y no había forma de saber cuándo ni quién.
+    await audit(req.auth.commerceId, c.b2b_stock_sync ? "b2b_stock.prender" : "b2b_stock.apagar",
+      undefined, undefined, { operador: operador(req.auth) });
+    res.json({ activo: Boolean(c.b2b_stock_sync) });
   } catch (err) {
     next(err);
   }
 });
-
-/**
- * POST /api/b2b-stock/regenerar — si se filtraron.
- *
- * Cambian los dos de una: el que regenera porque perdió el control de uno no
- * sabe si perdió el otro, y dejarle la mitad vieja es dejarle el problema.
- * Hasta que los vuelva a cargar en NexoB2B, los avisos de ellos no entran.
- */
-b2bStockRouter.post("/regenerar", async (req, res, next) => {
-  try {
-    const { rows: [c] } = await pool.query(
-      `UPDATE commerces SET b2b_webhook_token = $2, b2b_webhook_secret = $3,
-              b2b_webhook_secret_ok_at = NULL
-        WHERE id = $1 RETURNING b2b_webhook_token, b2b_webhook_secret`,
-      [req.auth.commerceId, randomBytes(32).toString("hex"), randomBytes(32).toString("hex")]
-    );
-    res.json({
-      webhookUrl: urlDelWebhook(String(c.b2b_webhook_token)),
-      webhookSecret: c.b2b_webhook_secret,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
- * La URL que el comerciante pega en NexoB2B.
- *
- * El dominio sale de PUBLIC_URL porque acá no hay request del comerciante de
- * la cual deducirlo cuando la arma el que despacha, y porque detrás de nginx
- * el Host puede ser localhost.
- */
-/** Compara sin filtrar por tiempo dónde dejan de coincidir. */
-function mismoSecreto(recibido: string | undefined, esperado: string): boolean {
-  if (!recibido) return false;
-  const a = Buffer.from(recibido);
-  const b = Buffer.from(esperado);
-  // timingSafeEqual exige el mismo largo; un largo distinto ya es distinto.
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-function urlDelWebhook(token: string): string {
-  const base = (process.env.PUBLIC_URL ?? "https://nexopos.app").replace(/\/$/, "");
-  return `${base}/api/nexob2b/stock/${token}`;
-}

@@ -49,8 +49,8 @@ de la tienda online, y los interruptores de integración.
 
 Campos que conviene conocer: `nexob2b_id`, `nexob2b_token` (el JWT de B2B),
 `slug`, `closing_day` / `due_day` (períodos de cuenta corriente),
-`clubpay_api_key`, `b2b_stock_sync` + `b2b_webhook_token` + `b2b_webhook_secret`
-+ `b2b_webhook_secret_ok_at`, `margen_suma_iva` / `margen_redondeo`,
+`clubpay_api_key`, `b2b_stock_sync` (el token y el secreto por comercio se
+borraron en la 049), `margen_suma_iva` / `margen_redondeo`,
 `tienda_muestra_sin_stock`, y los de medios de pago y envío.
 
 ### `products`

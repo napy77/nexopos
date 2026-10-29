@@ -59,33 +59,15 @@ Si esa tarjeta no está en Configuración, es que faltó el paso 1.
 
 ---
 
-## Paso 3 — En NexoB2B, con tu cuenta de COMERCIO
-
-Este paso puede no hacer falta. Mirá la tarjeta del paso 2: si **no** aparece
-un recuadro que dice *"Falta un paso, en NexoB2B"*, ya está todo conectado y
-podés saltear este paso.
-
-Si aparece, vas a ver dos cajitas con un botón **Copiar** al lado: una
-**Dirección** y un **Secreto**.
-
-1. Copiá la Dirección.
-2. Entrá a **nexob2b.app** con tu cuenta de **comercio** — la que usás para
-   comprar, no la de mayorista.
-3. Buscá la clave de API de tu comercio y pegala en el campo de la dirección.
-4. Volvé a NexoPOS, copiá el Secreto, y pegalo en el campo del secreto.
-
-Los dos son secretos: quien los tenga puede cambiarte el stock. No los mandes
-por un grupo de WhatsApp ni los dejes anotados en el mostrador.
-
----
-
 ## Cómo saber que quedó bien
 
-Volvé a NexoPOS → Configuración → la tarjeta "Stock compartido con NexoB2B":
+No hay nada que copiar ni pegar en NexoB2B: los dos sistemas se hablan solos.
 
-- **"Esperando el primer aviso firmado"** → todavía falta el paso 3.
-- **"Los avisos llegan firmados con el secreto"** → listo, anda en los dos
-  sentidos.
+En NexoPOS → Configuración → la tarjeta "Stock compartido con NexoB2B":
+
+- **"Último aviso de NexoB2B: …"** → lo que despachás por mayor está llegando.
+- **"Todavía no llegó ningún aviso de NexoB2B"** → si ya despachaste algo de
+  tu catálogo propio y sigue así, avisanos.
 
 La prueba de verdad es más simple: vendé una unidad por el mostrador de
 NexoPOS y fijate que en NexoB2B haya bajado.
@@ -123,10 +105,9 @@ cómo quedarían.
 **No encuentro la tarjeta "Stock compartido" en Configuración.**
 Faltó el paso 1. Volvé a Productos y apretá "Importar mi catálogo".
 
-**Dice "Esperando el primer aviso firmado" y ya cargué todo en NexoB2B.**
-Revisá que la dirección y el secreto estén pegados enteros, sin espacios al
-principio ni al final. Y que los hayas cargado en tu cuenta de **comercio** de
-NexoB2B, no en la de mayorista.
+**Despaché por mayor y no baja en NexoPOS.**
+Fijate la tarjeta: si dice "Todavía no llegó ningún aviso", el problema no es
+tuyo. Avisanos y lo vemos con NexoB2B.
 
 **Vendo en el mostrador y no baja en NexoB2B.**
 El aviso se reintenta solo durante varias horas. Si al día siguiente sigue

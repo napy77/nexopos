@@ -68,12 +68,15 @@ el código.**
   mostrador de un producto propio. Se identifica con `pmp_id`,
   `presentacion_id` o `ean`, en ese orden de precisión. Lleva
   `idempotency_key` = el lote.
-- **Entrada:** `POST /api/nexob2b/stock` con la clave de plataforma (puerta
-  única, sin nada por comercio) o `POST /api/nexob2b/stock/:token` (por
-  comercio, se mantiene hasta que B2B confirme que migró).
+- **Entrada:** `POST /api/nexob2b/stock` con la clave de plataforma y el
+  `comercio_id`. Cruza por `presentacion_id` o `pmp_id`. La puerta por comercio
+  (`/stock/:token`) se sacó el 28/10: nunca recibió un aviso.
 - **Regla:** las dos mitades se prenden juntas. Media sincronización deja el
   número bajando y nunca subiendo, y el comerciante deja de creerle.
-- **Estado:** construido de los dos lados, **apagado** por comercio.
+- **Estado:** la entrada **nunca recibió un aviso en producción** (28/10: cero
+  pedidos en nginx, cero movimientos `b2b`). Pedido a B2B con las causas
+  probables (red sin NAT loopback, filtro por API key):
+  `PEDIDO-AVISOS-STOCK-A-NEXOB2B.md`. Prender o apagar queda en `audit_log`.
 
 ### Slugs y regiones
 - **Dirección:** NexoB2B → NexoPOS

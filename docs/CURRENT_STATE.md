@@ -60,7 +60,7 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 | Qué | Qué falta | De quién |
 |---|---|---|
-| **Stock compartido con NexoB2B** | Construido y probado de los dos lados. El interruptor está **apagado** hasta que Rivera Hogar confirme cómo se comporta su ERP. | decisión del cliente |
+| **Stock compartido con NexoB2B** | **La mitad B2B → NexoPOS nunca anduvo en producción**: el 28/10 se vio el interruptor de Rivera Hogar prendido y cero avisos recibidos desde siempre. Se sacó la puerta por comercio y su pantalla de copiar y pegar (migración 049), la tarjeta ahora muestra el último aviso recibido y prender o apagar queda en `audit_log`. Pedido a B2B: `PEDIDO-AVISOS-STOCK-A-NEXOB2B.md`. El interruptor va **apagado** hasta que llegue el primer aviso y Rivera confirme cómo se comporta su ERP. | NexoB2B, decisión del cliente |
 | **Libreta en la tienda** | Canje, estado y `linkedAt` construidos. El **emparejar por código** espera que ClubPay construya `/pos/tienda/emparejar`. | ClubPay |
 | **QR de vinculación en el mostrador** | Pedido escrito (`PEDIDO-QR-VINCULACION-A-CLUBPAY.md`). Sin respuesta. | ClubPay |
 | **Resúmenes hacia ClubPay** | Retenidos por `CLUBPAY_STATEMENTS` (default apagado): sin la adjudicación de movimientos del lado de ClubPay, la compra se contaría dos veces. | ClubPay |
@@ -124,9 +124,9 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 ## Migraciones
 
-**48 en el repo y en producción.** Corren solas al arrancar el
-backend. `047_importaciones.sql` y `048_operado_por_soporte.sql` entraron con el
-deploy del 28/10. Si `045_cuenta_clubpay_unica.sql` encuentra cuentas de ClubPay
+**49 en el repo, 48 en producción.** Corren solas al arrancar el
+backend. `049_sin_webhook_por_comercio.sql` (borra el token y el secreto por comercio)
+se aplica con el próximo deploy. Si `045_cuenta_clubpay_unica.sql` encuentra cuentas de ClubPay
 repetidas no crea el índice y lo avisa en el log del arranque.
 
 ## Desarrollo local

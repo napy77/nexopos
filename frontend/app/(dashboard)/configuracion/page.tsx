@@ -1084,8 +1084,7 @@ function ReglasPedidos({ onError }: { onError: (m: string) => void }) {
 function StockB2B({ onError }: { onError: (m: string) => void }) {
   const [estado, setEstado] = useState<{
     activo: boolean; productosPropios: number;
-    webhookUrl: string | null; webhookSecret: string | null;
-    secretoConfirmado: boolean;
+    ultimoAvisoB2B: string | null;
     pendientes: number; ultimoError: string | null; modoMock: boolean;
   } | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -1150,50 +1149,15 @@ function StockB2B({ onError }: { onError: (m: string) => void }) {
         </p>
       )}
 
-      {estado.activo && estado.webhookUrl && (
-        <div style={{ marginTop: 10 }}>
-          <strong style={{ fontSize: 13 }}>Falta un paso, en NexoB2B</strong>
-          <p className="muted" style={{ fontSize: 12, margin: "4px 0" }}>
-            Pegá esta dirección en tu cuenta de NexoB2B, en la clave de API de tu
-            comercio. Sin eso te avisamos nosotros a ellos, pero ellos no a vos.
-          </p>
-          <label style={{ fontSize: 12, fontWeight: 600 }}>Dirección</label>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <code style={{ fontSize: 11, wordBreak: "break-all", flex: 1 }}>
-              {estado.webhookUrl}
-            </code>
-            <BotonCopiar texto={estado.webhookUrl} />
-          </div>
-
-          {estado.webhookSecret && (
-            <>
-              <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginTop: 8 }}>
-                Secreto
-              </label>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <code style={{ fontSize: 11, wordBreak: "break-all", flex: 1 }}>
-                  {estado.webhookSecret}
-                </code>
-                <BotonCopiar texto={estado.webhookSecret} />
-              </div>
-            </>
-          )}
-
-          <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-            Los dos son secretos: quien los tenga puede cambiarte el stock. Van en la
-            misma clave de API, en el campo de dirección y en el de secreto.
-          </p>
-
-          {/* Mientras no llegue uno firmado, el secreto no se exige: si se
-              exigiera desde que se genera, el comerciante que todavía no lo
-              cargó allá se cortaría los avisos a sí mismo. */}
-          <p className={estado.secretoConfirmado ? "badge ok" : "badge warn"}
-            style={{ marginTop: 6 }}>
-            {estado.secretoConfirmado
-              ? "Los avisos llegan firmados con el secreto"
-              : "Esperando el primer aviso firmado. Hasta que llegue, alcanza con la dirección."}
-          </p>
-        </div>
+      {/* La otra mitad no tiene nada que configurar acá: NexoB2B avisa por la
+          puerta de plataforma. Lo único que el comerciante puede ver es si
+          llega, y eso es lo que conviene mostrarle. */}
+      {estado.activo && (
+        <p className={estado.ultimoAvisoB2B ? "badge ok" : "badge warn"} style={{ marginTop: 6 }}>
+          {estado.ultimoAvisoB2B
+            ? `Último aviso de NexoB2B: ${new Date(estado.ultimoAvisoB2B).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+            : "Todavía no llegó ningún aviso de NexoB2B: lo que despachás por mayor no está bajando acá."}
+        </p>
       )}
 
       {estado.pendientes > 0 && (
