@@ -123,6 +123,12 @@ Nombre y no id porque la importación de catálogo propio guarda nombres.
 `store_searches` (términos buscados en la tienda), `stock_movements`,
 `audit_log`, `wholesaler_offers`.
 
+### Quién operó (modo soporte)
+`sales.operado_por`, `cash_sessions.abierta_por` / `cerrada_por` y
+`cash_movements.operado_por` (migración 048). **NULL es el comercio**; un email
+es el equipo Nexo entrando por `/entrar`. Texto y no FK: el admin vive en B2B.
+En Odoo mapea a una nota o a `user_id` si algún día hay usuarios.
+
 ## Identificadores compartidos
 
 | Id | Forma | Significa |

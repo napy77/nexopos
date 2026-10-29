@@ -9,6 +9,8 @@
   --danger: #dc2626;
   --success: #16a34a;
   --warning: #d97706;
+  /* Alto de la franja de modo soporte; 0 cuando no está. */
+  --franja: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -23,7 +25,7 @@ body {
 
 a { color: var(--primary); text-decoration: none; }
 
-.layout { display: flex; min-height: 100vh; }
+.layout { display: flex; min-height: calc(100vh - var(--franja)); }
 
 .sidebar {
   width: 210px;
@@ -170,7 +172,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
   display: grid;
   grid-template-columns: 400px 1fr;
   gap: 0;
-  height: calc(100vh - 48px);
+  height: calc(100vh - 48px - var(--franja));
   margin: -24px;
   overflow: hidden;
 }
@@ -410,3 +412,17 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .login-box button { width: 100%; }
 .login-alta { text-align: center; font-size: 13px; margin: 16px 0 0; }
 .login-volver { text-align: center; font-size: 13px; margin-top: 14px; }
+
+/* Franja del modo soporte: el equipo Nexo dentro de la caja de un comercio.
+   Pegada arriba y en ámbar para que nadie la confunda con su propia sesión. */
+.con-soporte { --franja: 40px; }
+.soporte-franja {
+  position: sticky; top: 0; z-index: 50; box-sizing: border-box; min-height: 40px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 20px;
+  background: #fef3c7; color: #78350f; border-bottom: 1px solid #fcd34d;
+  font-size: 13px;
+}
+.soporte-franja button, .soporte-franja button:hover { flex-shrink: 0; background: #78350f; }
+.soporte-quien { opacity: 0.8; }
+.badge.soporte { background: #fef3c7; color: #78350f; }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import PDFDocument from "pdfkit";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
+import { operador } from "../middleware/auth.js";
 import { renderTicketHtml, fmtQty, fmtMoney, PAYMENT_LABEL } from "./ticket-render.js";
 import { sesionAbierta } from "./caja.js";
 import { registrarTransaccion, consultarCharge, aCentavos, aPesos, RECORTE_TEXTO } from "../integrations/clubpay.js";
@@ -221,8 +222,9 @@ salesRouter.post("/", async (req, res, next) => {
     } = await client.query(
       `INSERT INTO sales (commerce_id, ticket_number, customer_id, payment_method,
                           subtotal, discount, total, cash_session_id, paid_amount,
-                          clubpay_transaction_id, clubpay_member, clubpay_club, clubpay_discount)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                          clubpay_transaction_id, clubpay_member, clubpay_club, clubpay_discount,
+                          operado_por)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING id, ticket_number, created_at`,
       [commerceId, next_number, body.customerId ?? null, body.paymentMethod,
        subtotal, body.discount, total, sesion.id,
@@ -231,7 +233,8 @@ salesRouter.post("/", async (req, res, next) => {
        clubpayTransactionId,
        clubpaySocio,
        clubpayClub,
-       hayClubpay ? descuentoClubpay : null]
+       hayClubpay ? descuentoClubpay : null,
+       operador(req.auth)]
     );
 
     /*
@@ -413,13 +416,14 @@ salesRouter.post("/:id/refund", async (req, res, next) => {
       rows: [refund],
     } = await client.query(
       `INSERT INTO sales (commerce_id, ticket_number, customer_id, payment_method,
-                          subtotal, discount, total, refund_of, cash_session_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                          subtotal, discount, total, refund_of, cash_session_id, operado_por)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id, ticket_number`,
       [
         commerceId, next_number, original.customer_id, original.payment_method,
         -original.subtotal, -original.discount, -original.total, original.id,
         sesionReembolso.id,   // el reembolso descuenta de la caja de HOY
+        operador(req.auth),
       ]
     );
     // Espejo de las formas de pago: si parte la cubrió un cupón de ClubPay,
@@ -522,7 +526,7 @@ salesRouter.get("/", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT s.id, s.ticket_number, s.payment_method, s.subtotal, s.discount, s.total,
-              s.refund_of, s.created_at, c.name AS customer_name,
+              s.refund_of, s.created_at, s.operado_por, c.name AS customer_name,
               (SELECT r.id FROM sales r WHERE r.refund_of = s.id LIMIT 1) AS refunded_by
        FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
        WHERE s.commerce_id = $1 ORDER BY s.created_at DESC LIMIT 200`,

@@ -29,6 +29,9 @@ interface SesionCerrada {
   id: number; opened_at: string; closed_at: string;
   opening_amount: string; counted_amount: string; closing_note: string | null;
   closing_summary: Cierre | null;
+  /** Email del equipo Nexo si abrió o cerró en modo soporte. */
+  abierta_por?: string | null;
+  cerrada_por?: string | null;
 }
 
 const MEDIOS = [
@@ -301,8 +304,14 @@ export default function CajaPage() {
               const dif = s.closing_summary?.diferencia ?? 0;
               return (
                 <tr key={s.id}>
-                  <td>{new Date(s.opened_at).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                  <td>{new Date(s.closed_at).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                  <td>
+                    {new Date(s.opened_at).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    {s.abierta_por && <span className="badge soporte" style={{ marginLeft: 6 }} title={`Abrió ${s.abierta_por}`}>Soporte Nexo</span>}
+                  </td>
+                  <td>
+                    {new Date(s.closed_at).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    {s.cerrada_por && <span className="badge soporte" style={{ marginLeft: 6 }} title={`Cerró ${s.cerrada_por}`}>Soporte Nexo</span>}
+                  </td>
                   <td className="num">{money(s.opening_amount)}</td>
                   <td className="num">{money(s.closing_summary?.totalVendido ?? 0)}</td>
                   <td className="num">{money(s.counted_amount)}</td>

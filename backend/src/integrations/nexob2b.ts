@@ -403,6 +403,79 @@ export async function login(email: string, password: string): Promise<{ token: s
   }
 }
 
+/** Quién del equipo Nexo está adentro, cuando la entrada es de soporte. */
+export interface B2BSoporte {
+  ingreso_id: string;
+  admin_id: string;
+  admin_email: string | null;
+  desde: string;
+}
+
+export type ResultadoEntrada =
+  | { ok: true; token: string; comercio: B2BComercio; soporte: B2BSoporte | null }
+  | { ok: false; status: number; codigo: string };
+
+/** Códigos de entrada ya canjeados en modo mock: para probar la recarga (410). */
+const mockEntradasUsadas = new Set<string>();
+
+/**
+ * Canje del enlace `/entrar?token=…` que genera B2B (un solo uso, 2 minutos).
+ *
+ * No usa `api()` porque acá el `codigo` del error es lo que importa: un 410
+ * manda al login y un 403 muestra que el comercio está suspendido, y `api()`
+ * convierte todo 401 en "sesión expirada" y se queda sólo con el texto.
+ *
+ * Va con la clave de plataforma, la misma que ya usamos para `/api/v1/fichas`.
+ */
+export async function canjearEntrada(codigo: string): Promise<ResultadoEntrada> {
+  if (isMockMode()) {
+    // mock-soporte (equipo Nexo), mock-comercio (el propio comercio),
+    // mock-vencido, mock-suspendido. Cualquier sufijo sirve para tener varios:
+    // mock-soporte-2. Un código se canjea una vez, como en B2B.
+    const tipo = codigo.replace(/^mock-([a-z]+).*$/, "$1");
+    if (!codigo.startsWith("mock-")) return { ok: false, status: 404, codigo: "token_invalido" };
+    if (mockEntradasUsadas.has(codigo)) return { ok: false, status: 410, codigo: "token_usado" };
+    if (tipo === "vencido") return { ok: false, status: 410, codigo: "token_vencido" };
+    if (tipo === "suspendido") return { ok: false, status: 403, codigo: "comercio_suspendido" };
+    if (tipo !== "soporte" && tipo !== "comercio") return { ok: false, status: 404, codigo: "token_invalido" };
+    mockEntradasUsadas.add(codigo);
+    const email = "demo@nexopos.app";
+    return {
+      ok: true,
+      token: `mock-token-${email}`,
+      comercio: { id: `com_mock_${email}`, nombre: "demo", email, estado: "aprobado", ciudad: "Córdoba", provincia: "Córdoba" },
+      soporte: tipo === "soporte"
+        ? { ingreso_id: `ings_mock_${Date.now()}`, admin_id: "user_mock", admin_email: "admin@nexob2b.app", desde: new Date().toISOString() }
+        : null,
+    };
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${config.nexob2b.apiUrl}/api/v1/pos/entrada`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-publishable-api-key": config.nexob2b.publishableKey,
+        Authorization: `Bearer ${config.platformKey}`,
+      },
+      body: JSON.stringify({ token: codigo }),
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : "error de red";
+    throw new HttpError(502, `No se pudo conectar con NexoB2B: ${detail}`);
+  }
+
+  if (res.ok) {
+    const data = await res.json() as { token: string; comercio: B2BComercio; soporte?: B2BSoporte | null };
+    return { ok: true, token: data.token, comercio: data.comercio, soporte: data.soporte ?? null };
+  }
+  const data = await res.json().catch(() => ({})) as { codigo?: string; error?: string };
+  // Sin el código en el log: es una credencial, aunque sea de un solo uso.
+  console.error(`[nexob2b] POST /api/v1/pos/entrada → ${res.status} ${data.codigo ?? ""} ${data.error ?? ""}`);
+  return { ok: false, status: res.status, codigo: data.codigo ?? "error" };
+}
+
 export async function getTaxonomia(): Promise<B2BTaxonomia> {
   if (isMockMode()) {
     return {

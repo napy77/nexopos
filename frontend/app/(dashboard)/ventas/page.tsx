@@ -23,6 +23,8 @@ interface SaleLine {
 interface Sale {
   id: number; ticket_number: number; payment_method: string; total: string;
   created_at: string; customer_name: string | null; refund_of: number | null; refunded_by: number | null;
+  /** Email del equipo Nexo si la hizo en modo soporte; null si la hizo el comercio. */
+  operado_por?: string | null;
 }
 
 const CATEGORY_EMOJI: Record<string, string> = {
@@ -1357,7 +1359,14 @@ export default function VentasPage() {
               <tbody>
                 {refundList.map((s) => (
                   <tr key={s.id}>
-                    <td>#{s.ticket_number}</td>
+                    <td>
+                      #{s.ticket_number}
+                      {s.operado_por && (
+                        <span className="badge soporte" style={{ marginLeft: 6 }} title={`Hecha por ${s.operado_por}`}>
+                          Soporte Nexo
+                        </span>
+                      )}
+                    </td>
                     <td>{s.customer_name ?? "Consumidor Final"}</td>
                     <td>{METHOD_LABEL[s.payment_method] ?? s.payment_method}</td>
                     <td className="num">{money(s.total)}</td>

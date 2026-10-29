@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
+import { operador } from "../middleware/auth.js";
 import { sesionAbierta } from "./caja.js";
 import { descontarCupo } from "./disponibilidad.js";
 import { periodoAbierto } from "./cuenta-corriente.js";
@@ -161,7 +162,7 @@ function avanzar(paso: "listo" | "en_camino" | "entregado") {
      * Antes no, porque un pedido aceptado todavía puede cancelarse y una nota
      * de venta que se borra no es una nota de venta.
      */
-    if (paso === "entregado") await emitirNotaDeVenta(client, commerceId, pedido);
+    if (paso === "entregado") await emitirNotaDeVenta(client, commerceId, pedido, operador(req.auth));
 
     await encolarEvento(client, commerceId, id, `order.${paso}` as EventoPedido,
       await armarOrder(id, client));
@@ -283,7 +284,8 @@ pedidosPosRouter.post("/:id/cancelar", async (req, res, next) => {
 async function emitirNotaDeVenta(
   client: { query: (q: string, v?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
   commerceId: number,
-  pedido: Record<string, unknown>
+  pedido: Record<string, unknown>,
+  operadoPor: string | null
 ): Promise<void> {
   const METODO: Record<string, string> = {
     efectivo_entrega: "cash", online: "mercadopago", cuenta_corriente: "account",
@@ -305,10 +307,10 @@ async function emitirNotaDeVenta(
   );
   const { rows: [venta] } = await client.query(
     `INSERT INTO sales (commerce_id, ticket_number, customer_id, payment_method,
-                        subtotal, discount, total, cash_session_id, order_id)
-     VALUES ($1,$2,$3,$4,$5,0,$6,$7,$8) RETURNING id, ticket_number`,
+                        subtotal, discount, total, cash_session_id, order_id, operado_por)
+     VALUES ($1,$2,$3,$4,$5,0,$6,$7,$8,$9) RETURNING id, ticket_number`,
     [commerceId, next_number, pedido.customer_id ?? null, metodo,
-     Number(pedido.subtotal), total, sesion?.id ?? null, pedido.id]
+     Number(pedido.subtotal), total, sesion?.id ?? null, pedido.id, operadoPor]
   );
 
   const { rows: lineas } = await client.query(

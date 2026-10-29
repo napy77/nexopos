@@ -12,7 +12,7 @@ export async function api<T = unknown>(path: string, init?: RequestInit): Promis
     },
   });
   if (res.status === 401 && typeof window !== "undefined") {
-    localStorage.removeItem("nexopos_token");
+    borrarSesion();
     window.location.href = "/login";
     throw new Error("Sesión expirada");
   }
@@ -21,6 +21,28 @@ export async function api<T = unknown>(path: string, init?: RequestInit): Promis
     throw new Error(body.error ?? "Error de servidor");
   }
   return res.json() as Promise<T>;
+}
+
+/**
+ * Sesión del equipo Nexo dentro de la caja de un comercio (`/entrar`).
+ * Se guarda aparte del token para que la franja la lea sin decodificar el JWT.
+ */
+export interface Soporte { adminEmail: string | null; desde: string; vence: string }
+
+export function getSoporte(): Soporte | null {
+  try {
+    const raw = localStorage.getItem("nexopos_soporte");
+    return raw ? (JSON.parse(raw) as Soporte) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Todo lo que es de la sesión. Un login nuevo empieza de cero, sin restos. */
+export function borrarSesion(): void {
+  localStorage.removeItem("nexopos_token");
+  localStorage.removeItem("nexopos_commerce");
+  localStorage.removeItem("nexopos_soporte");
 }
 
 export function getToken(): string | null {

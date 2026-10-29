@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { NEXOB2B_REGISTRO_URL } from "@/lib/sitio";
+import { borrarSesion } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,6 +25,7 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Error de login");
+      borrarSesion();
       localStorage.setItem("nexopos_token", data.token);
       localStorage.setItem("nexopos_commerce", JSON.stringify(data.commerce));
       router.push("/dashboard");

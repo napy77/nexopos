@@ -28,7 +28,7 @@ login es la cuenta de NexoB2B.
 backend/src/
   index.ts          monta todas las rutas — el mapa del sistema
   config.ts         variables de entorno, con el porqué de cada default
-  migrations/       001..041, numeradas, se aplican al arrancar
+  migrations/       001..048, numeradas, se aplican al arrancar
   modules/          un archivo por área (ventas, stock, campañas, …)
   integrations/     nexob2b.ts y clubpay.ts: todo lo que sale por red
   middleware/       auth (JWT), api-key (NexoTienda), erp-key, error

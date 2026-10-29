@@ -27,7 +27,13 @@ Los valores reales viven en `backend/.env` del servidor, que está en
 | `/api/` | backend `127.0.0.1:4000` |
 | `/v1/` | backend `127.0.0.1:4000` |
 | `/health` | backend `127.0.0.1:4000` |
+| `/entrar` | frontend `127.0.0.1:3000`, **sin access log** |
 | `/` | frontend `127.0.0.1:3000` |
+
+**`/entrar` no se loguea.** Trae en la query un código de un solo uso para entrar
+a la caja de un comercio sin contraseña. El bloque está en
+`deploy/nginx-nexopos-ssl.conf` y, como el deploy no toca nginx, se aplica a
+mano (`cp` + `nginx -t` + `reload`, ver el encabezado del archivo).
 
 **`/v1/` necesita su propio bloque.** Sin él, todo lo que consume NexoTienda cae
 en el 404 de Next.js y el error no se parece a lo que pasa.

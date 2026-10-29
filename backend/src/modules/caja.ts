@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
+import { operador } from "../middleware/auth.js";
 import { renderCierreHtml } from "./caja-render.js";
 
 export const cajaRouter = Router();
@@ -138,9 +139,9 @@ cajaRouter.post("/abrir", async (req, res, next) => {
     const {
       rows: [sesion],
     } = await pool.query(
-      `INSERT INTO cash_sessions (commerce_id, opening_amount, opening_note)
-       VALUES ($1, $2, $3) RETURNING id, opened_at, opening_amount`,
-      [commerceId, body.openingAmount, body.note ?? null]
+      `INSERT INTO cash_sessions (commerce_id, opening_amount, opening_note, abierta_por)
+       VALUES ($1, $2, $3, $4) RETURNING id, opened_at, opening_amount`,
+      [commerceId, body.openingAmount, body.note ?? null, operador(req.auth)]
     );
     await audit(commerceId, "caja.abrir", "cash_sessions", sesion.id, { openingAmount: body.openingAmount });
     res.status(201).json({ sesion });
@@ -166,9 +167,9 @@ cajaRouter.post("/movimiento", async (req, res, next) => {
     const {
       rows: [mov],
     } = await pool.query(
-      `INSERT INTO cash_movements (commerce_id, session_id, type, amount, note)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [commerceId, sesion.id, body.type, body.amount, body.note]
+      `INSERT INTO cash_movements (commerce_id, session_id, type, amount, note, operado_por)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [commerceId, sesion.id, body.type, body.amount, body.note, operador(req.auth)]
     );
     await audit(commerceId, `caja.${body.type}`, "cash_movements", mov.id, body);
     res.status(201).json({ ok: true, id: mov.id });
@@ -199,9 +200,10 @@ cajaRouter.post("/cerrar", async (req, res, next) => {
 
     await pool.query(
       `UPDATE cash_sessions
-       SET closed_at = now(), counted_amount = $1, closing_note = $2, closing_summary = $3
+       SET closed_at = now(), counted_amount = $1, closing_note = $2, closing_summary = $3,
+           cerrada_por = $5
        WHERE id = $4`,
-      [body.countedAmount, body.note ?? null, JSON.stringify(cierre), sesion.id]
+      [body.countedAmount, body.note ?? null, JSON.stringify(cierre), sesion.id, operador(req.auth)]
     );
     await audit(commerceId, "caja.cerrar", "cash_sessions", sesion.id, { diferencia });
     res.json({ ok: true, sessionId: sesion.id, cierre });
@@ -261,7 +263,8 @@ cajaRouter.get("/:id/resumen.html", async (req, res, next) => {
 cajaRouter.get("/historial", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, opened_at, closed_at, opening_amount, counted_amount, closing_note, closing_summary
+      `SELECT id, opened_at, closed_at, opening_amount, counted_amount, closing_note, closing_summary,
+              abierta_por, cerrada_por
        FROM cash_sessions
        WHERE commerce_id = $1 AND closed_at IS NOT NULL
        ORDER BY closed_at DESC LIMIT 60`,

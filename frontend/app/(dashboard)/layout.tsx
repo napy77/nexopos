@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api, getToken } from "@/lib/api";
+import { api, getToken, getSoporte, borrarSesion, type Soporte } from "@/lib/api";
 
 const NAV = [
   { href: "/dashboard", label: "Resumen" },
@@ -49,6 +49,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const [commerceName, setCommerceName] = useState("");
   const [pendientes, setPendientes] = useState(0);
+  const [soporte, setSoporte] = useState<Soporte | null>(null);
 
   useEffect(() => {
     if (!getToken()) {
@@ -57,6 +58,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
     const raw = localStorage.getItem("nexopos_commerce");
     if (raw) setCommerceName(JSON.parse(raw).name ?? "");
+    setSoporte(getSoporte());
   }, [router]);
 
   /*
@@ -92,12 +94,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, []);
 
   function logout() {
-    localStorage.removeItem("nexopos_token");
-    localStorage.removeItem("nexopos_commerce");
+    borrarSesion();
+    router.replace("/login");
+  }
+
+  /**
+   * Salir del modo soporte. Si la pestaña la abrió el admin de B2B, se cierra
+   * y el equipo Nexo vuelve a donde estaba; si no, al login como cualquiera.
+   */
+  function salirSoporte() {
+    borrarSesion();
+    if (window.opener) {
+      window.close();
+      // Algunos navegadores no dejan cerrar: que al menos no quede adentro.
+      setTimeout(() => router.replace("/login"), 300);
+      return;
+    }
     router.replace("/login");
   }
 
   return (
+    <div className={soporte ? "con-soporte" : undefined}>
+    {soporte && (
+      <div className="soporte-franja" role="status">
+        <span>
+          <strong>Modo soporte:</strong> estás dentro de <strong>{commerceName || "este comercio"}</strong>{" "}
+          como si fueras el cliente. Lo que hagas queda hecho en su cuenta.
+          {soporte.adminEmail && <span className="soporte-quien"> · {soporte.adminEmail}</span>}
+        </span>
+        <button className="small" onClick={salirSoporte}>Salir</button>
+      </div>
+    )}
     <div className="layout">
       <nav className="sidebar">
         <div className="brand">
@@ -126,6 +153,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </nav>
       <main className="main">{children}</main>
+    </div>
     </div>
   );
 }

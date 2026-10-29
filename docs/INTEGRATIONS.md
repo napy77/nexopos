@@ -20,6 +20,19 @@ el código.**
 - **Regla:** no hay alta propia. Sin cuenta en B2B no hay NexoPOS. La ficha se
   copia pero **no se edita** acá.
 
+### Entrada sin contraseña (`/entrar`, modo soporte)
+- **Dirección:** NexoB2B abre `nexopos.app/entrar?token=…`; NexoPOS canjea
+  contra `POST /api/v1/pos/entrada`
+- **Auth:** `NEXOPOS_PLATFORM_KEY` (la misma de `/api/v1/fichas`), desde el
+  servidor
+- **Contrato:** `PEDIDO-A-NEXOPOS-ENTRAR.md`, `RESPUESTA-ENTRAR-A-NEXOB2B.md`
+- **Reglas:** el código es de un solo uso y vence a los 2 min; se saca de la URL
+  antes de canjearlo y nginx no lo loguea. Con `soporte`, la sesión dura lo que
+  el JWT de B2B (2 h), hay franja visible y lo que se hace guarda el email del
+  admin (`operado_por`, `abierta_por`, `cerrada_por`). **No pisa el
+  `nexob2b_token` del comercio si sigue vigente**: el dueño puede estar usando
+  la caja al mismo tiempo.
+
 ### Catálogo y compras
 - **Dirección:** NexoPOS → NexoB2B
 - **Método:** `GET /store/productos`, `/store/mayoristas/*`, `POST /store/ordenes`
