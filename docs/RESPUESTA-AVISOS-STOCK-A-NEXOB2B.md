@@ -68,9 +68,15 @@ llamamos a dos cosas:
   prendido y después de una venta de un producto propio**.
 
 Un comercio que prende el interruptor y todavía no vendió un producto propio
-nunca quedaba marcado, y nunca recibía avisos. Que Rivera no registre
-llamadas desde el 20/10 no dice que la caja entre con otra cuenta. Lo estamos
-revisando de nuestro lado (cola de salida y logins de Rivera) y les contamos.
+nunca quedaba marcado, y nunca recibía avisos.
+
+**Rivera Hogar, revisado en nuestra base (30/10):** no usa el mostrador de
+NexoPOS. Nunca hizo una venta, su último login es del 16/09 (el del 29/10 fue
+una entrada de soporte) y la cola de salida nunca tuvo un aviso suyo. No hay
+otra cuenta: si algo baja stock en B2B por Rivera, no es NexoPOS. Por eso no
+registran llamadas desde el 20/10, y está bien que no le lleguen avisos.
+Retiramos lo que dijimos el 28/10 sobre «cada venta del mostrador baja el stock
+en B2B»: el interruptor estaba prendido, pero no hubo ventas que avisar.
 
 **Lo cerramos nosotros:** al prender el interruptor, el POS hace un
 `GET /api/v1/pos/productos?page=1&pageSize=1` con el token del comercio. Eso
