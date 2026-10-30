@@ -53,16 +53,15 @@ export async function encolarStockB2B(
      *   presentacion_id  la presentación del maestro.
      *   ean             último recurso.
      *
-     * nexob2b_id guarda uno u otro según por dónde entró el producto: la
-     * presentación maestra (pp_) por la importación de catálogo propio, el
-     * listing del mayorista (pmp_) por una recepción de compra. Los dos sirven
-     * tal cual, así que el EAN ya casi nunca se usa —y con él se va el último
-     * lugar donde una presentación podía quedar sin nombrar, porque el EAN es
-     * el único de los tres que puede faltar—.
+     * nexob2b_id guarda casi siempre la presentación, entre por la
+     * importación del catálogo propio o por una compra. Sólo un `pmp_` es el
+     * listing. No se reconoce la presentación por su prefijo: en producción
+     * son UUID sin prefijo (Delfín, 30/10). Mirar `pp_` las hacía viajar por
+     * EAN, y sin EAN, como el texto "null".
      */
     `SELECT s.product_id,
             CASE WHEN p.nexob2b_id LIKE 'pmp\\_%' THEN p.nexob2b_id END AS pmp_id,
-            CASE WHEN p.nexob2b_id LIKE 'pp\\_%'  THEN p.nexob2b_id END AS presentacion_id,
+            CASE WHEN p.nexob2b_id NOT LIKE 'pmp\\_%' THEN p.nexob2b_id END AS presentacion_id,
             NULLIF(p.ean, '') AS ean
        FROM stock_items s
        JOIN products p ON p.id = s.product_id

@@ -65,8 +65,9 @@ el código.**
 ### Stock compartido (sólo el híbrido)
 - **Dirección:** los dos sentidos
 - **Salida:** `PUT /api/v1/pos/stock` con delta negativo por cada venta de
-  mostrador de un producto propio. Se identifica con `pmp_id`,
-  `presentacion_id` o `ean`, en ese orden de precisión. Lleva
+  mostrador de un producto propio. Se identifica con `pmp_id` si el id guardado
+  empieza con `pmp_`; si no, con `presentacion_id` (en producción son UUID sin
+  prefijo), y con `ean` como último recurso. Lleva
   `idempotency_key` = el lote.
 - **Entrada:** `POST /api/nexob2b/stock` con la clave de plataforma y el
   `comercio_id`. Cruza por `presentacion_id` o `pmp_id`. La puerta por comercio
@@ -80,8 +81,8 @@ el código.**
   token del comercio. B2B sólo avisa a comercios que alguna vez llamaron a
   `/api/v1/pos/*`, y sin esto uno recién prendido no recibía nada hasta su
   primera venta. Si falla, no se prende.
-- **Estado:** hasta el 29/10 no había llegado ningún aviso (filtro por API key
-  del lado de B2B, ya corregido). Ver `RESPUESTA-AVISOS-STOCK-A-NEXOB2B.md`.
+- **Estado:** anda con Delfín desde el 29/10 (entrada). La salida espera su
+  primera venta real con un UUID. Ver `RESPUESTA-AVISOS-STOCK-A-NEXOB2B.md`.
 
 ### Slugs y regiones
 - **Dirección:** NexoB2B → NexoPOS

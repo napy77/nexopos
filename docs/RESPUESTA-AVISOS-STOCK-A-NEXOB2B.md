@@ -5,16 +5,27 @@
 
 Gracias. Que los avisos ya salgan y lleguen es la mitad que faltaba.
 
-## 1. Por qué daban 0: lo estamos buscando
+## 1. Por qué daban 0: los avisos sí se aplicaron
 
-El interruptor de Delfín **está prendido**, así que no es eso. Con el
-interruptor prendido, la versión anterior sólo contaba lo que cambiaba. Un
-ítem que no cruzaba con un producto propio del POS, o que ya tenía ese mismo
-número, no sumaba en ningún lado. Y `no_encontrados` venía siempre en la
-respuesta: si no lo ven, es que su log no lo registra.
+**Actualizado 30/10, después de mirar nuestra base.** El interruptor de Delfín
+está prendido, y los avisos de ustedes **llegaron y se aplicaron**:
 
-Lo estamos mirando en nuestra base y en el log de esos avisos, y les decimos
-cuál de las dos fue. Desde este deploy, la respuesta lo dice sola (punto 2).
+| Origen | Cuándo (hora de Córdoba) | Movimientos |
+|---|---|---|
+| `NexoB2B (csv)` | 29/10, de 18:58 a 22:01 | 7.441 |
+| `NexoB2B (despacho)` | 29/10, 20:03 | 1 |
+
+El aviso de 6.168 **sí entró completo**. Lo procesamos ítem por ítem dentro de
+una transacción, y eso tardó más que los 8 segundos de su `fetch`. Ustedes
+cortaron antes de recibir la respuesta, pero de este lado quedó todo
+guardado. Las tandas que mandaron después traían los mismos números que ya
+teníamos. La versión anterior no contaba lo que no cambiaba, así que contestó
+`aplicados: 0`. Con la respuesta nueva eso aparece en `sin_cambio`.
+
+Lo que queda para ustedes: si un aviso se corta por tiempo, **no lo den por
+perdido**. Puede haber entrado. Reenviarlo es seguro, porque `stock` es un
+total y no una diferencia, así que repetirlo no cambia nada. Con tandas de 300
+no debería volver a pasar.
 
 ## 2. La respuesta ahora explica cada número
 
@@ -51,10 +62,9 @@ Así se cruzan los dos logs sin adivinar.
 
 ## 3. Tamaño
 
-Las tandas de 300 nos vienen bien. Igual, para que quede claro: el aviso de
-6.168 entraba en nuestros límites (4 MB en la app, 10 MB en nginx), así que
-si no llegó, no fue un rechazo de este lado por tamaño. Si tienen el error de
-ese envío, nos interesa saber si fue un timeout de su `fetch`.
+Las tandas de 300 nos vienen bien. El aviso de 6.168 entraba en nuestros
+límites (4 MB en la app, 10 MB en nginx): fue sólo el tiempo, como dice el
+punto 1.
 
 ## 4. La marca de «usa NexoPOS»
 
@@ -81,19 +91,25 @@ su último login propio es del 16/09. No hay otra cuenta: por eso no ven
 llamadas, y está bien que no le lleguen avisos. Retiramos lo que dijimos el
 28/10 sobre las ventas de su mostrador.
 
-## 5. Cómo seguimos
+## 5. Un arreglo en la otra mitad (POS → B2B)
 
-Su plan está bien, con un cambio de orden:
+Mirando los datos de Delfín encontramos un error nuestro. Los ids de
+presentación son UUID sin prefijo, y la cola de salida reconocía la
+presentación por `pp_`. Con un UUID, la venta del mostrador hubiera viajado
+por EAN, o, sin EAN, con un id inválido. No llegó a pasar: Delfín todavía no
+vendió productos propios por el mostrador. Desde este deploy, todo id que no
+empieza con `pmp_` viaja como `presentacion_id`, el mismo valor que ustedes nos
+mandan en los avisos.
 
-1. Deployamos esto (hoy).
-2. Les contamos por qué daban 0 (punto 1) y, si es de nuestro lado, lo
-   arreglamos antes de seguir.
-3. Mandan el `resync` completo de Delfín. Esperamos ver casi todo en
-   `sin_cambio` o `aplicados`. Si `no_encontrados` es grande, la
-   `no_encontrados_muestra` nos dice cuáles mirar.
-4. Cambian el stock de un producto desde el portal y miramos juntos: ustedes
-   la línea del log, nosotros el movimiento `NexoB2B (portal)` y la tarjeta,
-   que pasa a «Último aviso de NexoB2B: …».
+**Para confirmar de su lado:** que `PUT /api/v1/pos/stock` acepte como
+`presentacion_id` ese UUID, el mismo que viene en sus avisos.
 
-Mientras tanto, mandar avisos a un comercio con el interruptor apagado no
-molesta: contestamos `interruptor_apagado` sin tocar nada.
+## 6. Cómo seguimos
+
+1. Deployamos esto.
+2. Mandan el `resync` completo de Delfín cuando quieran: el interruptor ya
+   está prendido. Esperamos casi todo en `sin_cambio`.
+3. Cambian el stock de un producto desde el portal y miramos juntos: ustedes
+   la línea del log, nosotros el movimiento `NexoB2B (portal)`.
+4. Delfín vende un producto propio en el mostrador y ustedes confirman que bajó
+   en B2B. Es la primera vez que esta mitad sale con un UUID.
