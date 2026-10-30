@@ -73,10 +73,15 @@ el código.**
   (`/stock/:token`) se sacó el 28/10: nunca recibió un aviso.
 - **Regla:** las dos mitades se prenden juntas. Media sincronización deja el
   número bajando y nunca subiendo, y el comerciante deja de creerle.
-- **Estado:** la entrada **nunca recibió un aviso en producción** (28/10: cero
-  pedidos en nginx, cero movimientos `b2b`). Pedido a B2B con las causas
-  probables (red sin NAT loopback, filtro por API key):
-  `PEDIDO-AVISOS-STOCK-A-NEXOB2B.md`. Prender o apagar queda en `audit_log`.
+- **Respuesta a cada aviso:** `recibidos`, `aplicados`, `sin_cambio`,
+  `no_encontrados`, `invalidos`, `no_encontrados_muestra` (hasta 10) y, si no
+  se aplicó por decisión nuestra, `motivo: "interruptor_apagado"`.
+- **Al prender:** el POS llama `GET /api/v1/pos/productos?pageSize=1` con el
+  token del comercio. B2B sólo avisa a comercios que alguna vez llamaron a
+  `/api/v1/pos/*`, y sin esto uno recién prendido no recibía nada hasta su
+  primera venta. Si falla, no se prende.
+- **Estado:** hasta el 29/10 no había llegado ningún aviso (filtro por API key
+  del lado de B2B, ya corregido). Ver `RESPUESTA-AVISOS-STOCK-A-NEXOB2B.md`.
 
 ### Slugs y regiones
 - **Dirección:** NexoB2B → NexoPOS

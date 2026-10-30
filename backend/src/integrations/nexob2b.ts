@@ -966,6 +966,22 @@ export interface ResultadoStockB2B {
   presentacion?: string;
 }
 
+/**
+ * Le avisa a NexoB2B que este comercio usa el stock compartido, con la llamada
+ * más barata de `/api/v1/pos/*` que hay.
+ *
+ * NexoB2B decide a quién mandarle avisos de stock según si el comercio llamó
+ * alguna vez a `/api/v1/pos/*` con su token (RESPUESTA-7, 29/10). El
+ * mostrador no pasa por ahí —el login va por otro lado— y la cola de salida
+ * sólo llama después de una venta de un producto propio: un comercio recién
+ * prendido no recibía nada hasta su primera venta. Esto lo cierra al prender,
+ * y de paso prueba que el token sirve.
+ */
+export async function presentarseAB2B(token: string): Promise<void> {
+  if (isMockMode()) return;
+  await api("/api/v1/pos/productos?page=1&pageSize=1", { token });
+}
+
 export async function ajustarStockB2B(
   token: string,
   items: ItemStockB2B[],

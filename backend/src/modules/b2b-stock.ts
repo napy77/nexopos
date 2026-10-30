@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { pool, audit } from "../db.js";
 import { operador } from "../middleware/auth.js";
 import { HttpError } from "../middleware/error.js";
-import { ajustarStockB2B, isMockMode, type ResultadoStockB2B } from "../integrations/nexob2b.js";
+import { ajustarStockB2B, presentarseAB2B, isMockMode, type ResultadoStockB2B } from "../integrations/nexob2b.js";
 import { requierePlataforma } from "./plataforma.js";
 
 /**
@@ -247,6 +247,27 @@ export function iniciarStockB2B(): void {
 export const b2bStockWebhookRouter = Router();
 
 /**
+ * Lo que le contestamos a NexoB2B por cada aviso. Los números suman
+ * `recibidos`, y cuando no se aplicó nada `motivo` dice por qué: el 29/10
+ * llegaron 900 avisos con «0 aplicadas» y del otro lado no había forma de
+ * saber si era el interruptor, ids que no cruzaban o stock ya igual.
+ */
+type ResultadoAviso = {
+  recibidos: number;
+  aplicados: number;
+  /** Ya teníamos ese mismo número: no es un error, no hay movimiento. */
+  sin_cambio: number;
+  /** Sin id o sin un `stock` numérico. */
+  invalidos: number;
+  /** El comercio no tiene ese producto como propio en el POS. */
+  no_encontrados: number;
+  /** Hasta diez, para poder buscarlos sin pedirnos el log. */
+  no_encontrados_muestra: string[];
+  /** Código fijo, para que lo registren tal cual. */
+  motivo?: "interruptor_apagado";
+};
+
+/**
  * Aplica lo que NexoB2B dice que quedó. `stock` es el total resultante, no un
  * delta: es el número a escribir. El movimiento guarda la diferencia contra lo
  * que teníamos, que es lo que el comerciante necesita leer en el historial.
@@ -255,18 +276,18 @@ async function aplicarStockDeB2B(
   commerceId: number,
   items: unknown[],
   origen: string
-): Promise<{ aplicados: number; noEncontrados: number }> {
+): Promise<ResultadoAviso> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    let aplicados = 0;
+    let aplicados = 0, sinCambio = 0, invalidos = 0;
     const desconocidos: string[] = [];
     for (const raw of items) {
       const item = raw as { presentacion_id?: unknown; pmp_id?: unknown; stock?: unknown };
       const presentacionId = String(item?.presentacion_id ?? "");
       const pmpId = String(item?.pmp_id ?? "");
       const stock = Number(item?.stock);
-      if ((!presentacionId && !pmpId) || !Number.isFinite(stock)) continue;
+      if ((!presentacionId && !pmpId) || !Number.isFinite(stock)) { invalidos++; continue; }
 
       // nexob2b_id guarda la presentación (pp_) si el producto entró por la
       // importación del catálogo propio, o el listing (pmp_) si entró por una
@@ -282,7 +303,7 @@ async function aplicarStockDeB2B(
       if (!linea) { desconocidos.push(presentacionId || pmpId); continue; }
 
       const delta = stock - Number(linea.quantity);
-      if (delta === 0) continue;
+      if (delta === 0) { sinCambio++; continue; }
 
       await client.query(
         "UPDATE stock_items SET quantity = $3, updated_at = now() WHERE commerce_id = $1 AND product_id = $2",
@@ -296,11 +317,11 @@ async function aplicarStockDeB2B(
       aplicados++;
     }
     await client.query("COMMIT");
-
-    if (desconocidos.length > 0) {
-      console.warn(`[b2b-stock] ${desconocidos.length} presentaciones no están en el stock del comercio ${commerceId}`);
-    }
-    return { aplicados, noEncontrados: desconocidos.length };
+    return {
+      recibidos: items.length, aplicados, sin_cambio: sinCambio, invalidos,
+      no_encontrados: desconocidos.length,
+      no_encontrados_muestra: desconocidos.slice(0, 10),
+    };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;
@@ -352,15 +373,20 @@ b2bStockWebhookRouter.post("/", requierePlataforma, async (req, res, next) => {
     // que no existe de este lado. Si NexoB2B avisa de uno que no conocemos, los
     // dos queremos saberlo.
     if (!comercio) throw new HttpError(404, `No tenemos ningún comercio con el id ${nexob2bId} de NexoB2B.`);
-    if (!comercio.b2b_stock_sync) {
-      res.json({ ok: true, aplicados: 0, motivo: "sincronización apagada" });
-      return;
-    }
+    const items = itemsDe(req.body);
+    const origen = origenDe(req.body);
+    const r: ResultadoAviso = comercio.b2b_stock_sync
+      ? await aplicarStockDeB2B(comercio.id, items, origen)
+      : { recibidos: items.length, aplicados: 0, sin_cambio: 0, invalidos: 0,
+          no_encontrados: 0, no_encontrados_muestra: [], motivo: "interruptor_apagado" };
 
-    const { aplicados, noEncontrados } = await aplicarStockDeB2B(
-      comercio.id, itemsDe(req.body), origenDe(req.body)
-    );
-    res.json({ ok: true, aplicados, no_encontrados: noEncontrados });
+    // Una línea por aviso, también con el interruptor apagado: es lo que
+    // permite cruzar nuestro log con el de ellos sin adivinar.
+    console.log(`[b2b-stock] aviso de B2B, comercio ${comercio.id} (${origen}): ` +
+      (r.motivo ? `${r.recibidos} recibidos, ${r.motivo}`
+        : `${r.recibidos} recibidos, ${r.aplicados} aplicados, ${r.sin_cambio} sin cambio, ` +
+          `${r.no_encontrados} no encontrados, ${r.invalidos} inválidos`));
+    res.json({ ok: true, ...r });
   } catch (err) {
     next(err);
   }
@@ -413,6 +439,20 @@ b2bStockRouter.get("/", async (req, res, next) => {
 /** PUT /api/b2b-stock — prender o apagar. */
 b2bStockRouter.put("/", async (req, res, next) => {
   try {
+    if (req.body?.activo) {
+      // Antes de prender, no después: si B2B no reconoce la sesión, ninguna de
+      // las dos mitades va a andar, y es mejor decirlo ahora que en una semana.
+      const { rows: [t] } = await pool.query(
+        "SELECT nexob2b_token FROM commerces WHERE id = $1", [req.auth.commerceId]);
+      if (!t?.nexob2b_token)
+        throw new HttpError(409, "No hay sesión de NexoB2B para este comercio. Volvé a entrar y probá de nuevo.");
+      try {
+        await presentarseAB2B(t.nexob2b_token);
+      } catch (err) {
+        console.error("[b2b-stock] no pudimos presentarnos a NexoB2B:", err);
+        throw new HttpError(502, "NexoB2B no respondió. No se prendió; probá de nuevo en un rato.");
+      }
+    }
     const { rows: [c] } = await pool.query(
       "UPDATE commerces SET b2b_stock_sync = $2 WHERE id = $1 RETURNING b2b_stock_sync",
       [req.auth.commerceId, Boolean(req.body?.activo)]
