@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api, money } from "@/lib/api";
 import { addToCart } from "@/lib/cart";
@@ -8,7 +8,13 @@ import { Foto } from "@/lib/foto";
 import type { B2BProducto, B2BListing, B2BPresentacion, B2BMayorista, B2BTaxonomia } from "@/lib/b2b-types";
 
 export default function CatalogoPage() {
+  // Lo que se ve en la caja y lo que se busca van separados: se busca 400 ms
+  // después de la última tecla, o al instante con Enter. Mismo método que el
+  // catálogo de NexoB2B (PEDIDO-A-NEXOPOS-BUSQUEDA.md), para que el comerciante
+  // encuentre lo mismo y de la misma forma en los dos lados.
+  const [texto, setTexto] = useState("");
   const [q, setQ] = useState("");
+  const pedidoActual = useRef(0);
   const [pasilloId, setPasilloId] = useState("");
   const [rubroId, setRubroId] = useState("");
   const [subrubroId, setSubrubroId] = useState("");
@@ -29,6 +35,9 @@ export default function CatalogoPage() {
   const subrubrosVisibles = (taxonomia?.subrubros ?? []).filter((s) => !rubroId || s.rubro_id === rubroId);
 
   const search = useCallback(async () => {
+    // Numerado: la respuesta de «fe» puede llegar después que la de «fernet»
+    // y pisarla. Sólo se muestra la del último pedido.
+    const nro = ++pedidoActual.current;
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -38,16 +47,20 @@ export default function CatalogoPage() {
       if (subrubroId) params.set("subrubro_id", subrubroId);
       if (mayoristaId) params.set("mayorista_id", mayoristaId);
       const data = await api<{ productos: B2BProducto[] }>(`/api/catalog?${params}`);
+      if (nro !== pedidoActual.current) return;
       setProductos(data.productos);
     } finally {
-      setLoading(false);
+      if (nro === pedidoActual.current) setLoading(false);
     }
   }, [q, pasilloId, rubroId, subrubroId, mayoristaId]);
 
   useEffect(() => {
-    const t = setTimeout(() => { search().catch(console.error); }, 300);
+    const t = setTimeout(() => setQ(texto.trim()), 400);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [texto]);
+
+  // El texto ya llega con su pausa; los filtros buscan al elegirlos.
+  useEffect(() => { search().catch(console.error); }, [search]);
 
   function agregarAlCarrito(producto: B2BProducto, listing: B2BListing, pres: B2BPresentacion) {
     addToCart({
@@ -85,8 +98,9 @@ export default function CatalogoPage() {
         <input
           type="search"
           placeholder="Buscar por nombre, marca o EAN…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") setQ(texto.trim()); }}
         />
         <select value={pasilloId} onChange={(e) => { setPasilloId(e.target.value); setRubroId(""); setSubrubroId(""); }}>
           <option value="">Todos los pasillos</option>
