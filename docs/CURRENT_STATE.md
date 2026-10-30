@@ -10,8 +10,9 @@ es parte de terminar un cambio.**
 `https://nexopos.app` · último commit desplegado: **`ffa77ff`**
 (verificable en `GET /health`, que devuelve el commit y cuándo arrancó).
 
-Comercios reales en uso conocidos: **Jure Hnos**, **Rivera Hogar** (mayorista y
-comercio a la vez), **Supermercado Delfín**.
+Comercios reales en uso conocidos: **Jure Hnos** y **Supermercado Delfín**
+(mayorista y comercio a la vez: usa el stock compartido). Rivera Hogar está dado
+de alta pero no usa el mostrador (0 ventas, último login propio 16/09).
 
 ## Funciona
 
@@ -60,7 +61,7 @@ documento de refuerzo. Avisa en el alta y lista los sospechosos. **No fusiona.**
 
 | Qué | Qué falta | De quién |
 |---|---|---|
-| **Stock compartido con NexoB2B** | **La mitad B2B → NexoPOS nunca anduvo en producción.** Causa (29/10, B2B): sólo avisaban si existía una `nexo_api_key` tipo nexopos; ya lo cambiaron. Ahora avisan a los comercios marcados por llamar a `/api/v1/pos/*`, y el POS hace esa llamada al prender el interruptor. Los avisos de Delfín llegaron con 0 aplicados, por el interruptor apagado según la forma de la respuesta (falta confirmarlo en la base). La respuesta ahora trae `recibidos`/`aplicados`/`sin_cambio`/`no_encontrados`/`invalidos` y `motivo: "interruptor_apagado"`. Correspondencia: `PEDIDO-AVISOS-STOCK-A-NEXOB2B.md`, `RESPUESTA-7-A-NEXOPOS-AVISOS-STOCK.md`, `RESPUESTA-AVISOS-STOCK-A-NEXOB2B.md`. Rivera Hogar no usa el mostrador (0 ventas, último login 16/09): su interruptor prendido no tuvo efecto. Interruptores **apagados** hasta que cada comercio confirme su ERP. | NexoB2B, decisión del cliente |
+| **Stock compartido con NexoB2B** | Para cualquier comercio que sea mayorista y comercio a la vez; hoy lo usa Delfín (interruptor prendido). **La mitad B2B → NexoPOS no anduvo hasta el 29/10**: B2B sólo avisaba si existía una `nexo_api_key` tipo nexopos (ya corregido). Ahora avisan a los comercios marcados por llamar a `/api/v1/pos/*`, y el POS hace esa llamada al prender. **Los primeros avisos a Delfín (29/10) dieron 0 aplicados con el interruptor prendido: en diagnóstico** (no cruzan, o el stock ya era igual). La respuesta ahora trae `recibidos`/`aplicados`/`sin_cambio`/`no_encontrados`/`invalidos` y `motivo`. Correspondencia: `PEDIDO-AVISOS-STOCK-A-NEXOB2B.md`, `RESPUESTA-7-A-NEXOPOS-AVISOS-STOCK.md`, `RESPUESTA-AVISOS-STOCK-A-NEXOB2B.md`. Prenderlo lo decide cada comercio, cuando su ERP deja de reescribir el total en B2B. | NexoB2B, decisión del cliente |
 | **Libreta en la tienda** | Canje, estado y `linkedAt` construidos. El **emparejar por código** espera que ClubPay construya `/pos/tienda/emparejar`. | ClubPay |
 | **QR de vinculación en el mostrador** | Pedido escrito (`PEDIDO-QR-VINCULACION-A-CLUBPAY.md`). Sin respuesta. | ClubPay |
 | **Resúmenes hacia ClubPay** | Retenidos por `CLUBPAY_STATEMENTS` (default apagado): sin la adjudicación de movimientos del lado de ClubPay, la compra se contaría dos veces. | ClubPay |

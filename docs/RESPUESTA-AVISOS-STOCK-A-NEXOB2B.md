@@ -5,17 +5,16 @@
 
 Gracias. Que los avisos ya salgan y lleguen es la mitad que faltaba.
 
-## 1. Por qué daban 0: el interruptor de Delfín está apagado
+## 1. Por qué daban 0: lo estamos buscando
 
-Lo deducimos de lo que describen. Con el interruptor apagado, la versión
-anterior contestaba `{ ok: true, aplicados: 0, motivo: "sincronización apagada" }`,
-**sin** `no_encontrados`. Con el interruptor prendido, `no_encontrados` venía
-siempre, aunque fuera 0. Si no lo ven, es que contestó la rama del interruptor
-apagado. Lo confirmamos en la base y les avisamos.
+El interruptor de Delfín **está prendido**, así que no es eso. Con el
+interruptor prendido, la versión anterior sólo contaba lo que cambiaba. Un
+ítem que no cruzaba con un producto propio del POS, o que ya tenía ese mismo
+número, no sumaba en ningún lado. Y `no_encontrados` venía siempre en la
+respuesta: si no lo ven, es que su log no lo registra.
 
-No es un error: el interruptor arranca apagado, y lo prende el comercio cuando
-su ERP deja de reescribir el total en B2B. Si lo prendiéramos antes, el ERP le
-devolvería las unidades que el mostrador acaba de descontar.
+Lo estamos mirando en nuestra base y en el log de esos avisos, y les decimos
+cuál de las dos fue. Desde este deploy, la respuesta lo dice sola (punto 2).
 
 ## 2. La respuesta ahora explica cada número
 
@@ -57,11 +56,11 @@ Las tandas de 300 nos vienen bien. Igual, para que quede claro: el aviso de
 si no llegó, no fue un rechazo de este lado por tamaño. Si tienen el error de
 ese envío, nos interesa saber si fue un timeout de su `fetch`.
 
-## 4. La marca de «usa NexoPOS» y Rivera Hogar
+## 4. La marca de «usa NexoPOS»
 
-La marca por llamadas a `/api/v1/pos/*` tiene un hueco: **el mostrador casi
-nunca pasa por ahí**. El login va por otro lado. Con el token del comercio sólo
-llamamos a dos cosas:
+La marca por llamadas a `/api/v1/pos/*` tiene un hueco que vale para cualquier
+comercio: **el mostrador casi nunca pasa por ahí**. El login va por otro lado.
+Con el token del comercio sólo llamamos a dos cosas:
 
 - `GET /api/v1/pos/productos`, cuando el comercio importa su catálogo propio.
 - `PUT /api/v1/pos/stock`, la cola de salida, que sólo sale **con el interruptor
@@ -70,14 +69,6 @@ llamamos a dos cosas:
 Un comercio que prende el interruptor y todavía no vendió un producto propio
 nunca quedaba marcado, y nunca recibía avisos.
 
-**Rivera Hogar, revisado en nuestra base (30/10):** no usa el mostrador de
-NexoPOS. Nunca hizo una venta, su último login es del 16/09 (el del 29/10 fue
-una entrada de soporte) y la cola de salida nunca tuvo un aviso suyo. No hay
-otra cuenta: si algo baja stock en B2B por Rivera, no es NexoPOS. Por eso no
-registran llamadas desde el 20/10, y está bien que no le lleguen avisos.
-Retiramos lo que dijimos el 28/10 sobre «cada venta del mostrador baja el stock
-en B2B»: el interruptor estaba prendido, pero no hubo ventas que avisar.
-
 **Lo cerramos nosotros:** al prender el interruptor, el POS hace un
 `GET /api/v1/pos/productos?page=1&pageSize=1` con el token del comercio. Eso
 los marca en el momento, y además prueba que el token sirve. Si B2B no lo
@@ -85,13 +76,18 @@ reconoce, el interruptor no se prende y el comerciante ve que tiene que volver
 a entrar. No hace falta nada de su lado. Sólo que la marca **no se borre** si
 un comercio pasa un tiempo sin llamar.
 
+**Sobre Rivera Hogar:** no usa el mostrador de NexoPOS. Nunca hizo una venta y
+su último login propio es del 16/09. No hay otra cuenta: por eso no ven
+llamadas, y está bien que no le lleguen avisos. Retiramos lo que dijimos el
+28/10 sobre las ventas de su mostrador.
+
 ## 5. Cómo seguimos
 
 Su plan está bien, con un cambio de orden:
 
 1. Deployamos esto (hoy).
-2. Les avisamos cuando el interruptor de Delfín esté prendido. Lo decide el
-   comercio, por lo del ERP del punto 1.
+2. Les contamos por qué daban 0 (punto 1) y, si es de nuestro lado, lo
+   arreglamos antes de seguir.
 3. Mandan el `resync` completo de Delfín. Esperamos ver casi todo en
    `sin_cambio` o `aplicados`. Si `no_encontrados` es grande, la
    `no_encontrados_muestra` nos dice cuáles mirar.
