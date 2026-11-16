@@ -137,8 +137,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {!conexion && (
           <div className="conexion-aviso" role="status">
             <strong>Sin conexión</strong>
-            No cierres ni recargues: lo cargado sigue en pantalla. Cobrar y el
-            menú vuelven solos cuando vuelva internet.
+            La venta cargada queda guardada en esta caja. Cobrar y el menú
+            vuelven solos cuando vuelva internet.
           </div>
         )}
         {/* Sin conexión el menú se apaga entero: cada pantalla se trae del

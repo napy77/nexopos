@@ -46,5 +46,5 @@ npm run dist                                # release/NexoPOS Setup x.y.z.exe
 - **Vender sin conexión**: si se corta con la caja abierta, el frontend avisa,
   apaga el menú y el cobro, y los recupera solo (`frontend/lib/conexion.ts`;
   sirve igual en el navegador). Todavía **no se puede cobrar** sin internet:
-  la venta se registra en el servidor. Tampoco sobrevive a cerrar la ventana,
-  porque la venta en curso vive en memoria.
+  la venta se registra en el servidor. La venta en curso sí sobrevive a cerrar
+  la ventana (`frontend/lib/venta-en-curso.ts`).

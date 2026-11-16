@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, money } from "@/lib/api";
 import { useConexion } from "@/lib/conexion";
+import { guardarVentaEnCurso, leerVentaEnCurso } from "@/lib/venta-en-curso";
 import { loadPrintSettings, printTicket, openTicketPdf, printQrCobro } from "@/lib/print";
 import { leerCodigoBalanza, buscarPorPlu, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
 import { Foto } from "@/lib/foto";
@@ -116,6 +117,29 @@ export default function VentasPage() {
   const mpVivo = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const pagaConRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * La venta en curso se guarda en esta caja y se recupera al abrir.
+   *
+   * `recuperada` evita que el primer render, todavía vacío, pise lo guardado
+   * antes de leerlo. Se lee en un efecto y no al crear el estado porque el
+   * servidor también dibuja esta página y no tiene localStorage.
+   */
+  const [recuperada, setRecuperada] = useState(false);
+  useEffect(() => {
+    const venta = leerVentaEnCurso<SaleLine>();
+    if (venta) {
+      setLines(venta.lines);
+      setCustomerId(venta.customerId);
+      // Que el cajero lo sepa: si no, cobra de más a quien venga después.
+      setNotice("Se recuperó la venta que estaba cargada. Revisala antes de cobrar.");
+      setTimeout(() => setNotice(""), 8000);
+    }
+    setRecuperada(true);
+  }, []);
+  useEffect(() => {
+    if (recuperada) guardarVentaEnCurso(lines, customerId);
+  }, [recuperada, lines, customerId]);
 
   const loadStock = useCallback(() => {
     api<StockItem[]>("/api/stock").then(setItems).catch(console.error);
@@ -1195,10 +1219,10 @@ export default function VentasPage() {
           )}
           {error && <p className="error">{error}</p>}
           {/* La venta se registra en el servidor: sin conexión no hay número
-              de ticket ni descuento de stock. Lo cargado espera en memoria,
-              no en disco: por eso el aviso de no cerrar. */}
+              de ticket ni descuento de stock. Lo cargado espera guardado en
+              la caja (lib/venta-en-curso.ts). */}
           {!conexion && (
-            <p className="error">Sin conexión: no cierres la ventana. La venta queda cargada y se cobra apenas vuelva internet.</p>
+            <p className="error">Sin conexión: la venta queda guardada en esta caja y se cobra apenas vuelva internet.</p>
           )}
           <button
             className="pay-btn"
