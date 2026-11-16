@@ -426,3 +426,81 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .soporte-franja button, .soporte-franja button:hover { flex-shrink: 0; background: #78350f; }
 .soporte-quien { opacity: 0.8; }
 .badge.soporte { background: #fef3c7; color: #78350f; }
+
+/* ── Descubrí mayoristas: la misma cara que el portal del comercio en B2B ── */
+.descubrir { max-width: 1120px; }
+.descubrir-titulo { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.descubrir-titulo h1 { margin-bottom: 2px; }
+.descubrir-titulo p { margin: 0 0 16px; }
+.descubrir-buscador { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.descubrir-buscador input { flex: 1; min-width: 240px; padding: 11px 14px; border-radius: 12px; font-size: 14px; }
+.descubrir-buscador label { display: flex; align-items: center; gap: 8px; }
+.descubrir-buscador select { padding: 10px 12px; border-radius: 12px; }
+
+.pildoras { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.pildoras-rotulo { font-size: 12px; font-weight: 600; }
+.pildora {
+  background: var(--surface); color: #4b5563; border: 1px solid var(--border);
+  border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.pildora:hover { background: var(--surface); border-color: #93c5fd; }
+.pildora.activa, .pildora.activa:hover { background: var(--primary); border-color: var(--primary); color: #fff; }
+.pildora.rubro.activa, .pildora.rubro.activa:hover { background: #4f46e5; border-color: #4f46e5; }
+.pildora.ubicacion { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; cursor: default; }
+.pildora.sin-ubicacion { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+button.enlace { background: none; padding: 0 4px; color: var(--muted); text-decoration: underline; font-size: 12px; font-weight: 500; }
+button.enlace:hover { background: none; color: var(--text); }
+button.enlace.primario { color: #4f46e5; }
+
+.aviso { border: 1px solid; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; }
+.aviso.warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+.aviso.ok { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.aviso.err { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+
+.descubrir-grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+.descubrir-grilla.cargando { opacity: .6; transition: opacity .15s; }
+.descubrir-corte { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.descubrir-corte::before, .descubrir-corte::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.descubrir-vacio { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 48px 24px; text-align: center; }
+.descubrir-vacio h3 { margin: 12px 0 6px; }
+
+.tarjeta-may {
+  background: var(--surface); border: 1px solid #eef0f3; border-radius: 16px; overflow: hidden;
+  display: flex; flex-direction: column; transition: box-shadow .15s, border-color .15s;
+}
+.tarjeta-may:hover { box-shadow: 0 4px 14px rgba(17, 24, 39, .08); border-color: var(--border); }
+.tarjeta-may.esqueleto { height: 330px; background: linear-gradient(90deg, #f3f4f6, #e5e7eb, #f3f4f6); background-size: 200% 100%; animation: esqueleto 1.2s infinite; }
+@keyframes esqueleto { to { background-position: -200% 0; } }
+.tarjeta-may-portada { position: relative; height: 96px; }
+.tarjeta-may-portada > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tarjeta-may-distancia {
+  position: absolute; top: 8px; right: 8px; background: rgba(0, 0, 0, .3); color: #fff;
+  font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+}
+.tarjeta-may-logo {
+  position: absolute; left: 20px; bottom: -28px; width: 64px; height: 64px; border-radius: 14px;
+  background: var(--surface); box-shadow: 0 1px 4px rgba(17, 24, 39, .12);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.tarjeta-may-logo img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+.tarjeta-may-cuerpo { padding: 40px 20px 20px; display: flex; flex-direction: column; flex: 1; }
+.tarjeta-may-cabeza { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.tarjeta-may-cabeza .badge { white-space: nowrap; }
+.tarjeta-may-nombre { font-size: 17px; font-weight: 700; color: var(--text); line-height: 1.25; }
+.tarjeta-may-nombre:hover { color: var(--primary); }
+.tarjeta-may-sub { margin: 4px 0 0; }
+.tarjeta-may-productos { margin: 4px 0 0; font-size: 12px; }
+.tarjeta-may-muestras { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.tarjeta-may-muestras > div {
+  aspect-ratio: 1; border: 1px solid #f1f2f4; border-radius: 10px; background: #fafafa;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.tarjeta-may-muestras img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+.tarjeta-may-descripcion {
+  margin: 14px 0 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tarjeta-may-contacto { margin: 12px 0 0; font-size: 12px; }
+.tarjeta-may-acciones { display: flex; gap: 10px; margin-top: auto; padding-top: 16px; }
+.tarjeta-may-acciones > * { flex: 1; text-align: center; padding: 10px 12px; border-radius: 10px; font-size: 14px; }
+a.boton.secundario { border: 1px solid var(--border); color: var(--text); background: var(--surface); font-weight: 600; }
+a.boton.secundario:hover { background: #f9fafb; }

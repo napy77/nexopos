@@ -80,9 +80,13 @@ export interface B2BMayorista {
   provincia: string | null;
   rubros: string[];
   logo_url: string | null;
+  portada_url?: string | null;
+  descripcion?: string | null;
   distancia_km?: number | null;
   solicitud: { id: string; estado: "pendiente" | "aceptado" | "rechazado" } | null;
   contacto: { nombre: string; celular: string | null; email: string | null; es_vendedor: boolean } | null;
+  productos_count?: number;
+  muestras?: { nombre: string; imagen_url: string }[];
 }
 
 export interface B2BMedioPago {

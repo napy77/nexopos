@@ -26,6 +26,13 @@ export default function CatalogoPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // «Ver catálogo» desde Descubrí mayoristas llega con ?mayorista_id=. Se lee
+  // una vez al entrar; después el filtro es el del selector.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("mayorista_id");
+    if (id) setMayoristaId(id);
+  }, []);
+
   useEffect(() => {
     api<B2BTaxonomia>("/api/catalog/taxonomia").then(setTaxonomia).catch(console.error);
     api<{ mayoristas: B2BMayorista[] }>("/api/mayoristas").then((d) => setMayoristas(d.mayoristas)).catch(console.error);

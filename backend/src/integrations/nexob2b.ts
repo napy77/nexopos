@@ -141,10 +141,30 @@ export interface B2BMayorista {
   provincia: string | null;
   rubros: string[];
   logo_url: string | null;
+  portada_url?: string | null;
+  descripcion?: string | null;
+  /** Cambia cuando el mayorista sube otro logo o portada (el archivo no). */
+  updated_at?: string | null;
   distancia_km?: number | null;
   solicitud: { id: string; estado: "pendiente" | "aceptado" | "rechazado" } | null;
   contacto: { nombre: string; celular: string | null; email: string | null; es_vendedor: boolean } | null;
+  /** Productos aprobados y con precio que publica. */
+  productos_count?: number;
+  /** Hasta tres fotos del catálogo, con prioridad para lo que tiene stock. */
+  muestras?: { nombre: string; imagen_url: string }[];
 }
+
+/**
+ * Lo que vende un mayorista. Es otra lista que el tipo de comercio («Almacén /
+ * Kiosco»): se cruzan por las equivalencias de `/store/tipos-comercio`, nunca
+ * directo. Compararlas directo era lo que dejaba la búsqueda vacía en B2B.
+ * Fija del lado de ellos (PARA-NEXOPOS-DESCUBRIR-MAYORISTAS.md, 16/11).
+ */
+export const RUBROS_MAYORISTA = [
+  "Alimentos y bebidas", "Limpieza y hogar", "Electrónica", "Indumentaria y calzado",
+  "Ferretería y construcción", "Farmacia y perfumería", "Librería y papelería",
+  "Juguetes y entretenimiento", "Automotor", "Otros",
+] as const;
 
 export interface B2BMedioPago {
   id: string;
@@ -271,20 +291,37 @@ async function api<T>(path: string, opts: { token?: string; method?: string; bod
 const MOCK_MAYORISTAS: B2BMayorista[] = [
   {
     id: "may_mock_1", nombre: "Distribuidora El Sol", ciudad: "Córdoba", provincia: "Córdoba",
-    rubros: ["almacen", "limpieza"], logo_url: null, distancia_km: 3.2,
+    rubros: ["Alimentos y bebidas", "Limpieza y hogar"], logo_url: null, distancia_km: 0.8,
     solicitud: { id: "sol_mock_1", estado: "aceptado" },
     contacto: { nombre: "Pedro Gómez", celular: "+5493512345678", email: "pedro@elsol.com", es_vendedor: true },
+    productos_count: 1240, updated_at: "2026-11-12T02:30:00.000Z",
+    muestras: [
+      { nombre: "Yerba", imagen_url: "https://placehold.co/200x200/png?text=Yerba" },
+      { nombre: "Azúcar", imagen_url: "https://placehold.co/200x200/png?text=Azucar" },
+      { nombre: "Fideos", imagen_url: "https://placehold.co/200x200/png?text=Fideos" },
+    ],
   },
   {
     id: "may_mock_2", nombre: "Mayorista Norte", ciudad: "Córdoba", provincia: "Córdoba",
-    rubros: ["almacen", "bebidas"], logo_url: null, distancia_km: 8.5,
+    rubros: ["Alimentos y bebidas"], logo_url: null, distancia_km: 8.5,
     solicitud: { id: "sol_mock_2", estado: "aceptado" },
     contacto: { nombre: "Ana Ruiz", celular: "+5493511111111", email: "ana@norte.com", es_vendedor: false },
+    productos_count: 3, muestras: [], descripcion: "Bebidas y vinos para almacenes de la zona norte.",
   },
   {
     id: "may_mock_3", nombre: "Distribuciones del Centro", ciudad: "Villa María", provincia: "Córdoba",
-    rubros: ["perfumeria", "limpieza"], logo_url: null, distancia_km: 42,
-    solicitud: null, contacto: null,
+    rubros: ["Farmacia y perfumería", "Limpieza y hogar"], logo_url: null, distancia_km: 42,
+    solicitud: null, contacto: null, productos_count: 310, muestras: [],
+  },
+  {
+    id: "may_mock_4", nombre: "Ferretera Sur", ciudad: "Río Cuarto", provincia: "Córdoba",
+    rubros: ["Ferretería y construcción"], logo_url: null, distancia_km: 180,
+    solicitud: null, contacto: null, productos_count: 90, muestras: [],
+  },
+  {
+    id: "may_mock_5", nombre: "Mayorista de Prueba", ciudad: null, provincia: "Córdoba",
+    rubros: ["Alimentos y bebidas"], logo_url: null, distancia_km: null,
+    solicitud: { id: "sol_mock_5", estado: "pendiente" }, contacto: null, productos_count: 6, muestras: [],
   },
 ];
 
@@ -497,7 +534,58 @@ export async function getMayoristas(token: string, busqueda?: string): Promise<B
   if (busqueda) params.set("busqueda", busqueda);
   const qs = params.size ? `?${params}` : "";
   const data = await api<{ mayoristas: B2BMayorista[] }>(`/store/mayoristas/lista${qs}`, { token });
-  return data.mayoristas.map((m) => ({ ...m, logo_url: urlPublica(m.logo_url) }));
+  return data.mayoristas.map(conImagenes);
+}
+
+/** Logo, portada y fotos con dirección completa, y la versión para la caché. */
+function conImagenes(m: B2BMayorista): B2BMayorista {
+  // El archivo se llama igual cuando el mayorista sube otro: sin `?v=` el
+  // navegador sigue mostrando el viejo.
+  const v = m.updated_at ? `?v=${encodeURIComponent(m.updated_at)}` : "";
+  const conV = (u: string | null | undefined) => { const a = urlPublica(u); return a ? a + v : null; };
+  return {
+    ...m,
+    logo_url: conV(m.logo_url),
+    portada_url: conV(m.portada_url),
+    muestras: (m.muestras ?? []).map((f) => ({ ...f, imagen_url: urlPublica(f.imagen_url) ?? f.imagen_url })),
+  };
+}
+
+/**
+ * La búsqueda de «Descubrí mayoristas», la misma que usa el portal del
+ * comercio. Sin `lat`/`lng` no hay distancia ni radio. Los mayoristas sin
+ * ubicación vienen siempre, al final y con `distancia_km: null`.
+ */
+export async function descubrirMayoristas(token: string, f: {
+  lat: number | null; lng: number | null; radioKm: number; rubros: string[]; busqueda?: string;
+}): Promise<B2BMayorista[]> {
+  if (isMockMode()) {
+    const term = f.busqueda?.toLowerCase().trim();
+    return MOCK_MAYORISTAS
+      .filter((m) => f.lat == null || m.distancia_km == null || m.distancia_km <= f.radioKm)
+      .filter((m) => f.rubros.length === 0 || m.rubros.some((r) => f.rubros.includes(r)))
+      .filter((m) => !term || [m.nombre, m.ciudad, m.provincia, ...m.rubros]
+        .some((x) => x?.toLowerCase().includes(term)))
+      .map(conImagenes);
+  }
+  const params = new URLSearchParams({ radio_km: String(f.radioKm) });
+  if (f.lat != null && f.lng != null) { params.set("lat", String(f.lat)); params.set("lng", String(f.lng)); }
+  if (f.rubros.length) params.set("rubros", f.rubros.join(","));
+  if (f.busqueda) params.set("busqueda", f.busqueda);
+  const data = await api<{ mayoristas: B2BMayorista[] }>(`/store/mayoristas/lista?${params}`, { token });
+  return data.mayoristas.map(conImagenes);
+}
+
+/** Qué rubros de mayorista le sirven a cada tipo de comercio. */
+export async function tiposDeComercio(): Promise<Record<string, string[]>> {
+  if (isMockMode()) {
+    return {
+      "Almacén": ["Alimentos y bebidas", "Limpieza y hogar", "Farmacia y perfumería"],
+      "Ferretería": ["Ferretería y construcción", "Limpieza y hogar", "Automotor", "Electrónica"],
+    };
+  }
+  const data = await api<{ equivalencias?: Record<string, string[]> }>("/store/tipos-comercio");
+  return data.equivalencias ?? {};
 }
 
 export async function solicitarAlta(token: string, mayoristaId: string, mensaje: string): Promise<unknown> {
@@ -745,7 +833,7 @@ export async function fichaComercio(token: string): Promise<B2BComercio | null> 
       id: "com_mock", nombre: "Jure Hnos", email: "jure@test.com", estado: "aprobado",
       ciudad: "Morrison", provincia: "Córdoba",
       telefono: "3515630140", direccion: "San Martín 450",
-      rubros: ["Almacén"],
+      rubros: ["Almacén"], lat: -32.59, lng: -62.83,
       regiones: [{ id: "reg_mock", slug: "morrison", name: "Morrison",
                    province: "Córdoba", label: "Morrison, Córdoba" }],
     };

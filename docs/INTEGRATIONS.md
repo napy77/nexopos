@@ -41,6 +41,20 @@ el código.**
 - **Regla:** el `precio` que llega es **el costo con la lista del comercio ya
   aplicada**. Nunca se usa como precio de venta.
 
+### Descubrí mayoristas
+- **Dirección:** NexoPOS → NexoB2B
+- **Método:** `GET /store/mayoristas/lista` (con `lat`, `lng`, `radio_km`,
+  `rubros`, `busqueda`), `GET /store/tipos-comercio` y `POST /store/solicitudes`,
+  con el token del comercio y la publishable key.
+- **Regla:** es la misma búsqueda que el portal del comercio. El tipo de
+  comercio («Almacén / Kiosco») y el rubro de mayorista («Alimentos y bebidas»)
+  son listas distintas: se cruzan por las equivalencias de `tipos-comercio`.
+  Sin rubros elegidos, usamos los sugeridos. Si con esos no aparece nadie,
+  repetimos sin rubros y lo avisamos. Lo hace `GET /api/mayoristas/descubrir`.
+- **Ubicación:** `lat`/`lng` salen de `/store/comercios/me`, en memoria 5 min.
+  No se guardan acá: el comerciante mueve el pin en B2B.
+- **Fuente:** `PARA-NEXOPOS-DESCUBRIR-MAYORISTAS.md` (16/11).
+
 ### Catálogo propio (el híbrido mayorista + comercio)
 - **Dirección:** NexoPOS → NexoB2B
 - **Método:** `GET /api/v1/pos/productos` (pagina de a 200)
