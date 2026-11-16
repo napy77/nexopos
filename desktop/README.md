@@ -43,7 +43,8 @@ npm run dist                                # release/NexoPOS Setup x.y.z.exe
   `https://nexopos.app/descargas/`, que todavía no existe (si no responde, abre
   igual). Para prenderla hay que servir ahí el contenido de `release/`
   (`.exe`, `.blockmap`, `latest.yml`) desde nginx.
-- **Conexión inestable** (siguiente etapa): hoy, si se corta con la caja
-  abierta, la pantalla queda y las llamadas fallan igual que en el navegador.
-  La idea acordada es grisar lo que depende de la nube (ClubPay, Mercado Pago,
-  pedidos, catálogo B2B) y recuperarlo solo al volver.
+- **Vender sin conexión**: si se corta con la caja abierta, el frontend avisa,
+  apaga el menú y el cobro, y los recupera solo (`frontend/lib/conexion.ts`;
+  sirve igual en el navegador). Todavía **no se puede cobrar** sin internet:
+  la venta se registra en el servidor. Tampoco sobrevive a cerrar la ventana,
+  porque la venta en curso vive en memoria.

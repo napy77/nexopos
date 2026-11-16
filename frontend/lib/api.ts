@@ -1,16 +1,32 @@
 "use client";
 
+import { marcarConConexion, marcarSinConexion } from "./conexion";
+
 /** Cliente HTTP mínimo: agrega el JWT y redirige al login si expira. */
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("nexopos_token") : null;
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers,
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init?.headers,
+      },
+    });
+  } catch {
+    // fetch sólo rechaza cuando la llamada no llegó a ningún lado.
+    marcarSinConexion();
+    throw new Error("Sin conexión con NexoPOS. Revisá internet y probá de nuevo.");
+  }
+  // 502/503/504 los contesta nginx cuando no llega al backend: para la caja
+  // es lo mismo que estar sin internet, y se recupera igual.
+  if (res.status >= 502 && res.status <= 504) {
+    marcarSinConexion();
+    throw new Error("NexoPOS no está respondiendo. Probá de nuevo en unos segundos.");
+  }
+  marcarConConexion();
   if (res.status === 401 && typeof window !== "undefined") {
     borrarSesion();
     window.location.href = "/login";

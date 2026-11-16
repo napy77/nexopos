@@ -425,6 +425,15 @@ button.small { padding: 4px 10px; font-size: 12px; }
 }
 .soporte-franja button, .soporte-franja button:hover { flex-shrink: 0; background: #78350f; }
 .soporte-quien { opacity: 0.8; }
+/* Sin conexión: el menú queda a la vista pero apagado, con el aviso arriba. */
+.sidebar a.sin-conexion, .sidebar a.sin-conexion:hover {
+  opacity: 0.35; cursor: not-allowed; background: none; color: #d1d5db;
+}
+.conexion-aviso {
+  margin: 4px 12px 8px; padding: 10px 12px; border-radius: 8px;
+  background: #7f1d1d; color: #fff; font-size: 12px; line-height: 1.4;
+}
+.conexion-aviso strong { display: block; font-size: 13px; margin-bottom: 2px; }
 .badge.soporte { background: #fef3c7; color: #78350f; }
 
 /* ── Descubrí mayoristas: la misma cara que el portal del comercio en B2B ── */

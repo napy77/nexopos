@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, getToken, getSoporte, borrarSesion, type Soporte } from "@/lib/api";
+import { useConexion } from "@/lib/conexion";
 
 const NAV = [
   { href: "/dashboard", label: "Resumen" },
@@ -50,6 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [commerceName, setCommerceName] = useState("");
   const [pendientes, setPendientes] = useState(0);
   const [soporte, setSoporte] = useState<Soporte | null>(null);
+  const conexion = useConexion();
 
   useEffect(() => {
     if (!getToken()) {
@@ -130,11 +132,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="brand">
           Nexo<span>POS</span>
         </div>
+        {/* En el menú y no flotando: un aviso encima de la pantalla tapa
+            justo el botón que el cajero está mirando. */}
+        {!conexion && (
+          <div className="conexion-aviso" role="status">
+            <strong>Sin conexión</strong>
+            No cierres ni recargues: lo cargado sigue en pantalla. Cobrar y el
+            menú vuelven solos cuando vuelva internet.
+          </div>
+        )}
+        {/* Sin conexión el menú se apaga entero: cada pantalla se trae del
+            servidor, y salir de la caja a mitad de una venta para caer en una
+            pantalla que no carga es peor que quedarse donde uno está. */}
         {NAV.map((item) => (
           <Link
             key={item.href}
             href={item.href}
-            className={pathname.startsWith(item.href) ? "active" : ""}
+            className={`${pathname.startsWith(item.href) ? "active" : ""} ${conexion ? "" : "sin-conexion"}`}
+            aria-disabled={!conexion}
+            tabIndex={conexion ? undefined : -1}
+            onClick={conexion ? undefined : (e) => e.preventDefault()}
           >
             {item.label}
             {item.href === "/pedidos" && pendientes > 0 && (
@@ -143,7 +160,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </Link>
         ))}
         <div className="footer">
-          <Link href="/configuracion" className={`perfil-link ${pathname.startsWith("/configuracion") ? "active" : ""}`}>
+          <Link
+            href="/configuracion"
+            className={`perfil-link ${pathname.startsWith("/configuracion") ? "active" : ""} ${conexion ? "" : "sin-conexion"}`}
+            aria-disabled={!conexion}
+            tabIndex={conexion ? undefined : -1}
+            onClick={conexion ? undefined : (e) => e.preventDefault()}
+          >
             <span className="perfil-nombre">{commerceName || "Mi comercio"}</span>
             <span className="perfil-sub">⚙ Configuración</span>
           </Link>

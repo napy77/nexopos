@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, money } from "@/lib/api";
+import { useConexion } from "@/lib/conexion";
 import { loadPrintSettings, printTicket, openTicketPdf, printQrCobro } from "@/lib/print";
 import { leerCodigoBalanza, buscarPorPlu, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
 import { Foto } from "@/lib/foto";
@@ -73,6 +74,7 @@ export default function VentasPage() {
   const [view, setView] = useState<View>("order");
   const [paymentMethod, setPaymentMethod] = useState<string>("cash");
   const [error, setError] = useState("");
+  const conexion = useConexion();
   const [notice, setNotice] = useState("");
   const [lastTicket, setLastTicket] = useState<{ id: number; ticketNumber: number; total: number; vuelto?: number | null } | null>(null);
   const [showCustomers, setShowCustomers] = useState(false);
@@ -1038,7 +1040,7 @@ export default function VentasPage() {
                 <>
                   <div className="toolbar" style={{ marginBottom: 6 }}>
                     <label style={{ fontWeight: 600 }}>🎫 Socio ClubPay</label>
-                    <button onClick={mostrarQrCobro}>Mostrar QR al cliente</button>
+                    <button onClick={mostrarQrCobro} disabled={!conexion}>Mostrar QR al cliente</button>
                     <span className="muted">El socio lo escanea con su teléfono</span>
                   </div>
                   {/* Alternativa para el comercio que sí tiene lector 2D o cámara */}
@@ -1056,7 +1058,7 @@ export default function VentasPage() {
                         style={{ flex: 1, minWidth: 220 }}
                         disabled={validando}
                       />
-                      <button className="secondary" onClick={validarSocio} disabled={validando || !qrSocio.trim()}>
+                      <button className="secondary" onClick={validarSocio} disabled={validando || !qrSocio.trim() || !conexion}>
                         {validando ? "Validando…" : "Validar"}
                       </button>
                     </div>
@@ -1192,10 +1194,16 @@ export default function VentasPage() {
             <p className="error">La cuenta corriente requiere un cliente: volvé y seleccionalo con el botón 👤.</p>
           )}
           {error && <p className="error">{error}</p>}
+          {/* La venta se registra en el servidor: sin conexión no hay número
+              de ticket ni descuento de stock. Lo cargado espera en memoria,
+              no en disco: por eso el aviso de no cerrar. */}
+          {!conexion && (
+            <p className="error">Sin conexión: no cierres la ventana. La venta queda cargada y se cobra apenas vuelva internet.</p>
+          )}
           <button
             className="pay-btn"
             style={{ maxWidth: 420 }}
-            disabled={(paymentMethod === "account" && !customerId) || faltaPlata}
+            disabled={(paymentMethod === "account" && !customerId) || faltaPlata || !conexion}
             onClick={() => (paymentMethod === "mercadopago" ? mostrarQrMP() : cobrar())}
           >
             {paymentMethod === "mercadopago" ? "📲 Mostrar QR de Mercado Pago" : "✓ Validar y emitir ticket"}
