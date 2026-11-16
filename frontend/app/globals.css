@@ -434,6 +434,13 @@ button.small { padding: 4px 10px; font-size: 12px; }
   background: #7f1d1d; color: #fff; font-size: 12px; line-height: 1.4;
 }
 .conexion-aviso strong { display: block; font-size: 13px; margin-bottom: 2px; }
+/* Ventas cobradas sin conexión que todavía no llegaron al servidor */
+.sidebar a.cola-aviso, .sidebar a.cola-aviso:hover {
+  margin: 0 12px 8px; padding: 8px 12px; border-radius: 8px;
+  background: #78350f; color: #fff; font-size: 12px; line-height: 1.4;
+}
+.cola-aviso span { display: block; }
+.cola-aviso .cola-rechazadas { color: #fecaca; }
 .badge.soporte { background: #fef3c7; color: #78350f; }
 
 /* ── Descubrí mayoristas: la misma cara que el portal del comercio en B2B ── */

@@ -84,6 +84,12 @@ La venta del mostrador. `refund_of` apunta a la venta original cuando es un
 reembolso, que viaja con cantidades negativas. `order_id` la liga al pedido de
 la tienda cuando la venta nació de uno.
 
+`offline_id`, `offline_code` y `offline_synced_at` (migración 050) marcan una
+venta cobrada sin conexión. `offline_id` lo inventa la caja y tiene índice
+único por comercio: es lo que hace que reenviar la misma venta devuelva la que
+ya existe. En estas ventas **`created_at` es la hora del cobro**, no la de
+registro, y la caja (`cash_session_id`) es la que estaba abierta al registrar.
+
 ### `orders` / `order_lines`
 El pedido de la tienda. Estados: `recibido`, `aceptado`, `listo`, `en_camino`,
 `entregado`, `cancelado`. Pago: `efectivo_entrega`, `online`,

@@ -5,7 +5,9 @@ import Link from "next/link";
 import { api, money } from "@/lib/api";
 import { useConexion } from "@/lib/conexion";
 import { guardarVentaEnCurso, leerVentaEnCurso } from "@/lib/venta-en-curso";
-import { loadPrintSettings, printTicket, openTicketPdf, printQrCobro } from "@/lib/print";
+import { loadPrintSettings, printTicket, openTicketPdf, printQrCobro, printProvisorio } from "@/lib/print";
+import { getDesktop } from "@/lib/desktop";
+import { encolarVenta, enviarCola } from "@/lib/ventas-offline";
 import { leerCodigoBalanza, buscarPorPlu, BALANZA_DEFAULT, type BalanzaConfig } from "@/lib/balanza";
 import { Foto } from "@/lib/foto";
 import { centavosAPesos, type ClubPayValidacion, type ClubPayOferta, type ClubPayElegido, type ClubPayCobro, type ClubPayCobroEstado } from "@/lib/clubpay";
@@ -76,6 +78,11 @@ export default function VentasPage() {
   const [paymentMethod, setPaymentMethod] = useState<string>("cash");
   const [error, setError] = useState("");
   const conexion = useConexion();
+  // Cobrar sin conexión sólo en la app de Windows: en un navegador, «borrar
+  // datos de navegación» se lleva la cola con las ventas adentro.
+  const [enApp, setEnApp] = useState(false);
+  useEffect(() => setEnApp(getDesktop() !== null), []);
+  const sinConexionEnApp = !conexion && enApp;
   const [notice, setNotice] = useState("");
   const [lastTicket, setLastTicket] = useState<{ id: number; ticketNumber: number; total: number; vuelto?: number | null } | null>(null);
   const [showCustomers, setShowCustomers] = useState(false);
@@ -663,6 +670,64 @@ export default function VentasPage() {
 
   // ── Pago ───────────────────────────────────────────────────────────────────
 
+  /**
+   * Cobra en efectivo sin el servidor: la venta va a la cola de esta caja y
+   * se registra sola cuando vuelve la conexión (lib/ventas-offline.ts).
+   *
+   * Sólo efectivo y sin beneficios: es lo único que la caja puede dar por
+   * cobrado sin preguntarle a nadie.
+   */
+  function cobrarSinConexion() {
+    setError("");
+    // Un QR de Mercado Pago que quedó vivo se puede pagar igual desde el
+    // teléfono del cliente, que sí tiene datos: cobrarle efectivo encima es
+    // cobrarle dos veces, y sin conexión no hay cómo darlo de baja.
+    if (mpVivo.current) {
+      setError("Hay un QR de Mercado Pago sin dar de baja. Esperá a que vuelva la conexión para cobrar esta venta.");
+      return;
+    }
+    if (paymentMethod !== "cash" || clubpayElegido) {
+      setError("Sin conexión sólo se puede cobrar en efectivo y sin beneficio de ClubPay.");
+      return;
+    }
+    const renglones = lines.filter((l) => l.quantity > 0);
+    if (renglones.length === 0) return;
+    let venta;
+    try {
+      venta = encolarVenta({
+        items: renglones.map((l) => ({
+          productId: l.productId, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice,
+        })),
+        total,
+        paidAmount: montoPagado && !isNaN(montoPagado) ? montoPagado : null,
+        customerId: customerId || null,
+      });
+    } catch {
+      // Sin registro no hay venta: que el cajero no entregue la mercadería
+      // creyendo que quedó anotada.
+      setError("No se pudo guardar la venta en esta caja. No la des por cobrada: anotala a mano.");
+      return;
+    }
+    setLastTicket(null);
+    setVueltoPendiente(venta.paidAmount != null ? Math.max(0, venta.paidAmount - total) : null);
+    setLines([]);
+    setSelectedId(null);
+    setBuffer("");
+    setCustomerId("");
+    setPagaCon("");
+    setView("order");
+    setNotice(`Venta ${venta.code} cobrada sin conexión. Se registra sola cuando vuelva internet.`);
+    setTimeout(() => setNotice(""), 8000);
+    searchRef.current?.focus();
+    // El provisorio se imprime siempre, aunque la impresión automática esté
+    // apagada: es el único respaldo en papel si esta PC se rompe antes de
+    // mandar la venta.
+    printProvisorio(venta).catch((err) =>
+      setError(err instanceof Error ? err.message : "No se pudo imprimir el comprobante"));
+    // Por si la conexión ya volvió y todavía nadie se enteró
+    void enviarCola();
+  }
+
   async function cobrar(mpPaymentId?: string): Promise<boolean> {
     setError("");
     // Otro medio con un QR de Mercado Pago todavía vivo: primero se da de
@@ -1152,7 +1217,9 @@ export default function VentasPage() {
               // si falta algo de configurar aparece apagado con el motivo.
               if (m.id === "mercadopago" && !mpEstado?.mostrador && !mpEstado?.motivo) return null;
               const mpApagado = m.id === "mercadopago" && !mpEstado?.mostrador;
-              const disabled = (m.id === "account" && !customerId) || mpApagado;
+              // Sin conexión lo único que se puede dar por cobrado es efectivo
+              const sinRed = !conexion && m.id !== "cash";
+              const disabled = (m.id === "account" && !customerId) || mpApagado || sinRed;
               return (
                 <button
                   key={m.id}
@@ -1164,7 +1231,7 @@ export default function VentasPage() {
                   {m.label}
                   {disabled && (
                     <span className="muted" style={{ fontSize: 11 }}>
-                      {mpApagado ? mpEstado?.motivo : "elegí un cliente"}
+                      {sinRed ? "necesita internet" : mpApagado ? mpEstado?.motivo : "elegí un cliente"}
                     </span>
                   )}
                 </button>
@@ -1181,7 +1248,11 @@ export default function VentasPage() {
                   type="number" inputMode="decimal" step="0.01" min="0"
                   value={pagaCon}
                   onChange={(e) => setPagaCon(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !faltaPlata) cobrar(); }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" || faltaPlata) return;
+                    if (sinConexionEnApp) cobrarSinConexion();
+                    else if (conexion) cobrar();
+                  }}
                   placeholder="Importe que entrega"
                   style={{ width: 180, fontSize: 20, padding: "10px 12px" }}
                 />
@@ -1221,16 +1292,31 @@ export default function VentasPage() {
           {/* La venta se registra en el servidor: sin conexión no hay número
               de ticket ni descuento de stock. Lo cargado espera guardado en
               la caja (lib/venta-en-curso.ts). */}
-          {!conexion && (
+          {!conexion && !enApp && (
             <p className="error">Sin conexión: la venta queda guardada en esta caja y se cobra apenas vuelva internet.</p>
+          )}
+          {sinConexionEnApp && (
+            <p className="muted">
+              <strong>Sin conexión:</strong> se puede cobrar sólo en efectivo. La venta se guarda en
+              esta caja, sale un comprobante provisorio y se registra sola cuando vuelva internet.
+            </p>
           )}
           <button
             className="pay-btn"
             style={{ maxWidth: 420 }}
-            disabled={(paymentMethod === "account" && !customerId) || faltaPlata || !conexion}
-            onClick={() => (paymentMethod === "mercadopago" ? mostrarQrMP() : cobrar())}
+            disabled={
+              (paymentMethod === "account" && !customerId) || faltaPlata ||
+              (!conexion && !(enApp && paymentMethod === "cash" && !clubpayElegido))
+            }
+            onClick={() => {
+              if (sinConexionEnApp) cobrarSinConexion();
+              else if (paymentMethod === "mercadopago") mostrarQrMP();
+              else cobrar();
+            }}
           >
-            {paymentMethod === "mercadopago" ? "📲 Mostrar QR de Mercado Pago" : "✓ Validar y emitir ticket"}
+            {sinConexionEnApp
+              ? "💵 Cobrar sin conexión (efectivo)"
+              : paymentMethod === "mercadopago" ? "📲 Mostrar QR de Mercado Pago" : "✓ Validar y emitir ticket"}
           </button>
         </div>
       )}

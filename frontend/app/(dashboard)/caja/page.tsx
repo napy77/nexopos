@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, money } from "@/lib/api";
 import { printCierreCaja } from "@/lib/print";
+import { descartarRechazada, enviarCola, useVentasOffline } from "@/lib/ventas-offline";
 
 interface Resumen {
   apertura: number;
@@ -51,6 +52,7 @@ export default function CajaPage() {
   const [mostrarCierre, setMostrarCierre] = useState(false);
   const [contado, setContado] = useState("");
   const [error, setError] = useState("");
+  const sinEnviar = useVentasOffline();
   const [busy, setBusy] = useState(false);
 
   const cargar = useCallback(async () => {
@@ -62,7 +64,9 @@ export default function CajaPage() {
     setHistorial(h);
   }, []);
 
-  useEffect(() => { cargar().catch(console.error); }, [cargar]);
+  // También cuando cambia la cola de ventas sin conexión: cada una que entra
+  // al servidor mueve el arqueo, y esta pantalla lo habría leído antes.
+  useEffect(() => { cargar().catch(console.error); }, [cargar, sinEnviar.length]);
 
   async function abrir(form: FormData) {
     setError("");
@@ -111,6 +115,13 @@ export default function CajaPage() {
 
   async function cerrar() {
     setError("");
+    // Cerrar con ventas en la cola deja el arqueo corto por plata que sí está
+    // en el cajón, y esas ventas caerían después en el turno de otro.
+    if (sinEnviar.some((v) => !v.motivo)) {
+      setError("Hay ventas cobradas sin conexión que todavía no se enviaron. Esperá a que se envíen para cerrar la caja.");
+      void enviarCola();
+      return;
+    }
     setBusy(true);
     try {
       const r = await api<{ cierre: Cierre; sessionId: number }>("/api/caja/cerrar", {
@@ -138,6 +149,53 @@ export default function CajaPage() {
     <div>
       <h1>Caja</h1>
       {error && <p className="error">{error}</p>}
+
+      {/* ── Ventas cobradas sin conexión que no llegaron al servidor ── */}
+      {sinEnviar.length > 0 && (
+        <div className="card" style={{ border: "2px solid var(--warning, #d97706)" }}>
+          <h2>Ventas cobradas sin conexión</h2>
+          <p className="muted">
+            Están guardadas en esta caja. Las que dicen «por enviar» se registran solas; las
+            rechazadas necesitan que las cargues a mano, porque esa plata ya está en el cajón.
+          </p>
+          <table>
+            <thead>
+              <tr><th>Comprobante</th><th>Hora</th><th>Total</th><th>Estado</th><th></th></tr>
+            </thead>
+            <tbody>
+              {sinEnviar.map((v) => (
+                <tr key={v.id}>
+                  <td>{v.code}</td>
+                  <td>{new Date(v.soldAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                  <td>{money(v.total)}</td>
+                  <td>
+                    {v.motivo ? <span className="error">Rechazada: {v.motivo}</span> : "Por enviar"}
+                    {v.motivo && (
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {v.items.map((i) => `${i.quantity} × ${i.name}`).join(" · ")}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {v.motivo && (
+                      <button className="small secondary" onClick={() => {
+                        if (window.confirm(`¿Ya cargaste a mano la venta ${v.code} por ${money(v.total)}? Se borra de esta lista y no se puede recuperar.`)) {
+                          descartarRechazada(v.id);
+                        }
+                      }}>Ya la cargué</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {sinEnviar.some((v) => !v.motivo) && (
+            <div className="toolbar" style={{ marginTop: 8 }}>
+              <button className="secondary" onClick={() => void enviarCola()}>Enviar ahora</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Cierre recién hecho ── */}
       {ultimoCierre && (

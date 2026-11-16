@@ -60,7 +60,34 @@ const createSaleSchema = z.object({
     // con "Datos inválidos" deja al cajero sin poder cobrar por una diferencia
     // que no significa nada.
   }).nullish(),
+  /**
+   * Venta cobrada sin conexión, que la caja manda cuando vuelve internet.
+   * `id` lo inventa la caja y es lo que evita registrarla dos veces si el
+   * envío se reintenta. Ver migrations/050_ventas_sin_conexion.sql.
+   */
+  offline: z.object({
+    id: z.string().uuid(),
+    /** Cuándo se cobró de verdad */
+    soldAt: z.string().datetime(),
+    /** Número del comprobante provisorio que se llevó el cliente */
+    code: z.string().min(1).max(20),
+  }).nullish(),
 });
+
+/** Una venta sin conexión que ya se registró: se contesta lo mismo que la primera vez. */
+async function ventaOfflineExistente(commerceId: number, offlineId: string) {
+  const { rows: [v] } = await pool.query(
+    `SELECT id, ticket_number, subtotal, total FROM sales
+      WHERE commerce_id = $1 AND offline_id = $2::uuid`,
+    [commerceId, offlineId]
+  );
+  if (!v) return null;
+  return {
+    id: v.id, ticketNumber: Number(v.ticket_number),
+    subtotal: Number(v.subtotal), total: Number(v.total),
+    vuelto: null, clubpay: null, yaRegistrada: true,
+  };
+}
 
 /**
  * POST /api/sales
@@ -70,16 +97,35 @@ const createSaleSchema = z.object({
  */
 salesRouter.post("/", async (req, res, next) => {
   const client = await pool.connect();
+  // Afuera del try para que el catch lo vea
+  let offlineId: string | null = null;
   try {
     const body = createSaleSchema.parse(req.body);
+    offlineId = body.offline?.id ?? null;
     const commerceId = req.auth.commerceId;
     if (body.paymentMethod === "account" && !body.customerId)
       throw new HttpError(400, "La venta a cuenta corriente requiere un cliente");
 
+    if (body.offline) {
+      // Sin conexión no hubo forma de consultar a ClubPay ni a Mercado Pago,
+      // ni de mirar el crédito del cliente: lo único que la caja pudo cobrar
+      // con certeza es efectivo.
+      if (body.paymentMethod !== "cash" || body.clubpay || body.mercadopago) {
+        throw new HttpError(400, "Una venta sin conexión sólo puede ser en efectivo.", "offline_solo_efectivo");
+      }
+      const previa = await ventaOfflineExistente(commerceId, body.offline.id);
+      if (previa) {
+        res.status(200).json(previa);
+        return;
+      }
+    }
+
     // Sin caja abierta no se vende: se chequea antes de tocar ClubPay para no
     // dejar una transacción registrada allá por una venta que no va a existir.
     const sesion = await sesionAbierta(commerceId, client);
-    if (!sesion) throw new HttpError(409, "La caja está cerrada. Abrila para poder vender.");
+    // El `code` lo lee la cola de ventas sin conexión: con la caja cerrada la
+    // venta no se rechaza, espera a que haya una abierta.
+    if (!sesion) throw new HttpError(409, "La caja está cerrada. Abrila para poder vender.", "caja_cerrada");
 
     await client.query("BEGIN");
 
@@ -223,8 +269,14 @@ salesRouter.post("/", async (req, res, next) => {
       `INSERT INTO sales (commerce_id, ticket_number, customer_id, payment_method,
                           subtotal, discount, total, cash_session_id, paid_amount,
                           clubpay_transaction_id, clubpay_member, clubpay_club, clubpay_discount,
-                          operado_por)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                          operado_por, offline_id, offline_code, offline_synced_at, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+               $15::uuid, $16::text,
+               CASE WHEN $15::uuid IS NOT NULL THEN now() END,
+               -- La hora del cobro, nunca en el futuro: el reloj de una PC de
+               -- mostrador puede estar adelantado. LEAST ignora el NULL de
+               -- una venta común y deja now().
+               LEAST($17::timestamptz, now()))
        RETURNING id, ticket_number, created_at`,
       [commerceId, next_number, body.customerId ?? null, body.paymentMethod,
        subtotal, body.discount, total, sesion.id,
@@ -234,7 +286,10 @@ salesRouter.post("/", async (req, res, next) => {
        clubpaySocio,
        clubpayClub,
        hayClubpay ? descuentoClubpay : null,
-       operador(req.auth)]
+       operador(req.auth),
+       body.offline?.id ?? null,
+       body.offline?.code ?? null,
+       body.offline?.soldAt ?? null]
     );
 
     /*
@@ -368,6 +423,17 @@ salesRouter.post("/", async (req, res, next) => {
     });
   } catch (err) {
     await client.query("ROLLBACK");
+    // Dos envíos de la misma venta sin conexión a la vez: el segundo choca con
+    // el índice único. No es un error, es la venta que ya entró.
+    if (offlineId && (err as { code?: string }).code === "23505") {
+      try {
+        const previa = await ventaOfflineExistente(req.auth.commerceId, offlineId);
+        if (previa) {
+          res.status(200).json(previa);
+          return;
+        }
+      } catch { /* cae al error original */ }
+    }
     next(err);
   } finally {
     client.release();

@@ -142,6 +142,69 @@ export async function printQrCobro(datos: {
 }
 
 /**
+ * El comprobante provisorio de una venta cobrada sin conexión.
+ *
+ * Se arma acá porque el ticket de verdad lo dibuja el backend y no hay
+ * backend. No lleva número de ticket: ése lo pone el servidor al registrar la
+ * venta, y prometer uno acá sería inventarlo. El código P-… queda guardado en
+ * la venta y sale impreso en el ticket definitivo.
+ */
+export async function printProvisorio(venta: {
+  code: string;
+  soldAt: string;
+  items: { name: string; quantity: number; unitPrice: number }[];
+  total: number;
+  paidAmount: number | null;
+}): Promise<void> {
+  const { width } = loadPrintSettings();
+  const esTermica = width !== "auto";
+  const contenido = width === "80mm" ? "72mm" : width === "58mm" ? "50mm" : "100%";
+  let comercio = "";
+  try {
+    comercio = JSON.parse(localStorage.getItem("nexopos_commerce") ?? "{}").name ?? "";
+  } catch { /* sin nombre, sale igual */ }
+  const plata = (n: number) =>
+    `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const cantidad = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 3 });
+  const fecha = new Date(venta.soldAt).toLocaleString("es-AR", {
+    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    hourCycle: "h23", timeZone: "America/Argentina/Cordoba",
+  });
+  const filas = venta.items.map((i) => `
+    <div>${escapar(i.name)}</div>
+    <div class="linea"><span>${cantidad(i.quantity)} x ${plata(i.unitPrice)}</span><span>${plata(i.quantity * i.unitPrice)}</span></div>`).join("");
+  const vuelto = venta.paidAmount != null ? venta.paidAmount - venta.total : null;
+
+  return printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>
+    @page { size: ${esTermica ? `${width} auto` : "auto"}; margin: ${esTermica ? "0" : "10mm"}; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: ${esTermica ? "4mm 2mm" : "0"}; width: ${contenido};
+           font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+           font-size: 12px; line-height: 1.35; color: #000; background: #fff; }
+    .centro { text-align: center; }
+    .comercio { font-size: 15px; font-weight: 700; }
+    .sep { border-top: 1px dashed #000; margin: 6px 0; }
+    .linea { display: flex; justify-content: space-between; gap: 8px; }
+    .total { font-size: 15px; font-weight: 700; }
+  </style></head><body>
+    <div class="centro comercio">${escapar(comercio)}</div>
+    <div class="centro">Comprobante provisorio<br>Ticket no fiscal</div>
+    <div class="sep"></div>
+    <div class="linea"><span>Provisorio</span><span>${escapar(venta.code)}</span></div>
+    <div class="linea"><span>Fecha</span><span>${fecha}</span></div>
+    <div class="sep"></div>
+    ${filas}
+    <div class="sep"></div>
+    <div class="linea total"><span>TOTAL</span><span>${plata(venta.total)}</span></div>
+    <div class="linea"><span>Pago</span><span>Efectivo</span></div>
+    ${venta.paidAmount != null ? `<div class="linea"><span>Paga con</span><span>${plata(venta.paidAmount)}</span></div>` : ""}
+    ${vuelto != null && vuelto > 0 ? `<div class="linea"><span>Vuelto</span><span>${plata(vuelto)}</span></div>` : ""}
+    <div class="sep"></div>
+    <div class="centro">Venta hecha sin conexión.<br>Queda registrada cuando vuelva internet.</div>
+  </body></html>`);
+}
+
+/**
  * Manda el HTML a la impresora. En la app de escritorio sale directo, sin
  * diálogo, a la impresora elegida en Configuración; en un navegador se monta
  * en un iframe oculto y el navegador pregunta.

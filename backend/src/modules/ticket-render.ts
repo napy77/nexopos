@@ -18,6 +18,8 @@ export interface TicketData {
   total: string | number;
   paid_amount?: string | number | null;
   refund_of: number | null;
+  /** Comprobante provisorio que se entregó si la venta se cobró sin conexión */
+  offline_code?: string | null;
   clubpay_member?: string | null;
   clubpay_club?: string | null;
   clubpay_discount?: string | number | null;
@@ -153,6 +155,7 @@ export function renderTicketHtml(
   <div class="sep"></div>
   <div class="linea"><span>Ticket</span><span>#${sale.ticket_number}</span></div>
   <div class="linea"><span>Fecha</span><span>${fecha}</span></div>
+  ${sale.offline_code ? `<div class="linea"><span>Provisorio</span><span>${escape(sale.offline_code)}</span></div>` : ""}
   ${sale.customer_name ? `<div class="linea"><span>Cliente</span><span>${escape(sale.customer_name)}</span></div>` : ""}
   <div class="sep"></div>
 

@@ -45,6 +45,12 @@ npm run dist                                # release/NexoPOS Setup x.y.z.exe
   (`.exe`, `.blockmap`, `latest.yml`) desde nginx.
 - **Vender sin conexión**: si se corta con la caja abierta, el frontend avisa,
   apaga el menú y el cobro, y los recupera solo (`frontend/lib/conexion.ts`;
-  sirve igual en el navegador). Todavía **no se puede cobrar** sin internet:
-  la venta se registra en el servidor. La venta en curso sí sobrevive a cerrar
-  la ventana (`frontend/lib/venta-en-curso.ts`).
+  sirve igual en el navegador). **Dentro de la app** se puede cobrar en
+  efectivo: la venta va a una cola local (`frontend/lib/ventas-offline.ts`),
+  imprime un comprobante provisorio y se registra sola al volver. Que sea sólo
+  en la app es a propósito: en un navegador, borrar los datos de navegación se
+  lleva la cola.
+- **Etapa B, sin hacer**: abrir la app sin internet (hoy sólo se vende si la
+  pantalla ya estaba abierta al cortarse) y copiar la cola a un archivo en
+  disco desde `main.ts`, para que no dependa sólo del almacenamiento de la
+  ventana.

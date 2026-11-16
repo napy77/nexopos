@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, getToken, getSoporte, borrarSesion, type Soporte } from "@/lib/api";
 import { useConexion } from "@/lib/conexion";
+import { enviarCola, useVentasOffline } from "@/lib/ventas-offline";
 
 const NAV = [
   { href: "/dashboard", label: "Resumen" },
@@ -52,6 +53,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [pendientes, setPendientes] = useState(0);
   const [soporte, setSoporte] = useState<Soporte | null>(null);
   const conexion = useConexion();
+  const sinEnviar = useVentasOffline();
+  const pendientesEnvio = sinEnviar.filter((v) => !v.motivo).length;
+  const rechazadas = sinEnviar.length - pendientesEnvio;
+
+  // La cola de ventas sin conexión se manda al entrar, cada vez que vuelve
+  // la conexión, y cada medio minuto mientras quede algo: una venta puede
+  // estar esperando que alguien abra la caja, y eso no dispara ningún evento.
+  useEffect(() => {
+    if (!conexion || pendientesEnvio === 0) return;
+    void enviarCola();
+    const t = setInterval(() => void enviarCola(), 30_000);
+    return () => clearInterval(t);
+  }, [conexion, pendientesEnvio]);
 
   useEffect(() => {
     if (!getToken()) {
@@ -137,13 +151,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {!conexion && (
           <div className="conexion-aviso" role="status">
             <strong>Sin conexión</strong>
-            La venta cargada queda guardada en esta caja. Cobrar y el menú
-            vuelven solos cuando vuelva internet.
+            La venta cargada queda guardada en esta caja. El menú y los cobros
+            que necesitan internet vuelven solos.
           </div>
         )}
         {/* Sin conexión el menú se apaga entero: cada pantalla se trae del
             servidor, y salir de la caja a mitad de una venta para caer en una
             pantalla que no carga es peor que quedarse donde uno está. */}
+        {sinEnviar.length > 0 && (
+          <Link href="/caja" className="cola-aviso"
+            onClick={conexion ? undefined : (e) => e.preventDefault()}>
+            {pendientesEnvio > 0 && (
+              <span><strong>{pendientesEnvio}</strong> {pendientesEnvio === 1 ? "venta sin enviar" : "ventas sin enviar"}</span>
+            )}
+            {rechazadas > 0 && (
+              <span className="cola-rechazadas">
+                <strong>{rechazadas}</strong> {rechazadas === 1 ? "venta rechazada" : "ventas rechazadas"}: revisalas en Caja
+              </span>
+            )}
+          </Link>
+        )}
         {NAV.map((item) => (
           <Link
             key={item.href}
