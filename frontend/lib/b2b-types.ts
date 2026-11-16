@@ -11,6 +11,11 @@ export interface B2BPresentacion {
   precio: number;
   precio_lista: number | null;
   stock: number | null;
+  /** "final" ya trae IVA; "neto" se muestra con «+ IVA». `precio` es el neto. */
+  muestra_precio?: "neto" | "final";
+  precio_final?: number | null;
+  precio_mostrar?: number | null;
+  precio_lista_mostrar?: number | null;
 }
 
 export interface B2BListing {
@@ -19,6 +24,7 @@ export interface B2BListing {
   mayorista_nombre: string;
   mayorista_logo: string | null;
   tiene_alta: boolean;
+  tiempo_entrega_dias?: number | null;
   presentaciones: B2BPresentacion[];
 }
 

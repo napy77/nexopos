@@ -59,6 +59,15 @@ export interface B2BPresentacion {
   ean_propio: string | null;
   precio: number;
   precio_lista: number | null;
+  /**
+   * Cómo ve el precio este comercio, según decide B2B (DEC-018): "final" ya
+   * trae IVA, "neto" se muestra con «+ IVA». `precio` es siempre el neto, y es
+   * el que va al carrito.
+   */
+  muestra_precio?: "neto" | "final";
+  precio_final?: number | null;
+  precio_mostrar?: number | null;
+  precio_lista_mostrar?: number | null;
   stock: number | null;     // null = el mayorista no gestiona stock
 }
 
@@ -607,11 +616,19 @@ export async function getProductos(
     /** Incluye productos maestros que ningún mayorista lista (para alta de
      *  stock comprado fuera de NexoB2B). Requiere soporte del backend B2B. */
     incluirSinMayorista?: boolean;
+    /** Sólo productos que algún mayorista tiene en stock. Lo filtra B2B: de a
+     *  50 por página, filtrarlo acá dejaría páginas vacías. */
+    conStock?: boolean;
+    page?: number;
+    pageSize?: number;
   }
-): Promise<B2BProducto[]> {
+): Promise<{ productos: B2BProducto[]; total: number; page: number; totalPages: number }> {
+  const page = Math.max(1, filtros.page ?? 1);
+  const pageSize = Math.min(100, Math.max(1, filtros.pageSize ?? 50));
   if (isMockMode()) {
     const term = filtros.q?.toLowerCase().trim();
-    return MOCK_PRODUCTOS.filter((p) => {
+    const todos = MOCK_PRODUCTOS.filter((p) => {
+      if (filtros.conStock && !p.mayoristas.some((m) => m.presentaciones.some((pr) => (pr.stock ?? 1) > 0))) return false;
       if (!filtros.incluirSinMayorista && p.mayoristas.length === 0) return false;
       if (term && !(p.nombre.toLowerCase().includes(term) || p.ean === filtros.q || p.marca?.toLowerCase().includes(term))) return false;
       if (filtros.rubroId && p.rubro_id !== filtros.rubroId) return false;
@@ -619,7 +636,22 @@ export async function getProductos(
       if (filtros.subrubroId && p.subrubro_id !== filtros.subrubroId) return false;
       if (filtros.mayoristaId && !p.mayoristas.some((m) => m.mayorista_id === filtros.mayoristaId)) return false;
       return true;
-    }).slice(0, 100);
+    });
+    return {
+      productos: todos.slice((page - 1) * pageSize, page * pageSize).map((p) => ({
+        ...p,
+        mayoristas: p.mayoristas.map((m) => ({
+          ...m,
+          // Como el real: este comercio ve el precio final, con su IVA.
+          presentaciones: m.presentaciones.map((pr) => ({
+            ...pr, muestra_precio: "final" as const,
+            precio_final: Math.round(pr.precio * (1 + (p.alicuota_iva ?? 21) / 100) * 100) / 100,
+            precio_mostrar: Math.round(pr.precio * (1 + (p.alicuota_iva ?? 21) / 100) * 100) / 100,
+          })),
+        })),
+      })),
+      total: todos.length, page, totalPages: Math.max(1, Math.ceil(todos.length / pageSize)),
+    };
   }
   // /store/productos con comercio_id calcula tiene_alta
   const params = new URLSearchParams({ comercio_id: comercioId });
@@ -629,8 +661,12 @@ export async function getProductos(
   if (filtros.subrubroId) params.set("subrubro_id", filtros.subrubroId);
   if (filtros.mayoristaId) params.set("mayorista_id", filtros.mayoristaId);
   if (filtros.incluirSinMayorista) params.set("incluir_sin_mayorista", "true");
-  const data = await api<{ productos: B2BProducto[] }>(`/store/productos?${params}`, { token });
-  return data.productos.map((p) => ({
+  if (filtros.conStock) params.set("con_stock", "1");
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const data = await api<{ productos: B2BProducto[]; total?: number; page?: number; totalPages?: number }>(
+    `/store/productos?${params}`, { token });
+  const productos = data.productos.map((p) => ({
     ...p,
     imagen_url: urlPublica(p.imagen_url),
     // Igual que la portada y los logos: NexoB2B guarda rutas relativas, y
@@ -638,6 +674,12 @@ export async function getProductos(
     imagenes: absolutas(p.imagenes),
     mayoristas: (p.mayoristas ?? []).map((m) => ({ ...m, mayorista_logo: urlPublica(m.mayorista_logo) })),
   }));
+  return {
+    productos,
+    total: data.total ?? productos.length,
+    page: data.page ?? page,
+    totalPages: data.totalPages ?? 1,
+  };
 }
 
 /**

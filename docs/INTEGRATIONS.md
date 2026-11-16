@@ -40,6 +40,12 @@ el código.**
 - **Dueño:** NexoB2B
 - **Regla:** el `precio` que llega es **el costo con la lista del comercio ya
   aplicada**. Nunca se usa como precio de venta.
+- **Pantalla Catálogo (16/11):** la misma que el portal del comercio. Tiene
+  vistas Lista, Chica y Grande, pasillo → rubro → subrubro y «Mostrar sin
+  stock», que manda `con_stock=1` cuando está apagado. «Solo con alta» se
+  filtra sobre lo que llegó, como en B2B. Viene de a 50 con `total` y
+  `totalPages`. El precio que se ve es `precio_mostrar` con «final» o «+ IVA»
+  (DEC-018 de B2B). Al carrito va siempre `precio`, el neto.
 
 ### Descubrí mayoristas
 - **Dirección:** NexoPOS → NexoB2B

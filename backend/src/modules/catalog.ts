@@ -81,22 +81,26 @@ catalogRouter.get("/maestro", async (req, res, next) => {
 });
 
 /**
- * GET /api/catalog?q=&rubro_id=&pasillo_id=&mayorista_id=
+ * GET /api/catalog?q=&pasillo_id=&rubro_id=&subrubro_id=&mayorista_id=&con_stock=1&page=
  * Catálogo en vivo de NexoB2B: producto maestro → mayoristas → presentaciones.
- * tiene_alta indica si el comercio puede comprarle a ese mayorista.
+ * tiene_alta indica si el comercio puede comprarle a ese mayorista. Viene de
+ * a 50, con el total, igual que en el portal del comercio.
  */
 catalogRouter.get("/", async (req, res, next) => {
   try {
     const { token, comercioId } = await b2bContext(req);
-    const productos = await getProductos(token, comercioId, {
+    const pagina = await getProductos(token, comercioId, {
       q: req.query.q ? String(req.query.q) : undefined,
       rubroId: req.query.rubro_id ? String(req.query.rubro_id) : undefined,
       pasilloId: req.query.pasillo_id ? String(req.query.pasillo_id) : undefined,
       subrubroId: req.query.subrubro_id ? String(req.query.subrubro_id) : undefined,
       mayoristaId: req.query.mayorista_id ? String(req.query.mayorista_id) : undefined,
       incluirSinMayorista: req.query.incluir_sin_mayorista === "true",
+      conStock: req.query.con_stock === "1",
+      page: Number(req.query.page) || 1,
+      pageSize: Number(req.query.page_size) || 50,
     });
-    res.json({ productos });
+    res.json(pagina);
   } catch (err) {
     next(err);
   }
