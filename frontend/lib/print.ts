@@ -1,6 +1,7 @@
 "use client";
 
 import { getToken } from "./api";
+import { getDesktop } from "./desktop";
 
 /**
  * Preferencias de impresión. Se guardan por DISPOSITIVO (localStorage), no
@@ -11,6 +12,11 @@ export interface PrintSettings {
   autoPrint: boolean;
   /** Ancho del papel: ticketera térmica o impresora común */
   width: "80mm" | "58mm" | "auto";
+  /**
+   * Sólo en la app de escritorio: a qué impresora sale. Vacío o ausente es la
+   * predeterminada de Windows. Un navegador no deja elegirla.
+   */
+  printer?: string;
 }
 
 const KEY = "nexopos_print_settings";
@@ -135,8 +141,24 @@ export async function printQrCobro(datos: {
   </body></html>`);
 }
 
-/** Monta el HTML en un iframe oculto y lo manda a la impresora. */
+/**
+ * Manda el HTML a la impresora. En la app de escritorio sale directo, sin
+ * diálogo, a la impresora elegida en Configuración; en un navegador se monta
+ * en un iframe oculto y el navegador pregunta.
+ */
 async function printHtml(html: string): Promise<void> {
+  const desktop = getDesktop();
+  if (desktop) {
+    const { printer, width } = loadPrintSettings();
+    try {
+      return await desktop.imprimir(html, { impresora: printer, termica: width !== "auto" });
+    } catch {
+      // El motivo real viene en inglés y envuelto por Electron. Lo que le
+      // sirve al cajero es saber dónde se arregla.
+      throw new Error("No se pudo imprimir. Revisá que la impresora esté prendida y elegida en Configuración.");
+    }
+  }
+
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
   iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";

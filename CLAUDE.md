@@ -21,6 +21,8 @@ login es la cuenta de NexoB2B.
 - **Frontend** `frontend/` — Next.js 15 (App Router) + React 19.
   **Sin framework de CSS**: variables en `app/globals.css`.
 - **Deploy** `deploy/` — VPS propio, systemd + nginx. Sin Docker en producción.
+- **Escritorio** `desktop/` — Electron. Una ventana que muestra nexopos.app y
+  agrega impresión directa. No lleva el frontend adentro; ver `desktop/README.md`.
 
 ## Estructura
 

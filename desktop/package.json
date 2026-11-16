@@ -1,0 +1,36 @@
+{
+  "name": "nexopos-desktop",
+  "productName": "NexoPOS",
+  "version": "1.0.0",
+  "description": "NexoPOS para Windows: la caja en su propia ventana, con impresión directa a la ticketera.",
+  "author": "Linware",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "npm run build && electron .",
+    "dist": "npm run build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0",
+    "typescript": "^5.7.2"
+  },
+  "build": {
+    "appId": "app.nexopos.desktop",
+    "productName": "NexoPOS",
+    "files": ["dist/**/*", "offline.html"],
+    "directories": { "output": "release" },
+    "win": { "target": "nsis" },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": "always",
+      "shortcutName": "NexoPOS"
+    },
+    "publish": [{ "provider": "generic", "url": "https://nexopos.app/descargas/" }]
+  }
+}

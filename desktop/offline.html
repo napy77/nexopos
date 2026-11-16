@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src https: http://localhost:*">
+  <title>NexoPOS — sin conexión</title>
+  <style>
+    body { margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
+           font-family: system-ui, "Segoe UI", sans-serif; background: #f4f5f7; color: #1c2430; }
+    .caja { background: #fff; border-radius: 12px; padding: 36px 40px; max-width: 420px;
+            text-align: center; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    h1 { margin: 0 0 4px; font-size: 26px; }
+    h1 span { color: #2563eb; }
+    h2 { font-size: 18px; margin: 18px 0 8px; }
+    p { margin: 0 0 18px; color: #5b6676; line-height: 1.45; }
+    button { font: inherit; font-weight: 600; padding: 10px 22px; border: 0; border-radius: 8px;
+             background: #2563eb; color: #fff; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: default; }
+    small { display: block; margin-top: 14px; color: #8a94a3; }
+  </style>
+</head>
+<body>
+  <div class="caja">
+    <h1>Nexo<span>POS</span></h1>
+    <h2>No hay conexión a internet</h2>
+    <p>La caja necesita conexión para abrir. Revisá el wifi o el cable de red: apenas vuelva, se abre sola.</p>
+    <button id="reintentar">Reintentar ahora</button>
+    <small id="estado">Probando cada 5 segundos…</small>
+  </div>
+  <script>
+    const destino = new URLSearchParams(location.search).get("destino");
+    const boton = document.getElementById("reintentar");
+    let saliendo = false;
+
+    // Se pregunta por el servidor antes de navegar: navegar a ciegas vuelve a
+    // caer en esta misma página y la pantalla parpadea cada cinco segundos.
+    async function probar() {
+      if (saliendo || !destino) return;
+      try {
+        await fetch(new URL("/", destino), { mode: "no-cors", cache: "no-store" });
+        saliendo = true;
+        location.replace(destino);
+      } catch { /* sigue sin red */ }
+    }
+
+    boton.addEventListener("click", async () => {
+      boton.disabled = true;
+      await probar();
+      boton.disabled = false;
+    });
+    window.addEventListener("online", probar);
+    setInterval(probar, 5000);
+  </script>
+</body>
+</html>

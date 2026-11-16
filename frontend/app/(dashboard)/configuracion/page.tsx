@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { ClavesApi } from "@/components/ClavesApi";
+import { getDesktop } from "@/lib/desktop";
 import {
   loadPrintSettings, savePrintSettings, printTicket,
   DEFAULT_PRINT_SETTINGS, type PrintSettings,
@@ -59,6 +60,8 @@ export default function ConfiguracionPage() {
   const [ultimaVenta, setUltimaVenta] = useState<Sale | null>(null);
   const [balanza, setBalanza] = useState<BalanzaConfig>(BALANZA_DEFAULT);
   const [pruebaCodigo, setPruebaCodigo] = useState("");
+  const [desktop, setDesktop] = useState(false);
+  const [impresoras, setImpresoras] = useState<{ nombre: string; etiqueta: string }[]>([]);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
   const [clubpay, setClubpay] = useState<{ configurado: boolean; mockMode: boolean; clavePreview: string | null } | null>(null);
@@ -72,6 +75,11 @@ export default function ConfiguracionPage() {
 
   useEffect(() => {
     setSettings(loadPrintSettings());
+    const d = getDesktop();
+    if (d) {
+      setDesktop(true);
+      d.impresoras().then(setImpresoras).catch(console.error);
+    }
     api<{ balanza: BalanzaConfig }>("/api/settings/balanza")
       .then((d) => setBalanza(d.balanza))
       .catch(console.error);
@@ -320,6 +328,30 @@ export default function ConfiguracionPage() {
             <span className="muted">Reimprime el último ticket emitido</span>
           </div>
 
+          {desktop ? (
+            <>
+              <h2 style={{ marginTop: 16 }}>Impresora</h2>
+              <select
+                value={settings.printer ?? ""}
+                onChange={(e) => update({ printer: e.target.value })}
+                style={{ width: "100%" }}
+              >
+                <option value="">La predeterminada de Windows</option>
+                {impresoras.map((i) => (
+                  <option key={i.nombre} value={i.nombre}>{i.etiqueta}</option>
+                ))}
+                {/* La elegida puede estar apagada o desinstalada: se la sigue
+                    mostrando para que se vea por qué no imprime. */}
+                {settings.printer && !impresoras.some((i) => i.nombre === settings.printer) && (
+                  <option value={settings.printer}>{settings.printer} (no se encuentra)</option>
+                )}
+              </select>
+              <p className="muted" style={{ margin: "8px 0 0" }}>
+                Desde la app de NexoPOS los tickets salen directo a esta impresora, sin
+                pedir confirmación.
+              </p>
+            </>
+          ) : (
           <div className="empty-state" style={{ marginTop: 12 }}>
             <strong>Sobre el diálogo de impresión</strong>
             <p className="muted" style={{ margin: "6px 0 0" }}>
@@ -341,6 +373,7 @@ export default function ConfiguracionPage() {
               Mac: open -a &quot;Google Chrome&quot; --args --kiosk-printing https://nexopos.app
             </code>
           </div>
+          )}
         </div>
 
         <div className="card" style={{ minWidth: 320 }}>
