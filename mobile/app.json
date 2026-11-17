@@ -62,6 +62,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a0dbc969-61aa-4d5a-854f-3dff8727f7af"
+      }
+    },
+    "owner": "napy77"
   }
 }
