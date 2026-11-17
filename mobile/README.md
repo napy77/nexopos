@@ -24,6 +24,12 @@ cada cambio pasa por las tiendas.
   diciendo para cuándo, listo, salió, entregado, cancelar con un motivo que lee
   el cliente. Los marcados para revisar piden un toque más.
 - **Ventas** — historial, reimprimir, reembolsar.
+- **Ticket sin ticketera** — «Enviar», en Vender y en Ventas: por WhatsApp al
+  número que se tipea (o el de la ficha del cliente) o con un QR en pantalla
+  que el cliente escanea con su cámara. Los dos abren el PDF del ticket con un
+  link firmado por el backend, sin sesión. Sin ticketera elegida, la app no
+  intenta imprimir al cobrar. El QR de contacto de WhatsApp no sirve para esto:
+  no trae el número ni deja mandar un mensaje armado.
 - **Clientes** — saldo, movimientos y cobro de la cuenta corriente.
 - **Productos** (en la barra dice «Stock»: con siete pestañas no entra) — stock con filtros de stock bajo y sin precio, precio, costo
   y mínimo, ajuste de stock con motivo. El buscador trae lo tuyo y, debajo, lo

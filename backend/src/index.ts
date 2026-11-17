@@ -13,7 +13,7 @@ import { catalogRouter, refreshProductTaxonomy } from "./modules/catalog.js";
 import { mayoristasRouter } from "./modules/mayoristas.js";
 import { purchasesRouter } from "./modules/purchases.js";
 import { stockRouter } from "./modules/stock.js";
-import { salesRouter } from "./modules/sales.js";
+import { salesRouter, ticketPublicoRouter } from "./modules/sales.js";
 import { customersRouter } from "./modules/customers.js";
 import { reportsRouter } from "./modules/reports.js";
 import { exportRouter } from "./modules/export.js";
@@ -71,6 +71,9 @@ app.use("/api/stock", requireAuth, stockRouter);
 app.use("/api/margenes", requireAuth, margenesRouter);
 app.use("/api/campanas", requireAuth, campanasRouter);
 app.use("/api/sales", requireAuth, salesRouter);
+// El ticket que abre el cliente desde WhatsApp o el QR: sin sesión, lo
+// autentica la firma que lleva el link.
+app.use("/api/ticket", ticketPublicoRouter);
 app.use("/api/customers", requireAuth, customersRouter);
 app.use("/api/reports", requireAuth, reportsRouter);
 app.use("/api/export", requireAuth, exportRouter);

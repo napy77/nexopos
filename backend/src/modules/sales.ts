@@ -1,5 +1,7 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { config } from "../config.js";
 import PDFDocument from "pdfkit";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
@@ -607,7 +609,7 @@ salesRouter.get("/", async (req, res, next) => {
 
 async function getSaleWithItems(saleId: number, commerceId: number) {
   const { rows: sales } = await pool.query(
-    `SELECT s.*, c.name AS customer_name, co.name AS commerce_name
+    `SELECT s.*, c.name AS customer_name, c.phone AS customer_phone, co.name AS commerce_name
      FROM sales s
      LEFT JOIN customers c ON c.id = s.customer_id
      JOIN commerces co ON co.id = s.commerce_id
@@ -678,7 +680,72 @@ salesRouter.get("/:id/ticket.pdf", async (req, res, next) => {
   try {
     const sale = await getSaleWithItems(Number(req.params.id), req.auth.commerceId);
     if (!sale) throw new HttpError(404, "Ticket no encontrado");
+    escribirTicketPdf(sale, res);
+  } catch (err) {
+    next(err);
+  }
+});
 
+/**
+ * GET /api/sales/:id/ticket.link → { path }
+ * El camino del ticket para mandarlo por WhatsApp o mostrarlo en un QR cuando
+ * no hay ticketera. Va el camino y no la URL entera porque el backend no sabe
+ * con qué dominio lo ven desde afuera; la app le pone adelante el suyo.
+ */
+salesRouter.get("/:id/ticket.link", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id FROM sales WHERE id = $1 AND commerce_id = $2`,
+      [Number(req.params.id), req.auth.commerceId]
+    );
+    if (!rows[0]) throw new HttpError(404, "Ticket no encontrado");
+    res.json({ path: `/api/ticket/${firmarTicket(Number(rows[0].id))}` });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/*
+ * El link público lleva el id de la venta y una firma con el secreto del
+ * servidor: quien no tiene el link no lo puede adivinar ni pasar de un ticket
+ * al siguiente cambiando el número. No vence, como no vence un ticket en
+ * papel. Si se cambia JWT_SECRET, los links ya mandados dejan de abrir.
+ */
+function firmaTicket(saleId: number): string {
+  return createHmac("sha256", config.jwtSecret)
+    .update(`ticket-publico:${saleId}`)
+    .digest("base64url")
+    .slice(0, 22);
+}
+
+const firmarTicket = (saleId: number): string => `${saleId}-${firmaTicket(saleId)}`;
+
+/**
+ * GET /api/ticket/:token — el PDF del ticket, sin sesión. Lo abre el cliente
+ * desde WhatsApp o escaneando el QR de la pantalla del mostrador.
+ */
+export const ticketPublicoRouter = Router();
+
+ticketPublicoRouter.get("/:token", async (req, res, next) => {
+  try {
+    const m = /^(\d+)-([A-Za-z0-9_-]{22})$/.exec(req.params.token);
+    const valido =
+      m !== null &&
+      timingSafeEqual(Buffer.from(m[2]), Buffer.from(firmaTicket(Number(m[1]))));
+    if (!m || !valido) throw new HttpError(404, "Ticket no encontrado");
+    const { rows } = await pool.query(`SELECT commerce_id FROM sales WHERE id = $1`, [Number(m[1])]);
+    if (!rows[0]) throw new HttpError(404, "Ticket no encontrado");
+    const sale = await getSaleWithItems(Number(m[1]), Number(rows[0].commerce_id));
+    if (!sale) throw new HttpError(404, "Ticket no encontrado");
+    escribirTicketPdf(sale, res);
+  } catch (err) {
+    next(err);
+  }
+});
+
+type TicketPdf = NonNullable<Awaited<ReturnType<typeof getSaleWithItems>>>;
+
+function escribirTicketPdf(sale: TicketPdf, res: Response): void {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename=ticket-${sale.ticket_number}.pdf`);
 
@@ -738,7 +805,4 @@ salesRouter.get("/:id/ticket.pdf", async (req, res, next) => {
 
     doc.text("¡Gracias por su compra!", { align: "center" });
     doc.end();
-  } catch (err) {
-    next(err);
-  }
-});
+}

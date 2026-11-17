@@ -7,6 +7,7 @@ import { api, ApiError, leerNumero, mensaje, money, referencia } from "@/lib/api
 import { imprimirQr, imprimirTicket, useImpresora } from "@/lib/impresora";
 import { BALANZA_DEFAULT, buscarPorPlu, leerCodigoBalanza, type BalanzaConfig } from "@/lib/balanza";
 import { Aviso, Boton, Chip, Fila, Hoja } from "@/components/ui";
+import { CompartirTicket } from "@/components/compartir-ticket";
 import {
   type ClubPayCobro, type ClubPayCobroEstado, type ClubPayElegido, type ClubPayOferta,
   type ClubPayValidacion, type CobroMP, type Customer, type StockItem,
@@ -44,6 +45,9 @@ export default function Vender() {
   const { width } = useWindowDimensions();
   const dosPaneles = width >= ANCHO_DOS_PANELES;
   const autoPrint = useImpresora((e) => e.config.autoPrint);
+  // Sin ticketera elegida no se intenta imprimir: el ticket sale por WhatsApp o QR
+  const hayTicketera = useImpresora((e) => e.config.tipo !== "ninguna");
+  const [compartir, setCompartir] = useState<{ id: number; ticketNumber: number } | null>(null);
 
   const [items, setItems] = useState<StockItem[]>([]);
   // Un comercio sin productos y un stock que todavía no llegó se ven igual
@@ -492,7 +496,7 @@ export default function Vender() {
       loadCustomers();
       foco();
       // La impresión va después de limpiar: la caja queda lista aunque la impresora falle
-      if (autoPrint) imprimir(sale.id);
+      if (autoPrint && hayTicketera) imprimir(sale.id);
       return true;
     } catch (err) {
       const msg = mensaje(err, "Error al cobrar");
@@ -785,7 +789,8 @@ export default function Vender() {
                 Ticket #{lastTicket.ticketNumber} · {money(lastTicket.total)}
                 {lastTicket.vuelto ? `  ·  Vuelto ${money(lastTicket.vuelto)}` : ""}
               </Text>
-              <Boton variante="secundario" onPress={() => imprimir(lastTicket.id)}>Imprimir</Boton>
+              {hayTicketera && <Boton variante="secundario" onPress={() => imprimir(lastTicket.id)}>Imprimir</Boton>}
+              <Boton variante="secundario" onPress={() => setCompartir(lastTicket)}>Enviar</Boton>
             </View>
           )}
         </View>
@@ -860,6 +865,7 @@ export default function Vender() {
           </View>
         )}
       </Hoja>
+      <CompartirTicket saleId={compartir?.id ?? null} ticketNumber={compartir?.ticketNumber} onCerrar={() => setCompartir(null)} />
     </View>
   );
 }

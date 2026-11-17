@@ -2,8 +2,9 @@ import { useCallback, useState } from "react";
 import { Alert, FlatList, RefreshControl, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { api, mensaje, money } from "@/lib/api";
-import { imprimirTicket } from "@/lib/impresora";
+import { imprimirTicket, useImpresora } from "@/lib/impresora";
 import { Aviso, Boton } from "@/components/ui";
+import { CompartirTicket } from "@/components/compartir-ticket";
 import { fechaHora, MEDIO_LABEL, type Sale } from "@/lib/tipos";
 import { color, s } from "@/lib/tema";
 
@@ -13,6 +14,8 @@ export default function Ventas() {
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const [refrescando, setRefrescando] = useState(false);
+  const hayTicketera = useImpresora((e) => e.config.tipo !== "ninguna");
+  const [compartir, setCompartir] = useState<{ id: number; ticketNumber: number } | null>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -47,7 +50,7 @@ export default function Ventas() {
               setAviso(`Reembolso del ticket #${v.ticket_number} emitido (ticket #${r.ticketNumber}).`);
               setTimeout(() => setAviso(""), 6000);
               cargar();
-              imprimir(r.id);
+              if (hayTicketera) imprimir(r.id);
             } catch (err) {
               setError(mensaje(err, "Error al reembolsar"));
             }
@@ -87,13 +90,15 @@ export default function Ventas() {
                 {v.operado_por ? ` · soporte ${v.operado_por}` : ""}
               </Text>
               <View style={s.fila}>
-                <Boton variante="secundario" onPress={() => imprimir(v.id)}>Reimprimir</Boton>
+                {hayTicketera && <Boton variante="secundario" onPress={() => imprimir(v.id)}>Reimprimir</Boton>}
+                <Boton variante="secundario" onPress={() => setCompartir({ id: v.id, ticketNumber: v.ticket_number })}>Enviar</Boton>
                 {reembolsable && <Boton variante="secundario" onPress={() => reembolsar(v)}>↩️ Reembolsar</Boton>}
               </View>
             </View>
           );
         }}
       />
+      <CompartirTicket saleId={compartir?.id ?? null} ticketNumber={compartir?.ticketNumber} onCerrar={() => setCompartir(null)} />
     </View>
   );
 }
