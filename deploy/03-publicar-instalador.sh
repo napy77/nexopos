@@ -40,7 +40,7 @@ fi
 
 # Un .exe que llegó cortado y un latest.yml sano hacen que todas las cajas
 # bajen un instalador roto. Se compara contra el hash que escribió el build.
-echo "Verificando $ARCHIVO…"
+echo "Verificando ${ARCHIVO}…"
 REAL=$(openssl dgst -sha512 -binary "$ORIGEN/$ARCHIVO" | base64 -w0)
 if [[ "$REAL" != "$SHA" ]]; then
   echo "El .exe no coincide con latest.yml (se subió incompleto o es de otro build)." >&2

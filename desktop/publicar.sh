@@ -20,7 +20,7 @@ npm run dist
 
 ARCHIVO=$(sed -n 's/^path: *//p' release/latest.yml | tr -d "'\"")
 echo
-echo "Subiendo $ARCHIVO a $SERVIDOR…"
+echo "Subiendo $ARCHIVO a ${SERVIDOR}…"
 ssh "$SERVIDOR" "rm -rf /tmp/nexopos-instalador && mkdir -p /tmp/nexopos-instalador"
 scp release/latest.yml "release/$ARCHIVO" "release/$ARCHIVO.blockmap" "$SERVIDOR:/tmp/nexopos-instalador/"
 ssh -t "$SERVIDOR" "sudo bash /opt/nexopos/deploy/03-publicar-instalador.sh /tmp/nexopos-instalador && rm -rf /tmp/nexopos-instalador"
