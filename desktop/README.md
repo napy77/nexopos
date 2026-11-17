@@ -39,10 +39,11 @@ npm run dist                                # release/NexoPOS Setup x.y.z.exe
   conexión. La impresión silenciosa en papel térmico no se vio salir.
 - **Ícono**: sale con el de Electron. Falta `build/icon.png` (512×512 o más).
 - **Firma de código**: sin certificado, SmartScreen avisa al instalar.
-- **Actualización automática**: la app busca `latest.yml` en
-  `https://nexopos.app/descargas/`, que todavía no existe (si no responde, abre
-  igual). Para prenderla hay que servir ahí el contenido de `release/`
-  (`.exe`, `.blockmap`, `latest.yml`) desde nginx.
+- **Publicar** (`bash desktop/publicar.sh usuario@servidor`, ver
+  `docs/DEPLOYMENT.md`): todavía no se hizo. Hasta entonces el sitio no muestra
+  la sección de descarga y la app no tiene de dónde actualizarse (si no
+  encuentra `latest.yml`, abre igual). Antes hay que agregar el bloque
+  `/descargas/` a la config de nginx del servidor, que se aplica a mano.
 - **Vender sin conexión**: si se corta con la caja abierta, el frontend avisa,
   apaga el menú y el cobro, y los recupera solo (`frontend/lib/conexion.ts`;
   sirve igual en el navegador). **Dentro de la app** se puede cobrar en

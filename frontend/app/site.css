@@ -103,7 +103,21 @@
 .site-footer a { color: var(--muted); }
 .site-footer a:hover { color: var(--text); }
 
+/* App de Windows: sólo aparece si el instalador está publicado */
+.site-windows-in { display: grid; grid-template-columns: 1.3fr 1fr; gap: 48px; align-items: center; }
+.site-windows-in h2 { text-align: left; margin-bottom: 14px; }
+.site-windows-lead { margin: 0 0 18px; font-size: 17px; }
+.site-windows-lista { margin: 0; padding-left: 20px; }
+.site-windows-lista li { margin-bottom: 10px; }
+.site-windows-caja {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 28px; text-align: center;
+}
+.site-windows-meta { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
+.site-windows-nota { margin: 14px 0 0; font-size: 13px; color: var(--muted); text-align: left; }
+
 @media (max-width: 960px) {
+  .site-windows-in { grid-template-columns: 1fr; gap: 24px; }
   .site-grid, .site-pasos { grid-template-columns: repeat(2, 1fr); }
   .site-eco-in { grid-template-columns: 1fr; gap: 24px; }
 }

@@ -27,6 +27,7 @@ Los valores reales viven en `backend/.env` del servidor, que está en
 | `/api/` | backend `127.0.0.1:4000` |
 | `/v1/` | backend `127.0.0.1:4000` |
 | `/health` | backend `127.0.0.1:4000` |
+| `/descargas/` | archivos en `/var/www/nexopos/descargas/` (instalador de Windows) |
 | `/entrar` | frontend `127.0.0.1:3000`, **sin access log** |
 | `/` | frontend `127.0.0.1:3000` |
 
@@ -37,6 +38,30 @@ mano (`cp` + `nginx -t` + `reload`, ver el encabezado del archivo).
 
 **`/v1/` necesita su propio bloque.** Sin él, todo lo que consume NexoTienda cae
 en el 404 de Next.js y el error no se parece a lo que pasa.
+
+**`/descargas/` también se aplica a mano**, igual que `/entrar`. Sin ese
+bloque, `/descargas/latest.yml` cae en Next y da 404: el sitio no muestra el
+botón de descarga y las apps instaladas no se actualizan (las dos cosas, en
+silencio).
+
+## Publicar el instalador de Windows
+
+Aparte del deploy y **sólo después de probarlo en Windows**: publicar hace
+aparecer la sección «NexoPOS para Windows» en el sitio y actualiza todas las
+cajas que ya tienen la app.
+
+Desde la Mac, con el repo ya desplegado en el servidor:
+
+```bash
+bash desktop/publicar.sh usuario@servidor
+```
+
+Genera el `.exe`, lo sube y corre `deploy/03-publicar-instalador.sh`, que
+verifica el hash contra `latest.yml` y escribe `latest.yml` al final (mientras
+tanto sigue valiendo la versión anterior). Para que las apps instaladas se
+enteren de una versión nueva hay que subir `version` en `desktop/package.json`.
+
+Comprobar: `curl -s https://nexopos.app/descargas/latest.yml`.
 
 ## Desplegar
 

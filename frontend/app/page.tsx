@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import Acceso from "./acceso";
+import DescargaWindows from "./descarga-windows";
 import { NEXOB2B_REGISTRO_URL } from "@/lib/sitio";
 import "./site.css";
 
@@ -151,6 +152,8 @@ export default function Sitio() {
             </div>
           </div>
         </section>
+
+        <DescargaWindows />
 
         <section className="site-section site-ecosistema">
           <div className="site-container site-eco-in">
