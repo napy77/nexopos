@@ -23,6 +23,9 @@ login es la cuenta de NexoB2B.
 - **Deploy** `deploy/` — VPS propio, systemd + nginx. Sin Docker en producción.
 - **Escritorio** `desktop/` — Electron. Una ventana que muestra nexopos.app y
   agrega impresión directa. No lleva el frontend adentro; ver `desktop/README.md`.
+- **Móvil** `mobile/` — Expo SDK 54 (el mismo stack que ClubPay), Android e
+  iOS, tablet y celular. App nativa contra `/api/*`, **sin web embebida**.
+  Imprime ESC/POS por red o Bluetooth; ver `mobile/README.md`.
 
 ## Estructura
 
@@ -72,6 +75,10 @@ Arrancan en `index.ts` y trabajan en segundo plano:
    Postgres rechace la consulta entera. TypeScript no mira adentro del SQL.
 8. **Nunca precio de venta automático desde el costo de NexoB2B.** Ese número
    es el costo; usarlo de precio hace vender a costo miles de productos.
+9. **`/api/*` también lo consume la app móvil instalada**, que no se actualiza
+   el día del deploy. Campos y rutas nuevas sí; renombrar, cambiar el tipo o
+   sacar algo que la app usa, no, hasta que la versión vieja deje de estar en
+   uso. La web y el backend salen juntos; la app no.
 
 ## Antes de modificar algo
 
