@@ -4,7 +4,8 @@ import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { operador } from "../middleware/auth.js";
-import { renderCierreHtml } from "./caja-render.js";
+import { renderCierreHtml, type CierreData } from "./caja-render.js";
+import { renderCierreEscpos } from "./ticket-escpos.js";
 
 export const cajaRouter = Router();
 
@@ -218,42 +219,47 @@ cajaRouter.post("/cerrar", async (req, res, next) => {
  * efectivo contado y la diferencia); con la sesión abierta, un corte parcial
  * para ver cómo viene el turno sin cerrarlo.
  */
+async function datosCierre(commerceId: number, sessionId: number): Promise<CierreData> {
+  const { rows } = await pool.query(
+    `SELECT s.id, s.opened_at, s.closed_at, s.closing_note, s.closing_summary, c.name AS commerce_name
+     FROM cash_sessions s JOIN commerces c ON c.id = s.commerce_id
+     WHERE s.id = $1 AND s.commerce_id = $2`,
+    [sessionId, commerceId]
+  );
+  if (!rows[0]) throw new HttpError(404, "Turno no encontrado");
+  const s = rows[0];
+  // Si está cerrada se usa el arqueo congelado; si sigue abierta, se calcula
+  const resumen = s.closed_at && s.closing_summary
+    ? s.closing_summary
+    : await calcularResumen(commerceId, sessionId);
+  return {
+    commerceName: s.commerce_name,
+    sessionId: s.id,
+    openedAt: s.opened_at,
+    closedAt: s.closed_at,
+    resumen,
+    note: s.closing_note,
+  };
+}
+
 cajaRouter.get("/:id/resumen.html", async (req, res, next) => {
   try {
-    const commerceId = req.auth.commerceId;
-    const sessionId = Number(req.params.id);
-    const { rows } = await pool.query(
-      `SELECT s.id, s.opened_at, s.closed_at, s.closing_note, s.closing_summary, c.name AS commerce_name
-       FROM cash_sessions s JOIN commerces c ON c.id = s.commerce_id
-       WHERE s.id = $1 AND s.commerce_id = $2`,
-      [sessionId, commerceId]
-    );
-    if (!rows[0]) throw new HttpError(404, "Turno no encontrado");
-    const s = rows[0];
-
-    // Si está cerrada se usa el arqueo congelado; si sigue abierta, se calcula
-    const resumen = s.closed_at && s.closing_summary
-      ? s.closing_summary
-      : await calcularResumen(commerceId, sessionId);
-
+    const data = await datosCierre(req.auth.commerceId, Number(req.params.id));
     const width = ["80mm", "58mm", "auto"].includes(String(req.query.width))
       ? (String(req.query.width) as "80mm" | "58mm" | "auto")
       : "80mm";
-
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(
-      renderCierreHtml(
-        {
-          commerceName: s.commerce_name,
-          sessionId: s.id,
-          openedAt: s.opened_at,
-          closedAt: s.closed_at,
-          resumen,
-          note: s.closing_note,
-        },
-        { width, autoPrint: req.query.autoprint === "1" }
-      )
-    );
+    res.send(renderCierreHtml(data, { width, autoPrint: req.query.autoprint === "1" }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /api/caja/:id/resumen.escpos?width=80mm|58mm → { base64 }, para la app móvil */
+cajaRouter.get("/:id/resumen.escpos", async (req, res, next) => {
+  try {
+    const data = await datosCierre(req.auth.commerceId, Number(req.params.id));
+    res.json({ base64: renderCierreEscpos(data, req.query.width === "58mm" ? "58mm" : "80mm") });
   } catch (err) {
     next(err);
   }

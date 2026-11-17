@@ -5,6 +5,7 @@ import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { operador } from "../middleware/auth.js";
 import { renderTicketHtml, fmtQty, fmtMoney, PAYMENT_LABEL } from "./ticket-render.js";
+import { renderTicketEscpos } from "./ticket-escpos.js";
 import { sesionAbierta } from "./caja.js";
 import { registrarTransaccion, consultarCharge, aCentavos, aPesos, RECORTE_TEXTO } from "../integrations/clubpay.js";
 import { clubpayKey } from "./clubpay.js";
@@ -647,6 +648,22 @@ salesRouter.get("/:id/ticket.html", async (req, res, next) => {
       : "80mm";
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(renderTicketHtml(sale, { width, autoPrint: req.query.autoprint === "1" }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/sales/:id/ticket.escpos?width=80mm|58mm → { base64 }
+ * Los bytes listos para la térmica, para la app de tablet y celular, que no
+ * tiene navegador que dibuje el HTML. Ver ticket-escpos.ts.
+ */
+salesRouter.get("/:id/ticket.escpos", async (req, res, next) => {
+  try {
+    const sale = await getSaleWithItems(Number(req.params.id), req.auth.commerceId);
+    if (!sale) throw new HttpError(404, "Ticket no encontrado");
+    const width = req.query.width === "58mm" ? "58mm" : "80mm";
+    res.json({ base64: renderTicketEscpos(sale, width) });
   } catch (err) {
     next(err);
   }

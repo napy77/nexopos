@@ -335,6 +335,9 @@ mercadopagoRouter.post("/cobro", async (req, res, next) => {
       paymentId: cobro.payment_id,
       status: cobro.status,
       qrDataUrl,
+      // El contenido del QR, para que la app móvil lo mande a la térmica con
+      // el comando de QR de la impresora en vez de como imagen.
+      qrData: cobro.qr_data,
       expiresAt: cobro.expires_at,
       monto: cobro.amount_cents / 100,
     });
