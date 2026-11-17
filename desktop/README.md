@@ -39,7 +39,7 @@ npm run dist                                # release/NexoPOS Setup x.y.z.exe
   conexión. La impresión silenciosa en papel térmico no se vio salir.
 - **Ícono**: sale con el de Electron. Falta `build/icon.png` (512×512 o más).
 - **Firma de código**: sin certificado, SmartScreen avisa al instalar.
-- **Publicar** (`bash desktop/publicar.sh usuario@servidor`, ver
+- **Publicar** (`bash /Users/german/ClaudeCode/nexo-pos/desktop/publicar.sh usuario@servidor`, ver
   `docs/DEPLOYMENT.md`): todavía no se hizo. Hasta entonces el sitio no muestra
   la sección de descarga y la app no tiene de dónde actualizarse (si no
   encuentra `latest.yml`, abre igual). Antes hay que agregar el bloque

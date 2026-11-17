@@ -7,7 +7,7 @@
 #
 # La carpeta tiene que traer lo que deja `npm run dist` en desktop/release/:
 # latest.yml, el .exe y su .blockmap. Lo normal es no correr esto a mano sino
-# `bash desktop/publicar.sh usuario@servidor` desde la Mac, que lo sube y lo llama.
+# `bash /Users/german/ClaudeCode/nexo-pos/desktop/publicar.sh usuario@servidor` desde la Mac, que lo sube y lo llama.
 #
 # Al publicar pasan dos cosas: la sección «NexoPOS para Windows» aparece en el
 # sitio, y las apps ya instaladas se actualizan a esta versión. Publicar sólo

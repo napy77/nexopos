@@ -53,7 +53,7 @@ cajas que ya tienen la app.
 Desde la Mac, con el repo ya desplegado en el servidor:
 
 ```bash
-bash desktop/publicar.sh usuario@servidor
+bash /Users/german/ClaudeCode/nexo-pos/desktop/publicar.sh usuario@servidor
 ```
 
 Genera el `.exe`, lo sube y corre `deploy/03-publicar-instalador.sh`, que

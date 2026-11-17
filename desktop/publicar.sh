@@ -3,7 +3,7 @@
 # Genera el instalador y lo publica en https://nexopos.app/descargas/
 #
 # Uso, desde la Mac:
-#   bash desktop/publicar.sh usuario@servidor
+#   bash /Users/german/ClaudeCode/nexo-pos/desktop/publicar.sh usuario@servidor
 #
 # Pide la contraseña de sudo en el servidor. Antes de correrlo:
 #   - probar el instalador en Windows: publicar actualiza todas las cajas;
@@ -13,7 +13,7 @@
 #
 set -euo pipefail
 
-SERVIDOR="${1:?Uso: bash desktop/publicar.sh usuario@servidor}"
+SERVIDOR="${1:?Uso: bash /Users/german/ClaudeCode/nexo-pos/desktop/publicar.sh usuario@servidor}"
 cd "$(dirname "$0")"
 
 npm run dist
