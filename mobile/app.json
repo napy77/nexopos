@@ -29,6 +29,7 @@
       "predictiveBackGestureEnabled": false
     },
     "plugins": [
+      "./plugins/permiso-ubicacion",
       "expo-router",
       "expo-secure-store",
       [
