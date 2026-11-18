@@ -6,6 +6,7 @@ import { router, useFocusEffect } from "expo-router";
 import { api, ApiError, leerNumero, mensaje, money, referencia } from "@/lib/api";
 import { imprimirQr, imprimirTicket, useImpresora } from "@/lib/impresora";
 import { BALANZA_DEFAULT, buscarPorPlu, leerCodigoBalanza, type BalanzaConfig } from "@/lib/balanza";
+import { CampoBusqueda } from "@/components/escaner";
 import { Aviso, Boton, Chip, Fila, Hoja } from "@/components/ui";
 import { CompartirTicket } from "@/components/compartir-ticket";
 import {
@@ -564,9 +565,10 @@ export default function Vender() {
   const catalogo = (
     <View style={{ flex: dosPaneles ? 3 : 1 }}>
       <View style={{ padding: 12, gap: 8 }}>
-        <TextInput
+        <CampoBusqueda
           ref={searchRef}
-          style={[s.input, { fontSize: 18 }]}
+          onEscaneo={(codigo) => onSearchEnter(codigo)}
+          style={{ fontSize: 18 }}
           placeholder="Escaneá o buscá un producto…"
           value={q}
           onChangeText={setQ}
@@ -666,9 +668,10 @@ export default function Vender() {
               {!socio && !clubpayElegido && (
                 <>
                   <Boton variante="secundario" onPress={mostrarQrCobro}>Mostrar QR al socio</Boton>
-                  <Text style={s.apagado}>¿Tenés lector de QR? Escaneá el del socio:</Text>
+                  <Text style={s.apagado}>O escaneá el QR del socio, con el lector o con la cámara:</Text>
                   <View style={s.fila}>
-                    <TextInput style={[s.input, { flex: 1 }]} value={qrSocio} onChangeText={setQrSocio}
+                    <CampoBusqueda qr estiloCaja={{ flex: 1 }} value={qrSocio} onChangeText={setQrSocio}
+                      onEscaneo={(codigo) => { setQrSocio(codigo); validarSocio(codigo); }}
                       onSubmitEditing={(e) => validarSocio(e.nativeEvent.text)} placeholder="QR del socio…" autoCapitalize="none" autoCorrect={false} />
                     <Boton variante="secundario" onPress={() => validarSocio()} cargando={validando} desactivado={!qrSocio.trim()}>Validar</Boton>
                   </View>

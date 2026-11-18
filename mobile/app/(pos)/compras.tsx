@@ -2,6 +2,7 @@ import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { Mayoristas } from "@/components/mayoristas";
+import { CampoBusqueda } from "@/components/escaner";
 import { Aviso, Boton, Chip, Fila, Hoja } from "@/components/ui";
 import { api, mensaje, money } from "@/lib/api";
 import {
@@ -120,9 +121,9 @@ function Catalogo({ buscarInicial, mayorista, onQuitarMayorista, onVerCarrito }:
   return (
     <View style={{ flex: 1 }}>
       <View style={{ padding: 12, gap: 8, maxWidth: 900, width: "100%", alignSelf: "center" }}>
-        <TextInput
-          style={s.input}
-          placeholder="Buscar por nombre, EAN, marca…"
+        <CampoBusqueda
+          onEscaneo={(codigo) => { setTexto(codigo); setQ(codigo); }}
+          placeholder="Escaneá o buscá por nombre, EAN, marca…"
           value={texto}
           onChangeText={setTexto}
           autoCorrect={false}

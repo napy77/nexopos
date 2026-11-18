@@ -58,6 +58,12 @@ Enter. No necesitan nada de la app; el buscador del mostrador tiene el foco y
 recibe la lectura. Con el teclado físico conectado, Android e iOS esconden el
 teclado de pantalla solos.
 
+Sin lector, la **cámara**: cada buscador de productos (Vender, Stock, alta del
+catálogo, Compras, el código de barras del producto propio) tiene el ícono de
+código de barras a la derecha. Lo leído entra igual que si lo hubiera tipeado
+el lector. El campo del QR del socio de ClubPay lee QR. Pide sólo el permiso
+de cámara, sin micrófono (`expo-camera`, `components/escaner.tsx`).
+
 ## Ticketeras
 
 | Conexión | Android | iOS |
@@ -103,6 +109,11 @@ eas build --platform all --profile production
 eas submit --platform all
 ```
 
+El perfil `production` da un AAB para Google Play con el número de versión
+(`versionCode`) que lleva EAS y sube solo. La **primera** subida a Play
+Console se hace a mano: `eas submit` necesita que la app ya exista allá y una
+cuenta de servicio de Google con permiso para subir.
+
 Android e iOS salen del mismo commit y con la misma versión, como ClubPay.
 
 ## Regla para el backend
@@ -128,6 +139,6 @@ nuevos sí, campos que cambian de nombre o de tipo no. Ver regla 9 en
   cerrada pide notificaciones push (`expo-notifications`, otra compilación y un
   envío desde el backend).
 - Fotos de productos: sacarlas con la cámara del celular pide
-  `expo-image-picker`, un módulo nativo nuevo (otra compilación y permiso de
-  cámara en las tiendas).
+  `expo-image-picker`, otro módulo nativo y otra compilación (el permiso de
+  cámara ya está, por el escáner).
 - `lib/b2b.ts` es copia de `frontend/lib/b2b-types.ts`: si cambia uno, el otro.

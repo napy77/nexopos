@@ -2,6 +2,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, Pressable, RefreshControl, Text, TextInput, View } from "react-native";
 import { Campo, FormPropio } from "@/components/form-propio";
+import { CampoBusqueda } from "@/components/escaner";
 import { Aviso, Boton, Chip, Hoja } from "@/components/ui";
 import { api, leerNumero, mensaje, money } from "@/lib/api";
 import { metaDe, opcionesDe, type B2BProductoMaestro } from "@/lib/b2b";
@@ -115,9 +116,10 @@ export default function Productos() {
           <Boton style={{ flex: 1 }} onPress={() => setAlta({ modo: "catalogo" })}>+ Del catálogo</Boton>
           <Boton style={{ flex: 1 }} variante="secundario" onPress={() => setAlta({ modo: "propio" })}>+ Producto propio</Boton>
         </View>
-        <TextInput
+        <CampoBusqueda
           ref={buscador}
-          style={s.input}
+          // Un código que no es EAN (uno interno, de Code 128) se busca como texto
+          onEscaneo={(codigo) => (pareceEan(codigo) ? onEnter(codigo) : setQ(codigo))}
           placeholder="Escaneá o buscá por nombre…"
           value={q}
           onChangeText={setQ}
@@ -497,9 +499,9 @@ function AltaCatalogo({ eanInicial, productoInicial, onAlta, onPropio }: {
   const sinResultados = !buscando && !!buscado && resultados.length === 0;
   return (
     <View style={{ gap: 10 }}>
-      <TextInput
+      <CampoBusqueda
         ref={buscador}
-        style={s.input}
+        onEscaneo={(codigo) => { setTermino(codigo); setOk(""); }}
         placeholder="Escaneá el código o buscá por nombre o marca…"
         value={termino}
         onChangeText={(t) => { setTermino(t); setOk(""); }}

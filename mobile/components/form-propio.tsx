@@ -4,6 +4,7 @@ import { api, leerNumero, mensaje } from "@/lib/api";
 import { useTaxonomia } from "@/lib/taxonomia";
 import { color, s } from "@/lib/tema";
 import type { StockItem } from "@/lib/tipos";
+import { CampoBusqueda } from "@/components/escaner";
 import { Aviso, Boton, Chip } from "./ui";
 
 /**
@@ -95,7 +96,7 @@ export function FormPropio({ inicial, eanInicial, onListo }: {
       <View style={[s.fila, { alignItems: "flex-start" }]}>
         <View style={{ flex: 1 }}>
           <Campo etiqueta="Código de barras">
-            <TextInput style={s.input} value={ean} onChangeText={setEan} keyboardType="number-pad" />
+            <CampoBusqueda value={ean} onChangeText={setEan} onEscaneo={setEan} keyboardType="number-pad" />
           </Campo>
         </View>
         <View style={{ flex: 1 }}>
