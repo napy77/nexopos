@@ -226,6 +226,7 @@ export default function Sitio() {
             <a href={NEXOB2B_REGISTRO_URL}>Crear cuenta</a>
             <a href="https://nexob2b.app">NexoB2B</a>
             <Link href="/docs/api">API para ERP</Link>
+            <Link href="/privacidad">Privacidad</Link>
           </nav>
         </div>
       </footer>

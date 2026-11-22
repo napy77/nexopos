@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <path id="pin" d="M512 130c-166 0-300 134-300 300 0 216 300 490 300 490s300-274 300-490c0-166-134-300-300-300z"/>
+    <clipPath id="enpin"><use href="#pin"/></clipPath>
+  </defs>
+  <use href="#pin" fill="#fff"/>
+  <g clip-path="url(#enpin)">
+    <rect x="160" y="120" width="720" height="170" fill="#1d4ed8"/>
+    <g fill="#93c5fd">
+      <rect x="248" y="120" width="88" height="170"/><rect x="424" y="120" width="88" height="170"/><rect x="600" y="120" width="88" height="170"/><rect x="776" y="120" width="88" height="170"/>
+    </g>
+    <circle cx="204" cy="290" r="44" fill="#1d4ed8"/><circle cx="292" cy="290" r="44" fill="#93c5fd"/>
+    <circle cx="380" cy="290" r="44" fill="#1d4ed8"/><circle cx="468" cy="290" r="44" fill="#93c5fd"/>
+    <circle cx="556" cy="290" r="44" fill="#1d4ed8"/><circle cx="644" cy="290" r="44" fill="#93c5fd"/>
+    <circle cx="732" cy="290" r="44" fill="#1d4ed8"/><circle cx="820" cy="290" r="44" fill="#93c5fd"/>
+  </g>
+  <text x="512" y="610" text-anchor="middle" font-family="Helvetica Neue, Arial" font-weight="800" font-size="250" fill="#13234a">N</text>
+  <g transform="rotate(-14 760 790)">
+    <rect x="636" y="706" width="258" height="166" rx="24" fill="#13234a" stroke="#fff" stroke-width="14"/>
+    <rect x="636" y="744" width="258" height="34" fill="#facc15"/>
+    <rect x="666" y="810" width="70" height="20" rx="6" fill="#94a3b8"/>
+  </g>
+</svg>

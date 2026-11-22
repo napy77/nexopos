@@ -134,3 +134,13 @@
   .site-section h2, .site-cta h2 { font-size: 26px; }
   .site-grid, .site-pasos { grid-template-columns: 1fr; }
 }
+
+/* Páginas de texto legal (/privacidad) */
+.site-legal h1 { font-size: 36px; font-weight: 800; color: #111827; }
+.site-legal h2 { font-size: 20px; text-align: left; margin: 32px 0 10px; }
+.site-legal p, .site-legal li { color: var(--text); }
+.site-legal ul { padding-left: 22px; }
+.site-legal li { margin-bottom: 8px; }
+.site-legal a { color: var(--primary); }
+.site-legal-fecha { color: var(--muted); font-size: 14px; margin-top: 6px; }
+@media (max-width: 640px) { .site-legal h1 { font-size: 28px; } }

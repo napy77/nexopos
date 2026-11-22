@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs><mask id="m"><rect width="1024" height="1024" fill="#fff"/>
+    <text x="512" y="610" text-anchor="middle" font-family="Helvetica Neue, Arial" font-weight="800" font-size="250" fill="#000">N</text>
+    <rect x="160" y="270" width="720" height="22" fill="#000"/>
+  </mask></defs>
+  <path mask="url(#m)" d="M512 130c-166 0-300 134-300 300 0 216 300 490 300 490s300-274 300-490c0-166-134-300-300-300z" fill="#fff"/>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f766e"/><stop offset="1" stop-color="#115e59"/></linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <!-- tira de papel de la sumadora -->
+  <path d="M392 120 H632 V520 H392Z" fill="#fff"/>
+  <path d="M392 120 l30 26 l30 -26 l30 26 l30 -26 l30 26 l30 -26 l30 26 l30 -26 V100 H392Z" fill="#0f766e"/>
+  <text x="512" y="350" text-anchor="middle" font-family="Helvetica Neue, Arial" font-weight="800" font-size="190" fill="#13234a">N</text>
+  <rect x="432" y="390" width="160" height="16" rx="8" fill="#cbd5e1"/>
+  <rect x="432" y="428" width="110" height="16" rx="8" fill="#cbd5e1"/>
+  <!-- sumadora -->
+  <path d="M250 500 H774 L840 900 H184Z" fill="#f97316"/>
+  <rect x="352" y="478" width="320" height="44" rx="22" fill="#13234a"/>
+  <rect x="300" y="560" width="424" height="90" rx="20" fill="#13234a"/>
+  <text x="694" y="626" text-anchor="end" font-family="Menlo, monospace" font-weight="700" font-size="62" fill="#4ade80">$1.250</text>
+  <g fill="#fff">
+    <rect x="292" y="690" width="96" height="70" rx="16"/><rect x="412" y="690" width="96" height="70" rx="16"/><rect x="532" y="690" width="96" height="70" rx="16"/>
+    <rect x="652" y="690" width="96" height="150" rx="16" fill="#13234a"/>
+    <rect x="280" y="782" width="100" height="70" rx="16"/><rect x="404" y="782" width="100" height="70" rx="16"/><rect x="528" y="782" width="100" height="70" rx="16"/>
+  </g>
+</svg>
