@@ -122,7 +122,9 @@ ni mueve dinero.
 ## Google Play · Ficha de la tienda
 
 ### Categoría y contacto
-- Tipo: **App**. Categoría: **Empresa**.
+- Tipo: **App**. Categoría: **Negocios**.
+- Etiquetas: **Negocios**, **Productividad**, **Escáner de código de barras**.
+  Ninguna de finanzas ni pagos: harían que Play la trate como app financiera.
 - Email: `soporte@nexopos.app` (**hay que crear la casilla** o el reenvío).
 - Sitio web: `https://nexopos.app`.
 - Teléfono: opcional, se puede dejar vacío.
@@ -186,6 +188,17 @@ Una cuenta personal de Play creada después de noviembre de 2023 tiene que hacer
 una **prueba cerrada con 12 testers durante 14 días** antes de pedir acceso a
 producción. Con una cuenta de organización, no. Se ve en Panel → «Pasar a
 producción».
+
+## Problemas que marcó Play al enviar (22/11)
+
+- **ID de publicidad:** declarar **No** (Contenido de la app → ID de publicidad).
+- **`android.hardware.screen.portrait` obligatoria:** la deducía Play de una
+  actividad de ML Kit fijada en vertical. Desde el código 5 la app la declara
+  opcional (`mobile/plugins/pantalla-libre.js`).
+- **«No se pudo resolver el DNS» de la política:** de los tres servidores de
+  nombres de nexopos.app, `ns3` (200.105.94.80) no responde, y el registro
+  delega en `ns*.nubilus.com.ar` mientras la zona dice `ns*.nexopos.app`. Lo
+  arregla Nubilus.
 
 ---
 

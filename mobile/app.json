@@ -30,6 +30,7 @@
     },
     "plugins": [
       "./plugins/permiso-ubicacion",
+      "./plugins/pantalla-libre",
       "expo-router",
       [
         "expo-secure-store",
