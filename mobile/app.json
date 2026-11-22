@@ -2,7 +2,7 @@
   "expo": {
     "name": "NexoPOS",
     "slug": "nexopos",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "nexopos",
@@ -31,7 +31,18 @@
     "plugins": [
       "./plugins/permiso-ubicacion",
       "expo-router",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "NexoPOS usa Face ID para que entres sin escribir la contraseña."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "NexoPOS usa Face ID para que entres sin escribir la contraseña."
+        }
+      ],
       [
         "expo-camera",
         {

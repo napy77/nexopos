@@ -44,7 +44,14 @@ cada cambio pasa por las tiendas.
   dispositivo (`lib/carrito.ts`), como la web lo guarda en el navegador.
   **Mayoristas**: descubrir por zona y rubro, pedir el alta, el contacto por
   WhatsApp y el catálogo de cada uno.
-- **Ajustes** (⚙️ arriba a la derecha) — ticketera del dispositivo, cerrar sesión.
+- **Ajustes** (⚙️ arriba a la derecha) — ticketera del dispositivo, ingreso con huella o Face ID, cerrar sesión.
+- **Huella o Face ID** — se ofrece después de entrar con la contraseña, o se
+  activa en Ajustes. El JWT dura 12 h y no hay token de renovación: lo que se
+  guarda es el email y la contraseña, en el Keychain / Keystore atados a la
+  biometría (`lib/biometria.ts`). Al ingresar se hace el login de siempre.
+  Si cambian las huellas del teléfono o la contraseña en NexoB2B, se borra y
+  se vuelve a la contraseña. El simulador de iOS no hace cumplir la
+  biometría: probarlo en un teléfono.
 
 Márgenes, campañas, fotos de productos y configuración siguen en nexopos.app.
 

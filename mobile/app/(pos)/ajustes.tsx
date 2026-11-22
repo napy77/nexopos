@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
-import { API_URL, mensaje } from "@/lib/api";
+import { API_URL, api, mensaje } from "@/lib/api";
+import * as Bio from "@/lib/biometria";
 import { useSesion } from "@/lib/sesion";
 import { imprimirPrueba, useImpresora } from "@/lib/impresora";
 import { buscarBle, vinculadasClasico } from "@/lib/impresora/transporte";
@@ -136,9 +137,74 @@ export default function Ajustes() {
           Márgenes, campañas, fotos de productos y configuración siguen en la web por ahora.
         </Text>
         <Boton variante="secundario" onPress={() => WebBrowser.openBrowserAsync("https://nexopos.app/login")}>Abrir nexopos.app</Boton>
+        <IngresoBiometrico email={comercio?.email ?? ""} />
         <Boton variante="peligro" onPress={salir}>Cerrar sesión</Boton>
         {API_URL !== "https://nexopos.app" && <Text style={s.apagado}>Servidor: {API_URL}</Text>}
       </View>
     </ScrollView>
+  );
+}
+
+/**
+ * Activar o apagar el ingreso con huella. Para activarlo se pide la
+ * contraseña y se verifica contra el login: guardar una equivocada haría
+ * fallar el próximo ingreso, justo cuando venció la sesión.
+ */
+function IngresoBiometrico({ email }: { email: string }) {
+  const [bio, setBio] = useState<Bio.Biometria | null>(null);
+  const [activo, setActivo] = useState(false);
+  const [clave, setClave] = useState("");
+  const [error, setError] = useState("");
+  const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    Promise.all([Bio.biometria(), Bio.emailGuardado()])
+      .then(([b, g]) => { setBio(b); setActivo(!!g && g === email); })
+      .catch(() => setBio(null));
+  }, [email]);
+
+  if (!bio?.disponible || !email) return null;
+
+  async function activar() {
+    if (!bio) return;
+    setError("");
+    setEnviando(true);
+    try {
+      await api("/api/auth/login", { body: { email, password: clave }, anonimo: true });
+      await Bio.guardar(email, clave, bio.nombre);
+      setActivo(true);
+      setClave("");
+    } catch (err) {
+      setError(err instanceof Error && err.message.includes("Credenciales")
+        ? "La contraseña no es correcta."
+        : mensaje(err, `No se pudo activar ${bio.nombre}`));
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <View style={{ gap: 8, paddingVertical: 4 }}>
+      <View style={s.entre}>
+        <Text style={{ fontSize: 16, color: color.texto }}>{`Ingresar con ${bio.nombre}`}</Text>
+        <Switch
+          value={activo}
+          onValueChange={async (v) => {
+            if (v) return; // se activa con la contraseña, abajo
+            await Bio.olvidar();
+            setActivo(false);
+          }}
+        />
+      </View>
+      {!activo && (
+        <>
+          <Text style={s.apagado}>{`Escribí tu contraseña una vez y después entrás con ${bio.nombre}.`}</Text>
+          <TextInput style={s.input} placeholder="Contraseña" value={clave} onChangeText={setClave}
+            secureTextEntry textContentType="password" />
+          {error ? <Aviso tipo="error">{error}</Aviso> : null}
+          <Boton variante="secundario" onPress={activar} cargando={enviando} desactivado={!clave}>Activar</Boton>
+        </>
+      )}
+    </View>
   );
 }

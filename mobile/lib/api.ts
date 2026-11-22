@@ -18,8 +18,12 @@ export class ApiError extends Error {
  * siempre online, así que un fallo de red es un error que se le muestra al
  * cajero, no algo que se encola.
  */
-export async function api<T = unknown>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
-  const token = useSesion.getState().token;
+export async function api<T = unknown>(path: string, init?: {
+  method?: string; body?: unknown;
+  /** Sin el JWT: para verificar una contraseña sin que un 401 cierre la sesión abierta. */
+  anonimo?: boolean;
+}): Promise<T> {
+  const token = init?.anonimo ? null : useSesion.getState().token;
   let res: Response;
   try {
     res = await fetch(API_URL + path, {
