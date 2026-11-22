@@ -31,7 +31,8 @@ y clientes inventados. No hay marcas reales a la vista.
 ## Google Play · Contenido de la app
 
 ### Política de privacidad
-`https://nexopos.app/privacidad`. Se publica con el próximo deploy del frontend.
+`https://nexopos.app/privacidad`, y la baja en `https://nexopos.app/eliminar-cuenta`.
+Salen con el deploy del frontend.
 
 ### Detalles de acceso
 **«Todas o algunas funciones de la app están restringidas»** → agregar
@@ -71,8 +72,12 @@ Ya está: **No**.
 2. ¿Todos los datos se encriptan en tránsito? **Sí** (HTTPS).
 3. Formas de cuenta: **«Mi app no permite crear cuentas»**: el alta es en
    NexoB2B. El login usa usuario y contraseña de NexoB2B.
+   → «¿Pueden acceder con cuentas creadas fuera de ella?» **Sí**, «A través de
+   cuentas de trabajo o empresariales».
 4. ¿Ofrecen una forma de pedir que se borren los datos? **Sí**:
-   `https://nexopos.app/privacidad#eliminar`.
+   `https://nexopos.app/eliminar-cuenta`. Replica la forma de
+   `nexob2b.app/eliminar-cuenta/`: baja por mail con nombre y CUIT, 30 días, y
+   el link a la baja de NexoB2B.
 
 Datos recopilados. En todos: **no se comparten**, el procesamiento **no es
 efímero**, la recopilación es **obligatoria** salvo que se diga otra cosa, y

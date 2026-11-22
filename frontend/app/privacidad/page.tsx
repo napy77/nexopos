@@ -117,7 +117,8 @@ export default function Privacidad() {
             y pedí la baja. Borramos los datos de tu comercio en NexoPOS dentro de los 30 días,
             salvo lo que la ley nos obligue a conservar. La cuenta de NexoB2B se da de baja en
             NexoB2B. Para desactivar el ingreso con huella alcanza con apagarlo en Ajustes o
-            desinstalar la app.
+            desinstalar la app. El paso a paso está en{" "}
+            <Link href="/eliminar-cuenta">Eliminar mi cuenta</Link>.
           </p>
           <p>
             Si sos cliente de un comercio que usa NexoPOS y querés ver, corregir o borrar tus datos,

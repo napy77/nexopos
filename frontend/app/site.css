@@ -144,3 +144,5 @@
 .site-legal a { color: var(--primary); }
 .site-legal-fecha { color: var(--muted); font-size: 14px; margin-top: 6px; }
 @media (max-width: 640px) { .site-legal h1 { font-size: 28px; } }
+.site-legal ol { padding-left: 22px; }
+.site-legal ol li { margin-bottom: 8px; }
