@@ -7,7 +7,7 @@ es parte de terminar un cambio.**
 
 ## En producción
 
-`https://nexopos.app` · último commit desplegado: **`ffa77ff`**
+`https://nexopos.app` · último commit desplegado: **`1b0b03f`** (visto en `/health` el 23/11)
 (verificable en `GET /health`, que devuelve el commit y cuándo arrancó).
 
 Comercios reales en uso conocidos: **Jure Hnos** y **Supermercado Delfín**
