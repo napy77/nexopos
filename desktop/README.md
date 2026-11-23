@@ -39,10 +39,8 @@ npm run dist                                # release/NexoPOS Setup x.y.z.exe
 
 ## Pendiente
 
-- **Ver salir un ticket con la 1.0.4.** La 1.0.3 ya imprimió, girado y cortado a la izquierda. Instalada en Windows con una OCOM
-  OCPP-812 de 80 mm (22/11): la 1.0.0 y la 1.0.2 (con `webContents.print`)
-  sacaban un papelito en blanco. La 1.0.3 imprime por PDF; el PDF se probó
-  en Mac, la impresión por SumatraPDF todavía no se vio en Windows.
+- **Rollo de 58 mm**: el de 80 se probó en Windows (OCOM OCPP-812, 1.0.4, 23/11);
+  el de 58 no. El ancho útil (`UTIL_MM` en `src/main.ts`) es un supuesto.
 - **Firma de código**: sin certificado, SmartScreen avisa al instalar.
 - **Publicar**: `bash /Users/german/ClaudeCode/nexo-pos/desktop/publicar.sh german@nexopos.app`
   (ver `docs/DEPLOYMENT.md`). Antes, subir la versión en `desktop/package.json`.
