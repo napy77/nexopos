@@ -18,6 +18,7 @@ Todos en `/Users/german/ClaudeCode/nexo-pos/mobile/assets/tienda/`:
 | `play/grafico-1024x500.png` | Gráfico de funciones de Play |
 | `play/capturas/1..5-*.png` | Capturas de teléfono para Play (1080 × 1920) |
 | `apple/capturas/1..5-*.png` | Capturas para iPhone de 6,9" (1320 × 2868) |
+| `apple/capturas-iphone-6.3/1..5-*.png` | Las mismas a 1206 × 2622: es la medida que pide App Store Connect en «iPhone con Dynamic Island (pantalla mediana)» |
 | `apple/capturas-ipad/1..5-*.png` | Capturas para iPad de 13" (2752 × 2064, horizontal) |
 | `fuentes/*.svg` | El ícono en vector, para rehacer cualquier tamaño |
 
