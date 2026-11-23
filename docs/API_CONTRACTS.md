@@ -123,7 +123,7 @@ POST /v1/cuentas/canjear   { token, storeId }
   → { accountId, storeId, displayName, linkedAt }
 
 GET  /v1/cuentas/:accountId?storeId=
-  → { accountId, storeId, displayName, balanceCents, limitCents,
+  → { accountId, storeId, displayName, phone, balanceCents, limitCents,
       availableCents, paused, onlineEnabled, creditEnabled, closingDay, dueDay,
       currentPeriod: { from, to, dueDate }, linkedAt }
 ```
@@ -143,6 +143,12 @@ GET  /v1/cuentas/:accountId?storeId=
   personas se pueden identificar en la tienda, hay cuentas a las que el comercio
   nunca les fió. Con `creditEnabled: false` no se ofrece cargar a la cuenta.
   `paused` es "por ahora no"; `creditEnabled: false` es "nunca se le abrió".
+- **`phone` (23/11, pedido de NexoTienda)** es el teléfono de la ficha del
+  cliente en ese comercio, o `null` (nunca `""`). Sirve para precargar el
+  carrito; nadie lo verificó. La ficha vacía se completa con el
+  `contact.phone` del primer pedido que trae `accountId`, y con el `phone` que
+  ClubPay mande en el canje (pedido, todavía no lo manda). **Nunca se pisa un
+  teléfono que la ficha ya tiene**: cuál vale lo decide el comercio.
 - **No existe `vinculo_ambiguo`.** El `external_id` es el id de la fila, dos
   fichas duplicadas son dos filas y sólo una está vinculada: el canje resuelve
   siempre a una.

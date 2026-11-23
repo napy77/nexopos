@@ -605,6 +605,12 @@ export interface SesionTienda {
   persona?: string | null;
   verification_level?: number;
   email_verified?: boolean;
+  /**
+   * El celular que la persona cargó en ClubPay, si lo cargó. Opcional y sin
+   * verificar allá. Pedido a ClubPay el 23/11 (PEDIDO-TELEFONO-EN-CANJE-A-CLUBPAY.md);
+   * hasta que lo mande, no viene.
+   */
+  phone?: string | null;
 }
 
 /**
@@ -628,7 +634,7 @@ export async function canjearTokenTienda(apiKey: string, token: string): Promise
     // primera vez desde la tienda y llega sin número. Lo demás se rechaza.
     if (token.startsWith("TIENDA-")) {
       return { account_id: `acc_mock_${token}`, external_id: null, persona: "Compradora Nueva",
-               verification_level: 1, email_verified: true };
+               verification_level: 1, email_verified: true, phone: "351 555-0101" };
     }
     if (!token.startsWith("CLI-")) throw new HttpError(401, "Token inválido o vencido");
     return { account_id: `acc_mock_${token}`, external_id: token, persona: "Germán Yovan" };

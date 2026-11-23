@@ -105,6 +105,10 @@ cuentasRouter.post("/cuentas/canjear", cuentas, async (req, res, next) => {
       throw new HttpError(403, "Ese acceso no es de esta tienda");
     }
 
+    // Si ClubPay manda el celular que la persona cargó allá, completa la ficha
+    // vacía. Hoy no lo manda; cuando lo mande, anda sin tocar nada acá.
+    if (sesion.phone) await completarTelefono(pool, Number(cliente.id), sesion.phone);
+
     await audit(commerceId, "cuenta.canje", "customers", cliente.id);
     res.json({
       accountId: refDeCliente(Number(cliente.id)),
@@ -184,6 +188,26 @@ async function clienteNacidoEnLaTienda(
   return customerId;
 }
 
+/**
+ * Le pone teléfono a una ficha que no tiene. Nunca pisa uno que ya está: el
+ * de la ficha lo cargó el comercio, o la misma persona antes, y cuál vale lo
+ * decide el comerciante en la ficha, no un pedido.
+ *
+ * Lo usan el pedido con sesión y el canje.
+ */
+export async function completarTelefono(
+  db: { query: (q: string, v?: unknown[]) => Promise<unknown> },
+  customerId: number, phone: string
+): Promise<void> {
+  const limpio = phone.trim().slice(0, 40);
+  if (!limpio) return;
+  await db.query(
+    `UPDATE customers SET phone = $2
+      WHERE id = $1 AND (phone IS NULL OR btrim(phone) = '')`,
+    [customerId, limpio]
+  );
+}
+
 // ── El estado, que se pregunta en cada operación ────────────────────────────
 
 /**
@@ -205,7 +229,7 @@ cuentasRouter.get("/cuentas/:accountId", cuentas, async (req, res, next) => {
     if (!Number.isInteger(customerId)) throw new HttpError(400, "accountId inválido");
 
     const { rows: [cliente] } = await pool.query(
-      `SELECT c.id, c.name, c.clubpay_status, c.clubpay_linked_at,
+      `SELECT c.id, c.name, c.phone, c.clubpay_status, c.clubpay_linked_at,
               co.closing_day, co.due_day
          FROM customers c JOIN commerces co ON co.id = c.commerce_id
         WHERE c.id = $1 AND c.commerce_id = $2`,
@@ -234,6 +258,13 @@ cuentasRouter.get("/cuentas/:accountId", cuentas, async (req, res, next) => {
       accountId: refDeCliente(Number(cliente.id)),
       storeId: String(commerceId),
       displayName: cliente.name,
+      /*
+       * Para precargar el campo del carrito, no para probar nada: nadie lo
+       * verificó. Es el de la ficha del comercio, que se completa con el
+       * primer pedido (o con el celular de ClubPay, si lo manda en el canje).
+       * Sin teléfono va null, no un texto vacío: la tienda lo pide.
+       */
+      phone: cliente.phone?.trim() || null,
       balanceCents: centavos(estado.saldo),
       limitCents: centavos(estado.limite),
       availableCents: centavos(estado.disponible),

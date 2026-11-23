@@ -9,6 +9,7 @@ import { PRECIO_EFECTIVO } from "./campanas-precio.js";
 import { disponibilidadMP, aplicarCobro } from "./mercadopago.js";
 import { crearCobroMP, cancelarCobroMP } from "../integrations/clubpay-cobros.js";
 import { reglasDe, identidadDe, evaluarPedido, type Cuenta } from "./reglas-pedidos.js";
+import { completarTelefono } from "./v1-cuentas.js";
 
 /**
  * Los pedidos de la tienda online.
@@ -314,6 +315,15 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
          VALUES ($1,$2,$3,$4,$5,$6)`,
         [orden.id, l.productId, l.name, l.unit, l.qty, l.price]
       );
+    }
+    /*
+     * El teléfono que la persona escribió completa su ficha si no tenía. Así,
+     * desde el segundo pedido, GET /v1/cuentas lo trae y la tienda lo
+     * precarga. Sólo si estaba vacía: si ya tiene uno y éste es otro (el de la
+     * casa, el del hijo que pasa a buscar), el que vale lo decide el comercio.
+     */
+    if (customerId && body.contact?.phone) {
+      await completarTelefono(client, customerId, body.contact.phone);
     }
     await client.query("COMMIT");
 
