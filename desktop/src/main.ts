@@ -97,6 +97,10 @@ function vieneDeLaApp(evento: IpcMainInvokeEvent): boolean {
   return !!marco && marco === evento.sender.mainFrame && esDeLaApp(marco.url);
 }
 
+// La versión instalada, para mostrarla en la caja: cuando algo falla, lo
+// primero es saber si esa PC ya se actualizó.
+ipcMain.handle("nexo:version", (evento) => (vieneDeLaApp(evento) ? app.getVersion() : ""));
+
 ipcMain.handle("nexo:impresoras", async (evento) => {
   if (!vieneDeLaApp(evento)) return [];
   const lista = await evento.sender.getPrintersAsync();

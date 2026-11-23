@@ -37,7 +37,6 @@ npm run dist                                # release/NexoPOS Setup x.y.z.exe
 - **Probar el instalador en una PC con Windows y una ticketera real.** Hasta
   ahora se probó la app en Mac: puente, lista de impresoras, pantalla sin
   conexión. La impresión silenciosa en papel térmico no se vio salir.
-- **Ícono**: sale con el de Electron. Falta `build/icon.png` (512×512 o más).
 - **Firma de código**: sin certificado, SmartScreen avisa al instalar.
 - **Publicar** (`bash /Users/german/ClaudeCode/nexo-pos/desktop/publicar.sh usuario@servidor`, ver
   `docs/DEPLOYMENT.md`): todavía no se hizo. Hasta entonces el sitio no muestra

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, getToken, getSoporte, borrarSesion, type Soporte } from "@/lib/api";
 import { useConexion } from "@/lib/conexion";
+import { getDesktop } from "@/lib/desktop";
 import { enviarCola, useVentasOffline } from "@/lib/ventas-offline";
 
 const NAV = [
@@ -52,6 +53,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [commerceName, setCommerceName] = useState("");
   const [pendientes, setPendientes] = useState(0);
   const [soporte, setSoporte] = useState<Soporte | null>(null);
+  // Sólo en la app de Windows. La 1.0.0 no sabe decirla: ahí no se muestra.
+  const [versionApp, setVersionApp] = useState("");
+
+  useEffect(() => {
+    getDesktop()?.version?.().then(setVersionApp, () => {});
+  }, []);
   const conexion = useConexion();
   const sinEnviar = useVentasOffline();
   const pendientesEnvio = sinEnviar.filter((v) => !v.motivo).length;
@@ -200,6 +207,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <a onClick={logout} style={{ cursor: "pointer", padding: "6px 20px" }}>
             Cerrar sesión
           </a>
+          {versionApp && <div className="version-app">NexoPOS para Windows {versionApp}</div>}
         </div>
       </nav>
       <main className="main">{children}</main>

@@ -7,6 +7,7 @@ import { contextBridge, ipcRenderer } from "electron";
  * frontend/lib/desktop.ts — si cambia acá, cambia allá.
  */
 contextBridge.exposeInMainWorld("nexoDesktop", {
+  version: () => ipcRenderer.invoke("nexo:version"),
   impresoras: () => ipcRenderer.invoke("nexo:impresoras"),
   imprimir: (html: string, opciones: { impresora?: string; termica?: boolean; ancho?: string }) =>
     ipcRenderer.invoke("nexo:imprimir", html, opciones),

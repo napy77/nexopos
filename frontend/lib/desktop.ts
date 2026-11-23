@@ -6,6 +6,8 @@
  * undefined y todo sigue como siempre.
  */
 export interface NexoDesktop {
+  /** No existe en la 1.0.0: se pregunta antes de llamarla. */
+  version?(): Promise<string>;
   impresoras(): Promise<{ nombre: string; etiqueta: string }[]>;
   /** Imprime sin diálogo. `impresora` vacía = la predeterminada de Windows. */
   imprimir(html: string, opciones: { impresora?: string; termica?: boolean; ancho?: string }): Promise<void>;

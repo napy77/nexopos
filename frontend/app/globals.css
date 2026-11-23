@@ -50,6 +50,7 @@ a { color: var(--primary); text-decoration: none; }
 .perfil-link { display: block; padding: 8px 20px !important; }
 .perfil-nombre { display: block; color: #fff; font-weight: 600; font-size: 13px; }
 .perfil-sub { display: block; color: #9ca3af; font-size: 11px; }
+.version-app { padding: 4px 20px 0; color: #6b7280; font-size: 11px; }
 
 /* POS bloqueado con la caja cerrada */
 .caja-cerrada-wrap {
