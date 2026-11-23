@@ -99,7 +99,10 @@ comercio del pedido, con cualquier forma de pago.
 
 `contact.email` (23/11) es opcional. Queda en el pedido (`orders.contact_email`)
 aunque no haya cuenta; uno sin forma de correo se descarta y el pedido entra
-igual. Con `accountId`, el teléfono y el correo completan la ficha vacía, sin
+igual. NexoTienda lo manda como lo escribió la persona y sólo si no está
+vacío. **Los pedidos a la libreta no traen `contact`**: su correo es el de la
+ficha (`COALESCE(o.contact_email, c.email)`, como ya hace la API para ERP).
+Quien mande avisos por correo tiene que leerlo así. Con `accountId`, el teléfono y el correo completan la ficha vacía, sin
 pisar nunca lo que ya tiene.
 
 **Reglas de identidad (CR-0003).** Si el comercio las prendió, un pedido con
