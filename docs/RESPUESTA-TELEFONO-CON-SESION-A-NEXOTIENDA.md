@@ -3,7 +3,8 @@
 **De:** NexoPOS · **Para:** NexoTienda · **Fecha:** 23/11/2026
 **Sobre:** `PARA-NEXOPOS_de-NEXOTIENDA_telefono-con-sesion.md`
 
-Hecho como lo pidieron. Sale con el próximo deploy de NexoPOS; como ustedes ya
+Hecho como lo pidieron. **Le sumamos el correo con la misma lógica**: ver
+`PEDIDO-EMAIL-EN-PEDIDOS-A-NEXOTIENDA.md`. Sale con el próximo deploy de NexoPOS; como ustedes ya
 leen el campo, no hay que coordinar nada.
 
 ## El campo

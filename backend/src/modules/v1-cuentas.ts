@@ -105,9 +105,9 @@ cuentasRouter.post("/cuentas/canjear", cuentas, async (req, res, next) => {
       throw new HttpError(403, "Ese acceso no es de esta tienda");
     }
 
-    // Si ClubPay manda el celular que la persona cargó allá, completa la ficha
-    // vacía. Hoy no lo manda; cuando lo mande, anda sin tocar nada acá.
-    if (sesion.phone) await completarTelefono(pool, Number(cliente.id), sesion.phone);
+    // Si ClubPay manda el celular o el correo de la persona, completan la ficha
+    // vacía. Hoy no los manda; cuando los mande, anda sin tocar nada acá.
+    await completarContacto(pool, Number(cliente.id), { phone: sesion.phone, email: sesion.email });
 
     await audit(commerceId, "cuenta.canje", "customers", cliente.id);
     res.json({
@@ -189,22 +189,35 @@ async function clienteNacidoEnLaTienda(
 }
 
 /**
- * Le pone teléfono a una ficha que no tiene. Nunca pisa uno que ya está: el
- * de la ficha lo cargó el comercio, o la misma persona antes, y cuál vale lo
- * decide el comerciante en la ficha, no un pedido.
+ * Un correo que se puede usar, en minúsculas, o null. No se rechaza nada por
+ * esto: un correo mal escrito en el carrito no puede frenar un pedido de
+ * harina. Si no tiene forma de correo, simplemente no se guarda.
+ */
+export function correoUsable(email: string | null | undefined): string | null {
+  const limpio = String(email ?? "").trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(limpio) && limpio.length <= 200 ? limpio : null;
+}
+
+/**
+ * Le pone teléfono y correo a una ficha que no los tiene. Nunca pisa uno que
+ * ya está: el de la ficha lo cargó el comercio, o la misma persona antes, y
+ * cuál vale lo decide el comerciante en la ficha, no un pedido.
  *
  * Lo usan el pedido con sesión y el canje.
  */
-export async function completarTelefono(
+export async function completarContacto(
   db: { query: (q: string, v?: unknown[]) => Promise<unknown> },
-  customerId: number, phone: string
+  customerId: number, datos: { phone?: string | null; email?: string | null }
 ): Promise<void> {
-  const limpio = phone.trim().slice(0, 40);
-  if (!limpio) return;
+  const phone = String(datos.phone ?? "").trim().slice(0, 40) || null;
+  const email = correoUsable(datos.email);
+  if (!phone && !email) return;
   await db.query(
-    `UPDATE customers SET phone = $2
-      WHERE id = $1 AND (phone IS NULL OR btrim(phone) = '')`,
-    [customerId, limpio]
+    `UPDATE customers
+        SET phone = CASE WHEN phone IS NULL OR btrim(phone) = '' THEN COALESCE($2::text, phone) ELSE phone END,
+            email = CASE WHEN email IS NULL OR btrim(email) = '' THEN COALESCE($3::text, email) ELSE email END
+      WHERE id = $1`,
+    [customerId, phone, email]
   );
 }
 
@@ -229,7 +242,7 @@ cuentasRouter.get("/cuentas/:accountId", cuentas, async (req, res, next) => {
     if (!Number.isInteger(customerId)) throw new HttpError(400, "accountId inválido");
 
     const { rows: [cliente] } = await pool.query(
-      `SELECT c.id, c.name, c.phone, c.clubpay_status, c.clubpay_linked_at,
+      `SELECT c.id, c.name, c.phone, c.email, c.clubpay_status, c.clubpay_linked_at,
               co.closing_day, co.due_day
          FROM customers c JOIN commerces co ON co.id = c.commerce_id
         WHERE c.id = $1 AND c.commerce_id = $2`,
@@ -261,10 +274,15 @@ cuentasRouter.get("/cuentas/:accountId", cuentas, async (req, res, next) => {
       /*
        * Para precargar el campo del carrito, no para probar nada: nadie lo
        * verificó. Es el de la ficha del comercio, que se completa con el
-       * primer pedido (o con el celular de ClubPay, si lo manda en el canje).
+       * primer pedido (o con lo que mande ClubPay en el canje).
        * Sin teléfono va null, no un texto vacío: la tienda lo pide.
        */
       phone: cliente.phone?.trim() || null,
+      /*
+       * Lo mismo con el correo: para precargar, sin verificar, null si no hay.
+       * Es a donde algún día van el ticket y los avisos del pedido.
+       */
+      email: correoUsable(cliente.email),
       balanceCents: centavos(estado.saldo),
       limitCents: centavos(estado.limite),
       availableCents: centavos(estado.disponible),

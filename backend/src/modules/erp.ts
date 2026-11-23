@@ -353,6 +353,7 @@ const SELECT_PEDIDO = `
          o.payment_method, o.payment_status, o.payment_id,
          COALESCE(o.contact_name, c.name) AS contacto_nombre,
          COALESCE(o.contact_phone, c.phone) AS contacto_telefono,
+         COALESCE(o.contact_email, c.email) AS contacto_email,
          o.customer_id, o.ready_estimate, o.cancel_reason, o.cancelled_by, o.review_reason,
          o.subtotal, o.fee, o.total, o.sale_id, s.ticket_number,
          (SELECT json_agg(json_build_object(
@@ -377,7 +378,8 @@ function pedidoErp(r: Record<string, any>) {
     actualizado: r.cursor,
     retiro: { tipo: r.slot_kind, franja: r.slot_label || null, direccion: r.address ?? null },
     pago: { medio: r.payment_method, estado: r.payment_status, id: r.payment_id ?? null },
-    contacto: { nombre: r.contacto_nombre ?? null, telefono: r.contacto_telefono ?? null },
+    contacto: { nombre: r.contacto_nombre ?? null, telefono: r.contacto_telefono ?? null,
+                email: r.contacto_email ?? null },
     // La libreta, con el mismo nombre que usa NexoTienda (`CLI-<id>`).
     cuenta_id: r.customer_id ? `CLI-${r.customer_id}` : null,
     notas: r.notes ?? null,

@@ -92,10 +92,15 @@ Estados (CHECK en la base): `recibido`, `aceptado`, `listo`, `en_camino`,
 
 Pago: `efectivo_entrega`, `online`, `cuenta_corriente`.
 
-Quién compra (CR-0003): `accountId` (`CLI-<n>`) y `contact` ({ name, phone })
+Quién compra (CR-0003): `accountId` (`CLI-<n>`) y `contact` ({ name, phone, email? })
 **pueden ir juntos**. `contact` es obligatorio salvo con `cuenta_corriente`;
 `accountId` es obligatorio con `cuenta_corriente`. La cuenta tiene que ser del
 comercio del pedido, con cualquier forma de pago.
+
+`contact.email` (23/11) es opcional. Queda en el pedido (`orders.contact_email`)
+aunque no haya cuenta; uno sin forma de correo se descarta y el pedido entra
+igual. Con `accountId`, el teléfono y el correo completan la ficha vacía, sin
+pisar nunca lo que ya tiene.
 
 **Reglas de identidad (CR-0003).** Si el comercio las prendió, un pedido con
 `efectivo_entrega` se evalúa con el nivel de verificación que **NexoPOS le
@@ -123,7 +128,7 @@ POST /v1/cuentas/canjear   { token, storeId }
   → { accountId, storeId, displayName, linkedAt }
 
 GET  /v1/cuentas/:accountId?storeId=
-  → { accountId, storeId, displayName, phone, balanceCents, limitCents,
+  → { accountId, storeId, displayName, phone, email, balanceCents, limitCents,
       availableCents, paused, onlineEnabled, creditEnabled, closingDay, dueDay,
       currentPeriod: { from, to, dueDate }, linkedAt }
 ```
@@ -143,12 +148,12 @@ GET  /v1/cuentas/:accountId?storeId=
   personas se pueden identificar en la tienda, hay cuentas a las que el comercio
   nunca les fió. Con `creditEnabled: false` no se ofrece cargar a la cuenta.
   `paused` es "por ahora no"; `creditEnabled: false` es "nunca se le abrió".
-- **`phone` (23/11, pedido de NexoTienda)** es el teléfono de la ficha del
-  cliente en ese comercio, o `null` (nunca `""`). Sirve para precargar el
-  carrito; nadie lo verificó. La ficha vacía se completa con el
-  `contact.phone` del primer pedido que trae `accountId`, y con el `phone` que
-  ClubPay mande en el canje (pedido, todavía no lo manda). **Nunca se pisa un
-  teléfono que la ficha ya tiene**: cuál vale lo decide el comercio.
+- **`phone` y `email` (23/11)** son los de la ficha del cliente en ese
+  comercio, o `null` (nunca `""`; el correo en minúsculas). Sirven para
+  precargar el carrito; nadie los verificó. La ficha vacía se completa con el
+  `contact` del primer pedido que trae `accountId`, y con lo que ClubPay mande
+  en el canje (`phone`, `email`: pedido, todavía no lo manda). **Nunca se pisa
+  lo que la ficha ya tiene**: cuál vale lo decide el comercio.
 - **No existe `vinculo_ambiguo`.** El `external_id` es el id de la fila, dos
   fichas duplicadas son dos filas y sólo una está vinculada: el canje resuelve
   siempre a una.
@@ -236,7 +241,7 @@ POST /api/erp/v1/pedidos/:code/cancelar   { motivo }       → el pedido
   pedido pagado espera a ClubPay antes del COMMIT. El ERP actualiza por `code`.
 - Forma del pedido: `code`, `status`, `creado`, `actualizado`,
   `retiro {tipo, franja, direccion}`, `pago {medio, estado, id}`,
-  `contacto {nombre, telefono}` (de la ficha si compró con la cuenta),
+  `contacto {nombre, telefono, email}` (de la ficha si compró con la cuenta),
   `cuenta_id` (`CLI-<n>`), `notas`, `listo_para`, `motivo_cancelacion`,
   `cancelado_por`, `revision {motivo}` (sólo en `recibido`; el código de
   CR-0003), `venta {id, ticket}`, `lineas [{producto_id (texto, el id de

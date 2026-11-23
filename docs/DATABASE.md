@@ -96,6 +96,8 @@ El pedido de la tienda. Estados: `recibido`, `aceptado`, `listo`, `en_camino`,
 `cuenta_corriente`. El precio y el nombre quedan **congelados en la línea**.
 `online` es Mercado Pago; `payment_status` suma `reembolsado` y
 `payment_error` guarda el motivo del rechazo para el comprador (042).
+`contact_email` (051) es el correo opcional del comprador, también en pedidos
+anónimos: es a donde van a ir el ticket y los avisos cuando se manden.
 
 ### `mp_cobros`
 Cada cobro con Mercado Pago pedido a ClubPay, del mostrador o de la tienda.

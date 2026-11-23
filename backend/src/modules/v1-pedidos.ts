@@ -9,7 +9,7 @@ import { PRECIO_EFECTIVO } from "./campanas-precio.js";
 import { disponibilidadMP, aplicarCobro } from "./mercadopago.js";
 import { crearCobroMP, cancelarCobroMP } from "../integrations/clubpay-cobros.js";
 import { reglasDe, identidadDe, evaluarPedido, type Cuenta } from "./reglas-pedidos.js";
-import { completarTelefono } from "./v1-cuentas.js";
+import { completarContacto, correoUsable } from "./v1-cuentas.js";
 
 /**
  * Los pedidos de la tienda online.
@@ -66,6 +66,11 @@ const nuevoPedidoSchema = z.object({
   contact: z.object({
     name: z.string().trim().min(1).max(120),
     phone: z.string().trim().min(4).max(40),
+    /**
+     * Opcional. Un correo que no tiene forma de correo no frena el pedido: se
+     * descarta. Para el ticket y los avisos que vengan después.
+     */
+    email: z.string().trim().max(200).optional(),
   }).optional(),
 });
 
@@ -301,13 +306,13 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
       `INSERT INTO orders (commerce_id, code, customer_id, contact_name, contact_phone,
                            slot_id, slot_label, slot_kind, address, notes,
                            payment_method, payment_status, subtotal, fee, total,
-                           verification_level, review_reason)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+                           verification_level, review_reason, contact_email)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
       [commerceId, nuevoCodigo(), customerId,
        body.contact?.name ?? null, body.contact?.phone ?? null,
        slot.id, slot.label, slot.kind, body.address ?? null, body.notes ?? null,
        body.paymentMethod, paymentStatus, subtotal, fee, total,
-       identidad.level, review]
+       identidad.level, review, correoUsable(body.contact?.email)]
     );
     for (const l of lineas) {
       await client.query(
@@ -317,13 +322,13 @@ pedidosRouter.post("/orders", pedidos, async (req, res, next) => {
       );
     }
     /*
-     * El teléfono que la persona escribió completa su ficha si no tenía. Así,
-     * desde el segundo pedido, GET /v1/cuentas lo trae y la tienda lo
-     * precarga. Sólo si estaba vacía: si ya tiene uno y éste es otro (el de la
+     * El teléfono y el correo que la persona escribió completan su ficha si no
+     * tenía. Así, desde el segundo pedido, GET /v1/cuentas los trae y la
+     * tienda los precarga. Sólo si estaba vacía: si ya tiene uno y éste es otro (el de la
      * casa, el del hijo que pasa a buscar), el que vale lo decide el comercio.
      */
-    if (customerId && body.contact?.phone) {
-      await completarTelefono(client, customerId, body.contact.phone);
+    if (customerId && body.contact) {
+      await completarContacto(client, customerId, { phone: body.contact.phone, email: body.contact.email });
     }
     await client.query("COMMIT");
 

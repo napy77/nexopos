@@ -74,7 +74,9 @@ Diferencias con su propuesta:
 - **`pago.estado`** puede ser `no_aplica` (efectivo o libreta), `pendiente`,
   `pagado`, `rechazado` o `reembolsado`.
 - **`contacto`** viene también cuando el pedido es a la libreta: ahí sale de
-  la ficha del cliente, y `cuenta_id` trae `CLI-<n>`.
+  la ficha del cliente, y `cuenta_id` trae `CLI-<n>`. Trae además `email`
+  (agregado el mismo 23/11, `null` casi siempre hasta que NexoTienda lo pida
+  en el carrito).
 - **`revision`** es `{ "motivo": "<código>" }` y viene sólo mientras está
   `recibido`. Los códigos son de CR-0003:
   - `cuenta_nueva_monto_alto`: «Es el primer pedido de esta persona y es

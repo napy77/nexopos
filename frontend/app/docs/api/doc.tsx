@@ -431,7 +431,7 @@ export function Doc() {
     "actualizado": "2026-11-23T20:41:00.123456Z",
     "retiro": { "tipo": "retiro", "franja": "Hoy 18 a 20 h", "direccion": null },
     "pago": { "medio": "efectivo_entrega", "estado": "no_aplica", "id": null },
-    "contacto": { "nombre": "Ana Pérez", "telefono": "3515550000" },
+    "contacto": { "nombre": "Ana Pérez", "telefono": "3515550000", "email": null },
     "cuenta_id": null,
     "notas": null,
     "listo_para": null,
