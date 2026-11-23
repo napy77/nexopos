@@ -39,7 +39,7 @@ npm run dist                                # release/NexoPOS Setup x.y.z.exe
 
 ## Pendiente
 
-- **Ver salir un ticket con la 1.0.3.** Instalada en Windows con una OCOM
+- **Ver salir un ticket con la 1.0.4.** La 1.0.3 ya imprimió, girado y cortado a la izquierda. Instalada en Windows con una OCOM
   OCPP-812 de 80 mm (22/11): la 1.0.0 y la 1.0.2 (con `webContents.print`)
   sacaban un papelito en blanco. La 1.0.3 imprime por PDF; el PDF se probó
   en Mac, la impresión por SumatraPDF todavía no se vio en Windows.

@@ -1,7 +1,7 @@
 {
   "name": "nexopos-desktop",
   "productName": "NexoPOS",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "NexoPOS para Windows: la caja en su propia ventana, con impresión directa a la ticketera.",
   "author": "Linware",
   "private": true,

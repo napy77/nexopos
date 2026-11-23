@@ -115,6 +115,15 @@ ipcMain.handle("nexo:impresoras", async (evento) => {
 const ROLLO_MM: Record<string, number> = { "80mm": 80, "58mm": 58 };
 
 /**
+ * Lo que de verdad se imprime de cada rollo: el ancho del contenido del
+ * ticket (estilosImpresion en backend/src/modules/ticket-render.ts). La
+ * ticketera no imprime de borde a borde y centra la hoja: un PDF de 80 mm en
+ * los ~72 mm útiles perdía 4 mm de cada lado y se comía el comienzo de cada
+ * línea.
+ */
+const UTIL_MM: Record<number, number> = { 80: 72, 58: 50 };
+
+/**
  * Bloquea cualquier script del documento: el ticket es HTML armado por el
  * backend o por lib/print.ts y no tiene por qué correr nada. La ventana sí
  * necesita JavaScript prendido para que la app mida el alto (eso entra por
@@ -150,7 +159,7 @@ async function imprimirEnRollo(hoja: BrowserWindow, rolloMm: number, impresora?:
     printBackground: true,
     margins: { top: 0, bottom: 0, left: 0, right: 0 },
     pageSize: {
-      width: rolloMm / 25.4,
+      width: (UTIL_MM[rolloMm] ?? rolloMm) / 25.4,
       // Unos milímetros de cola para que el corte no muerda la última línea.
       height: pulgadas(Number.isFinite(altoPx) && altoPx > 0 ? altoPx : 600) + 8 / 25.4,
     },
@@ -161,7 +170,14 @@ async function imprimirEnRollo(hoja: BrowserWindow, rolloMm: number, impresora?:
   try {
     // noscale: el PDF ya mide lo que el rollo; achicarlo a la hoja del driver
     // lo dejaría ilegible.
-    await imprimirPdf(archivo, { printer: impresora || undefined, scale: "noscale", silent: true });
+    // portrait: un ticket corto queda más ancho que alto, y SumatraPDF lo
+    // giraba para que entrara "mejor" en la hoja.
+    await imprimirPdf(archivo, {
+      printer: impresora || undefined,
+      scale: "noscale",
+      orientation: "portrait",
+      silent: true,
+    });
   } finally {
     await rm(archivo, { force: true });
   }
