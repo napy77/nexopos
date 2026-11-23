@@ -210,8 +210,8 @@ producción».
 |---|---|
 | Privacy Policy URL | `https://nexopos.app/privacidad` |
 | Support URL | `https://nexopos.app` |
-| Categoría | Business (secundaria: Productivity) |
-| Clasificación por edad | 4+ (todo «None») |
+| Categoría | Economía y empresas (Business). Secundaria: Productividad. «Compras» no: es la de tiendas para el consumidor |
+| Clasificación por edad | Todo «No» / «Ninguna», salvo **alcohol, tabaco o drogas: «Poco frecuente»**: los catálogos de mayoristas y los productos de un almacén o kiosco incluyen cerveza, vino y cigarrillos. Da **13+**. Reemplazo manual: «No aplicable» (no hay EULA con edad mínima; 18+ sólo sumaría verificaciones de edad en algunos países) |
 | Sign-in required | Sí: la misma cuenta de revisión de Play, con las mismas notas |
 | Exportación de cifrado | Ya declarado en `app.json` (`ITSAppUsesNonExemptEncryption: false`) |
 
@@ -219,7 +219,10 @@ producción».
 - Tracking: **No**.
 - Data Linked to You, todo con propósito **App Functionality**:
   - Contact Info → Name, Email Address, Phone Number, Physical Address
-  - Purchases → Purchase History
+  - Purchases → Purchase History («Compras» en la versión en español)
+  - Financial Info → Other Financial Info: el saldo de cuenta corriente es una
+    deuda del cliente, y Apple pone «deudas» como ejemplo. Payment Info no: el
+    número de tarjeta nunca pasa por la app
   - Identifiers → User ID (la cuenta de NexoB2B)
 - No se declara Location, Photos, Health, Usage Data ni Diagnostics.
 
@@ -233,4 +236,9 @@ porque así se usa un POS en el mostrador, y en esa orientación la app muestra
 productos y ticket lado a lado. Apple acepta 2752 × 2064 para 13".
 
 App Store Connect: ASC App ID `6838172105`. El build 1.0.0 (2) se subió el
-23/11 con `eas submit`.
+23/11 con `eas submit` y se mandó a revisión el mismo día, con publicación
+manual. Idioma único: Español (México); el inglés que App Store Connect crea por
+defecto se borró, porque si queda exige su propia descripción, palabras clave y
+URL de soporte. Disponible sólo en Argentina: así no aplican la evaluación de
+seguridad de China ni el Reglamento de Servicios Digitales de la UE. El arte de
+encabezado (5244 × 2950 o 3840 × 1646) es opcional y quedó vacío.
