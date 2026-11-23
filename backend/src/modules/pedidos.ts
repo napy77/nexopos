@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { PoolClient } from "pg";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
@@ -33,15 +34,6 @@ const PASOS: Record<string, string[]> = {
   cancelado: [],
 };
 
-async function traer(commerceId: number, id: number) {
-  const { rows } = await pool.query(
-    "SELECT * FROM orders WHERE id = $1 AND commerce_id = $2",
-    [id, commerceId]
-  );
-  if (!rows[0]) throw new HttpError(404, "No existe ese pedido");
-  return rows[0];
-}
-
 /** GET /api/pedidos — los que están en curso, y los últimos cerrados */
 pedidosPosRouter.get("/", async (req, res, next) => {
   try {
@@ -66,28 +58,79 @@ pedidosPosRouter.get("/", async (req, res, next) => {
   }
 });
 
+/*
+ * La lógica de cada paso vive en funciones que reciben el comercio, y no en
+ * los handlers: la llaman la pantalla de pedidos (`req.auth`) y la API para
+ * ERP (`req.erp`). Si se copia, en un tiempo descuentan el stock distinto.
+ */
+
+/** Quién da el paso. Cambia la auditoría y lo que pasa al repetirlo, nada más. */
+export interface Quien {
+  via: "panel" | "erp";
+  /** Quién operó si no fue el comercio (modo soporte). NULL es el comercio. */
+  operadoPor: string | null;
+  /**
+   * Repetir un paso ya dado contesta bien en vez de 409. Lo pide el ERP, que
+   * reintenta cuando se le corta la red y necesita saber si el primer intento
+   * llegó. La pantalla no: ahí un 409 es «otro ya lo movió», y conviene que
+   * el comerciante lo vea.
+   */
+  idempotente?: boolean;
+  /** La clave de ERP que lo pidió, para poder revocarla sabiendo qué hizo. */
+  keyId?: number;
+}
+
+/** `cambio: false` es que el pedido ya estaba ahí y no se tocó nada. */
+export interface Resultado { cambio: boolean; status: string }
+
+type Cliente = PoolClient;
+
 /**
- * POST /api/pedidos/:id/aceptar
+ * Lee el pedido bloqueado, dentro de la transacción, y decide si el paso
+ * corresponde. Leerlo afuera dejaba que dos «aceptar» a la vez —un doble
+ * clic, o el ERP reintentando— descontaran el stock dos veces.
+ */
+async function bloquear(
+  client: Cliente, commerceId: number, id: number, paso: string, quien: Quien,
+  mensaje: (status: string) => string
+): Promise<{ pedido: Record<string, any>; yaEstaba: boolean }> {
+  const { rows } = await client.query(
+    "SELECT * FROM orders WHERE id = $1 AND commerce_id = $2 FOR UPDATE",
+    [id, commerceId]
+  );
+  const pedido = rows[0];
+  if (!pedido) throw new HttpError(404, "No existe ese pedido");
+  if (quien.idempotente && pedido.status === paso) return { pedido, yaEstaba: true };
+  if (!PASOS[pedido.status].includes(paso)) {
+    // El estado va aparte del texto: el ERP decide con él, no leyendo la frase.
+    throw new HttpError(409, mensaje(pedido.status), "paso_invalido", { status: pedido.status });
+  }
+  return { pedido, yaEstaba: false };
+}
+
+/**
+ * Aceptar.
  *
  * Acá el comercio se compromete, y por eso acá se descuenta el stock: antes no
  * se movió nada, porque un pedido que le llegó y todavía no miró no puede
  * dejarle el inventario en un número que no refleja lo que hay en la góndola.
  */
-pedidosPosRouter.post("/:id/aceptar", async (req, res, next) => {
+export async function aceptarPedido(
+  commerceId: number, id: number, readyEstimate: string, quien: Quien
+): Promise<Resultado> {
+  if (!readyEstimate) {
+    throw new HttpError(400, "Decile para cuándo lo tenés: es lo que el cliente está esperando saber.");
+  }
   const client = await pool.connect();
   try {
-    const readyEstimate = String(req.body?.readyEstimate ?? "").trim();
-    if (!readyEstimate) {
-      throw new HttpError(400, "Decile para cuándo lo tenés: es lo que el cliente está esperando saber.");
-    }
-    const commerceId = req.auth.commerceId;
-    const id = Number(req.params.id);
-    const pedido = await traer(commerceId, id);
-    if (!PASOS[pedido.status].includes("aceptado")) {
-      throw new HttpError(409, `Este pedido ya está ${pedido.status}.`);
+    await client.query("BEGIN");
+    const { pedido, yaEstaba } = await bloquear(client, commerceId, id, "aceptado", quien,
+      (s) => `Este pedido ya está ${s}.`);
+    if (yaEstaba) {
+      await client.query("ROLLBACK");
+      return { cambio: false, status: "aceptado" };
     }
 
-    await client.query("BEGIN");
     const { rows: lineas } = await client.query(
       "SELECT product_id, quantity FROM order_lines WHERE order_id = $1", [id]
     );
@@ -120,41 +163,34 @@ pedidosPosRouter.post("/:id/aceptar", async (req, res, next) => {
     );
     await encolarEvento(client, commerceId, id, "order.aceptado", await armarOrder(id, client));
     await client.query("COMMIT");
-    await audit(commerceId, "pedido.aceptado", "orders", id, { readyEstimate });
-    res.json({ ok: true, status: "aceptado", readyEstimate });
+    await audit(commerceId, "pedido.aceptado", "orders", id, { readyEstimate, via: quien.via, keyId: quien.keyId });
+    return { cambio: true, status: "aceptado" };
   } catch (err) {
     await client.query("ROLLBACK");
-    next(err);
+    throw err;
   } finally {
     client.release();
   }
-});
+}
 
-/*
- * Una ruta por paso, en vez de una genérica `/:id/:paso`.
- *
- * La genérica se comía `/:id/cancelar`: Express la matcheaba primero con
- * paso="cancelar", contestaba "paso desconocido" y la cancelación no corría
- * —dejando el stock descontado de un pedido que nadie iba a entregar—. Rutas
- * explícitas no se pisan entre ellas.
- */
-function avanzar(paso: "listo" | "en_camino" | "entregado") {
-  return async (req: Parameters<Parameters<typeof pedidosPosRouter.post>[1]>[0],
-                res: Parameters<Parameters<typeof pedidosPosRouter.post>[1]>[1],
-                next: Parameters<Parameters<typeof pedidosPosRouter.post>[1]>[2]) => {
+/** Listo, en camino o entregado: pasos que no mueven stock. */
+export async function avanzarPedido(
+  commerceId: number, id: number, paso: "listo" | "en_camino" | "entregado", quien: Quien
+): Promise<Resultado> {
   const client = await pool.connect();
   try {
-    const commerceId = req.auth.commerceId;
-    const id = Number(req.params.id);
-    const pedido = await traer(commerceId, id);
-    if (!PASOS[pedido.status].includes(paso)) {
-      throw new HttpError(409, `Un pedido ${pedido.status} no puede pasar a ${paso}.`);
+    await client.query("BEGIN");
+    const { pedido, yaEstaba } = await bloquear(client, commerceId, id, paso, quien,
+      (s) => `Un pedido ${s} no puede pasar a ${paso}.`);
+    if (yaEstaba) {
+      await client.query("ROLLBACK");
+      return { cambio: false, status: paso };
     }
     if (paso === "en_camino" && pedido.slot_kind !== "reparto") {
-      throw new HttpError(409, "Este pedido es para retirar, no sale a la calle.");
+      throw new HttpError(409, "Este pedido es para retirar, no sale a la calle.",
+        "es_retiro", { status: pedido.status });
     }
 
-    await client.query("BEGIN");
     await client.query("UPDATE orders SET status = $2, updated_at = now() WHERE id = $1", [id, paso]);
 
     /*
@@ -162,50 +198,48 @@ function avanzar(paso: "listo" | "en_camino" | "entregado") {
      * Antes no, porque un pedido aceptado todavía puede cancelarse y una nota
      * de venta que se borra no es una nota de venta.
      */
-    if (paso === "entregado") await emitirNotaDeVenta(client, commerceId, pedido, operador(req.auth));
+    if (paso === "entregado") await emitirNotaDeVenta(client, commerceId, pedido, quien.operadoPor);
 
     await encolarEvento(client, commerceId, id, `order.${paso}` as EventoPedido,
       await armarOrder(id, client));
     await client.query("COMMIT");
-    await audit(commerceId, `pedido.${paso}`, "orders", id);
-    res.json({ ok: true, status: paso });
+    await audit(commerceId, `pedido.${paso}`, "orders", id, { via: quien.via, keyId: quien.keyId });
+    return { cambio: true, status: paso };
   } catch (err) {
     await client.query("ROLLBACK");
-    next(err);
+    throw err;
   } finally {
     client.release();
   }
-  };
 }
 
-pedidosPosRouter.post("/:id/listo", avanzar("listo"));
-pedidosPosRouter.post("/:id/en-camino", avanzar("en_camino"));
-pedidosPosRouter.post("/:id/entregado", avanzar("entregado"));
-
-const cancelarSchema = z.object({
+export const cancelarSchema = z.object({
   motivo: z.string().trim().min(1).max(400),
 });
 
 /**
- * POST /api/pedidos/:id/cancelar
+ * Cancelar.
  *
  * El motivo es texto libre del comerciante, no un código nuestro. "No me quedan
  * de ananá, tengo de muzzarella y napolitana; pasá igual y te las hago"
  * mantiene la venta y la relación. "Pedido cancelado: sin stock" las corta las
  * dos, y la plataforma no arbitra: acerca a las dos personas.
  */
-pedidosPosRouter.post("/:id/cancelar", async (req, res, next) => {
+export async function cancelarPedido(
+  commerceId: number, id: number, motivo: string, quien: Quien
+): Promise<Resultado> {
   const client = await pool.connect();
+  let devolucion: Awaited<ReturnType<typeof devolverCobroMP>> | null = null;
+  let clubpayKey = "";
   try {
-    const { motivo } = cancelarSchema.parse(req.body);
-    const commerceId = req.auth.commerceId;
-    const id = Number(req.params.id);
-    const pedido = await traer(commerceId, id);
-    if (!PASOS[pedido.status].includes("cancelado")) {
-      throw new HttpError(409, `Este pedido ya está ${pedido.status}.`);
+    await client.query("BEGIN");
+    const { pedido, yaEstaba } = await bloquear(client, commerceId, id, "cancelado", quien,
+      (s) => `Este pedido ya está ${s}.`);
+    if (yaEstaba) {
+      await client.query("ROLLBACK");
+      return { cambio: false, status: "cancelado" };
     }
 
-    await client.query("BEGIN");
     // Si ya se había aceptado, el stock estaba descontado y vuelve
     if (["aceptado", "listo", "en_camino"].includes(pedido.status)) {
       const { rows: lineas } = await client.query(
@@ -227,10 +261,10 @@ pedidosPosRouter.post("/:id/cancelar", async (req, res, next) => {
      */
     const { rows: [pago] } = await client.query(
       `SELECT o.code, o.payment_status, o.payment_id, c.clubpay_api_key
-         FROM orders o JOIN commerces c ON c.id = o.commerce_id WHERE o.id = $1 FOR UPDATE OF o`,
+         FROM orders o JOIN commerces c ON c.id = o.commerce_id WHERE o.id = $1`,
       [id]
     );
-    let devolucion: Awaited<ReturnType<typeof devolverCobroMP>> | null = null;
+    clubpayKey = pago.clubpay_api_key ?? "";
     // Sólo se devuelve un cobro que pasó por ClubPay. Un `payment_id` que no
     // está en mp_cobros no es plata que podamos devolver: los pedidos que el
     // sandbox de NexoTienda marcó pagados en septiembre (pay_sbx_…) dejaban
@@ -240,7 +274,7 @@ pedidosPosRouter.post("/:id/cancelar", async (req, res, next) => {
           "SELECT 1 FROM mp_cobros WHERE payment_id = $1 AND order_id = $2", [pago.payment_id, id])
       : { rows: [] };
     if (pago.payment_status === "pagado" && cobroDelPedido) {
-      devolucion = await devolverCobroMP(pago.clubpay_api_key ?? "", pago.payment_id, {
+      devolucion = await devolverCobroMP(clubpayKey, pago.payment_id, {
         externalReference: `nexopos-${commerceId}-pedido-${pago.code}-cancelado`,
       });
     }
@@ -253,24 +287,81 @@ pedidosPosRouter.post("/:id/cancelar", async (req, res, next) => {
     );
     await encolarEvento(client, commerceId, id, "order.cancelado", await armarOrder(id, client));
     await client.query("COMMIT");
-    await audit(commerceId, "pedido.cancelado", "orders", id, { motivo });
-    if (devolucion) await aplicarCobro(commerceId, devolucion).catch((e) => console.error("[mercadopago]", e));
-    // Los links que sigan vivos se dan de baja. Si alguno se paga igual,
-    // aplicarCobro ve el pedido cancelado y lo devuelve.
-    const { rows: vivos } = await pool.query(
-      "SELECT payment_id FROM mp_cobros WHERE order_id = $1 AND status IN ('pending','rejected')", [id]
-    );
-    for (const v of vivos) {
-      await cancelarCobroMP(pago.clubpay_api_key ?? "", v.payment_id)
-        .then((c) => aplicarCobro(commerceId, c))
-        .catch((e) => console.error("[mercadopago] no se pudo dar de baja el link:", e instanceof Error ? e.message : e));
-    }
-    res.json({ ok: true, status: "cancelado" });
   } catch (err) {
     await client.query("ROLLBACK");
-    next(err);
+    throw err;
   } finally {
     client.release();
+  }
+
+  await audit(commerceId, "pedido.cancelado", "orders", id, { motivo, via: quien.via, keyId: quien.keyId });
+  if (devolucion) await aplicarCobro(commerceId, devolucion).catch((e) => console.error("[mercadopago]", e));
+  // Los links que sigan vivos se dan de baja. Si alguno se paga igual,
+  // aplicarCobro ve el pedido cancelado y lo devuelve.
+  const { rows: vivos } = await pool.query(
+    "SELECT payment_id FROM mp_cobros WHERE order_id = $1 AND status IN ('pending','rejected')", [id]
+  );
+  for (const v of vivos) {
+    await cancelarCobroMP(clubpayKey, v.payment_id)
+      .then((c) => aplicarCobro(commerceId, c))
+      .catch((e) => console.error("[mercadopago] no se pudo dar de baja el link:", e instanceof Error ? e.message : e));
+  }
+  return { cambio: true, status: "cancelado" };
+}
+
+// ── La pantalla de pedidos ──────────────────────────────────────────────────
+
+const delPanel = (req: { auth: Parameters<typeof operador>[0] }): Quien =>
+  ({ via: "panel", operadoPor: operador(req.auth) });
+
+/**
+ * POST /api/pedidos/:id/aceptar
+ *
+ * Aceptar y declarar para cuándo lo tiene es un solo gesto (ver arriba).
+ */
+pedidosPosRouter.post("/:id/aceptar", async (req, res, next) => {
+  try {
+    const readyEstimate = String(req.body?.readyEstimate ?? "").trim();
+    await aceptarPedido(req.auth.commerceId, Number(req.params.id), readyEstimate, delPanel(req));
+    res.json({ ok: true, status: "aceptado", readyEstimate });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/*
+ * Una ruta por paso, en vez de una genérica `/:id/:paso`.
+ *
+ * La genérica se comía `/:id/cancelar`: Express la matcheaba primero con
+ * paso="cancelar", contestaba "paso desconocido" y la cancelación no corría
+ * —dejando el stock descontado de un pedido que nadie iba a entregar—. Rutas
+ * explícitas no se pisan entre ellas.
+ */
+function avanzar(paso: "listo" | "en_camino" | "entregado") {
+  return async (req: Parameters<Parameters<typeof pedidosPosRouter.post>[1]>[0],
+                res: Parameters<Parameters<typeof pedidosPosRouter.post>[1]>[1],
+                next: Parameters<Parameters<typeof pedidosPosRouter.post>[1]>[2]) => {
+    try {
+      await avanzarPedido(req.auth.commerceId, Number(req.params.id), paso, delPanel(req));
+      res.json({ ok: true, status: paso });
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+pedidosPosRouter.post("/:id/listo", avanzar("listo"));
+pedidosPosRouter.post("/:id/en-camino", avanzar("en_camino"));
+pedidosPosRouter.post("/:id/entregado", avanzar("entregado"));
+
+/** POST /api/pedidos/:id/cancelar */
+pedidosPosRouter.post("/:id/cancelar", async (req, res, next) => {
+  try {
+    const { motivo } = cancelarSchema.parse(req.body);
+    await cancelarPedido(req.auth.commerceId, Number(req.params.id), motivo, delPanel(req));
+    res.json({ ok: true, status: "cancelado" });
+  } catch (err) {
+    next(err);
   }
 });
 

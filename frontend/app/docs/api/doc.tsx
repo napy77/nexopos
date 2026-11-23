@@ -45,6 +45,7 @@ const SECCIONES = [
   ["precios", "Escribir precios"],
   ["stock", "Escribir stock"],
   ["ventas", "Leer las ventas"],
+  ["pedidos", "Pedidos de la tienda"],
   ["errores", "Errores"],
   ["falta", "Lo que todavía no hay"],
 ] as const;
@@ -90,8 +91,8 @@ export function Doc() {
           <h1>Conectá tu sistema con NexoPOS</h1>
           <p className="entrada">
             Si el comercio usa un ERP, Odoo o un sistema propio, puede dar de alta sus
-            productos de a miles, leer su catálogo, escribir precios y stock, y leer lo que
-            se vendió en el mostrador — sin que
+            productos de a miles, leer su catálogo, escribir precios y stock, leer lo que
+            se vendió en el mostrador y atender los pedidos de su tienda online — sin que
             nadie tenga que cargar nada a mano en la pantalla del POS.
           </p>
 
@@ -374,10 +375,11 @@ export function Doc() {
     "total_centavos": 10400000,
     "medio_pago": "cash",
     "es_reembolso": false,
+    "pedido_code": null,
     "lineas": [{
       "producto_id": 184, "ean": "7798042240180", "sku": null,
       "nombre": "Silla Plástica Voss 2000 — unidad",
-      "cantidad": "2.000", "precio_centavos": 5200000
+      "cantidad": 2, "precio_centavos": 5200000
     }]
   }],
   "hasta": "2026-09-15T03:28:32.005Z",
@@ -390,10 +392,124 @@ export function Doc() {
             </p>
             <p>
               Incluye los pedidos de la tienda online entregados, porque terminan como nota
-              de venta igual que una venta del mostrador. Un reembolso viene con{" "}
-              <code>es_reembolso: true</code> y cantidades negativas: es una venta al revés,
-              no un registro aparte que haya que interpretar.
+              de venta igual que una venta del mostrador. Esas traen{" "}
+              <code>pedido_code</code> con el código del pedido; las del mostrador,{" "}
+              <code>null</code>. Si tu sistema ya registró el pedido (ver{" "}
+              <a href="#pedidos">Pedidos de la tienda</a>), salteá las ventas con{" "}
+              <code>pedido_code</code> o las vas a contar dos veces.
             </p>
+            <p>
+              Un reembolso viene con <code>es_reembolso: true</code> y cantidades negativas:
+              es una venta al revés, no un registro aparte que haya que interpretar. Si
+              revierte la nota de un pedido, trae el <code>pedido_code</code> de ese pedido.
+            </p>
+            <p className="muted">
+              Guardá las ventas por <code>id</code>: la última de una página puede volver
+              a venir al principio de la siguiente.
+            </p>
+          </section>
+
+          <section id="pedidos">
+            <h2>Pedidos de la tienda</h2>
+            <p>
+              Para el comercio que atiende los pedidos de su tienda online (NexoTienda)
+              desde la caja de su propio sistema. El pedido sigue viviendo en NexoPOS: tu
+              sistema lo lee y lo mueve con la misma clave, y cada paso hace exactamente lo
+              mismo que en la pantalla de Pedidos — descuenta el stock al aceptar, lo
+              devuelve al cancelar, devuelve el pago de Mercado Pago, le avisa a la tienda y,
+              al entregarlo, emite la nota de venta.
+            </p>
+
+            <p className="firma"><span className="verbo get">GET</span> /pedidos?actualizados_desde=</p>
+            <Codigo>{`curl -s "${BASE}/pedidos?actualizados_desde=2026-11-23T00:00:00Z" \\
+  -H "Authorization: Bearer npos_TU_CLAVE"`}</Codigo>
+            <Codigo lang="json">{`{
+  "pedidos": [{
+    "code": "P-0962559F",
+    "status": "recibido",
+    "creado": "2026-11-23T20:41:00.123Z",
+    "actualizado": "2026-11-23T20:41:00.123456Z",
+    "retiro": { "tipo": "retiro", "franja": "Hoy 18 a 20 h", "direccion": null },
+    "pago": { "medio": "efectivo_entrega", "estado": "no_aplica", "id": null },
+    "contacto": { "nombre": "Ana Pérez", "telefono": "3515550000" },
+    "cuenta_id": null,
+    "notas": null,
+    "listo_para": null,
+    "motivo_cancelacion": null,
+    "cancelado_por": null,
+    "revision": null,
+    "venta": null,
+    "lineas": [{
+      "producto_id": "5404", "ean": "7790580109882", "sku": null,
+      "nombre": "Tableta Chocolate Extra Fino Aguila x 150 Grs — unidad",
+      "unidad": "unidad", "cantidad": 1, "precio_centavos": 500000
+    }],
+    "subtotal_centavos": 500000,
+    "cargo_centavos": 0,
+    "total_centavos": 500000
+  }],
+  "hasta": "2026-11-23T20:39:00.000000Z",
+  "hay_mas": false
+}`}</Codigo>
+            <ul>
+              <li>Con <code>actualizados_desde</code>: los que cambiaron después de esa fecha,
+                en <strong>cualquier estado</strong>, ordenados por <code>actualizado</code>, de
+                a 200. Sin él: los que están en curso (<code>recibido</code>,{" "}
+                <code>aceptado</code>, <code>listo</code>, <code>en_camino</code>), para la
+                primera lectura.</li>
+              <li>Guardá el <code>hasta</code> y mandalo como <code>actualizados_desde</code>{" "}
+                la próxima vez. Queda <strong>dos minutos atrás</strong> a propósito, así que
+                un pedido puede volver a venir: actualizalo por <code>code</code>, no lo
+                agregues de nuevo. Sin ese margen, un cambio que todavía se estaba guardando
+                cuando preguntaste se perdía.</li>
+              <li><code>producto_id</code> es el <code>id</code> de{" "}
+                <code>GET /productos</code>.</li>
+              <li><code>status</code>: <code>recibido</code> → <code>aceptado</code> →{" "}
+                <code>listo</code> → (<code>en_camino</code>, sólo reparto) →{" "}
+                <code>entregado</code>. Se puede <code>cancelado</code> desde cualquiera
+                antes de entregado.</li>
+              <li><code>revision</code> viene mientras está <code>recibido</code> y el pedido
+                pide que alguien lo mire antes de aceptarlo:{" "}
+                <code>{`{ "motivo": "cuenta_nueva_monto_alto" }`}</code> (primer pedido de esa
+                persona y grande: llamala antes de armarlo) o{" "}
+                <code>identidad_no_disponible</code> (no se pudo comprobar su cuenta: confirmá
+                con ella). No bloquea nada: mostralo y pedí confirmación antes de aceptar,
+                como hace la pantalla.</li>
+              <li><code>cuenta_id</code> (<code>CLI-…</code>) viene cuando compró con su
+                cuenta; el <code>contacto</code> viene siempre que lo tengamos.{" "}
+                <code>venta</code> es la nota de venta que salió al entregarlo.</li>
+            </ul>
+
+            <p className="firma"><span className="verbo get">GET</span> /pedidos/:code</p>
+            <p>Uno solo, con la misma forma.</p>
+
+            <h3>Mover un pedido</h3>
+            <table>
+              <thead><tr><th>Llamada</th><th>Cuerpo</th></tr></thead>
+              <tbody>
+                <tr><td><code>POST /pedidos/:code/aceptar</code></td><td><code>{`{ "listo_para": "30 minutos" }`}</code> — obligatorio: es lo que ve el comprador.</td></tr>
+                <tr><td><code>POST /pedidos/:code/listo</code></td><td>—</td></tr>
+                <tr><td><code>POST /pedidos/:code/en-camino</code></td><td>— (sólo reparto, después de listo)</td></tr>
+                <tr><td><code>POST /pedidos/:code/entregado</code></td><td>— (después de listo o en camino)</td></tr>
+                <tr><td><code>POST /pedidos/:code/cancelar</code></td><td><code>{`{ "motivo": "…" }`}</code> — texto libre, lo lee el comprador.</td></tr>
+              </tbody>
+            </table>
+            <Codigo>{`curl -s -X POST "${BASE}/pedidos/P-0962559F/aceptar" \\
+  -H "Authorization: Bearer npos_TU_CLAVE" \\
+  -H "Content-Type: application/json" \\
+  -d '{"listo_para":"30 minutos"}'`}</Codigo>
+            <p>
+              Contesta el pedido completo, con la misma forma que <code>GET /pedidos</code>.
+            </p>
+            <h3>Repetir no rompe nada</h3>
+            <p>
+              Si el pedido <strong>ya está</strong> en el estado que pedís, contesta{" "}
+              <code>200</code> con el pedido y no hace nada más: no descuenta el stock dos
+              veces ni avisa dos veces. Así podés reintentar tranquilo cuando se corta la
+              red. Si el paso no corresponde (entregar uno cancelado, por ejemplo), es un{" "}
+              <code>409</code> con el estado actual al lado:
+            </p>
+            <Codigo lang="json">{`{ "error": "Este pedido ya está entregado.", "code": "paso_invalido", "status": "entregado" }`}</Codigo>
           </section>
 
           <section id="errores">
@@ -402,13 +518,16 @@ export function Doc() {
               <tbody>
                 <tr><td><code>401</code></td><td>Clave ausente, inválida o revocada.</td></tr>
                 <tr><td><code>400</code></td><td>Faltan datos, o el cuerpo no tiene la forma esperada.</td></tr>
-                <tr><td><code>409</code></td><td>La operación choca con el estado actual.</td></tr>
+                <tr><td><code>404</code></td><td>Ese pedido no es de este comercio, o no existe.</td></tr>
+                <tr><td><code>409</code></td><td>La operación choca con el estado actual. En pedidos trae <code>status</code>.</td></tr>
               </tbody>
             </table>
             <p>
               El cuerpo trae <code>{`{ "error": "…" }`}</code> con un mensaje escrito para
               leerse: dice qué falta. Si lo vas a mostrar en tu sistema, mostralo tal cual —
-              está pensado para que lo entienda quien tiene que arreglarlo.
+              está pensado para que lo entienda quien tiene que arreglarlo. Para decidir
+              algo, usá el <code>code</code> cuando venga, no el texto: el texto lo podemos
+              mejorar.
             </p>
           </section>
 
@@ -420,7 +539,8 @@ export function Doc() {
             <ul>
               <li>
                 <strong>Webhooks hacia tu sistema.</strong> Hoy tenés que preguntar por{" "}
-                <code>/ventas</code>.
+                <code>/ventas</code> y <code>/pedidos</code>. Para pedidos, una vez por minuto
+                alcanza.
               </li>
             </ul>
             <p>

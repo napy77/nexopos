@@ -185,7 +185,14 @@ POST /api/erp/v1/productos   { productos: [{ ean?, nombre?, precio_centavos?, co
 GET  /api/erp/v1/importaciones/:id  → { estado, resumen, errores }
 PUT /api/erp/v1/precios      { precio_centavos, costo_centavos? }
 PUT /api/erp/v1/stock        { modo: "absoluto" | "ajuste" }
-GET /api/erp/v1/ventas?desde=ISO  → { ventas, hasta, hay_mas }
+GET /api/erp/v1/ventas?desde=ISO  → { ventas, hasta, hay_mas }   (cada venta con pedido_code)
+GET  /api/erp/v1/pedidos?actualizados_desde=ISO  → { pedidos, hasta, hay_mas }
+GET  /api/erp/v1/pedidos/:code
+POST /api/erp/v1/pedidos/:code/aceptar    { listo_para }   → el pedido
+POST /api/erp/v1/pedidos/:code/listo                       → el pedido
+POST /api/erp/v1/pedidos/:code/en-camino                   → el pedido
+POST /api/erp/v1/pedidos/:code/entregado                   → el pedido
+POST /api/erp/v1/pedidos/:code/cancelar   { motivo }       → el pedido
 ```
 
 - Centavos enteros, igual que `/v1`.
@@ -198,6 +205,39 @@ GET /api/erp/v1/ventas?desde=ISO  → { ventas, hasta, hay_mas }
   con el `nombre`. El `stock` **reemplaza**; un campo que no viene no borra. Se
   analiza en segundo plano (miles de consultas a NexoB2B no entran en el minuto
   de nginx) y se aplica todo junto, sin vista previa.
+- **`pedido_code` en `/ventas`**: `null` para el mostrador; el código del
+  pedido en la nota de un pedido de la tienda entregado y en su reembolso.
+
+### Pedidos desde el ERP (23/11, pedido de Nexo-odoo)
+
+- **El pedido sigue siendo de NexoPOS.** Los pasos corren por las mismas
+  funciones que la pantalla (`aceptarPedido`, `avanzarPedido`,
+  `cancelarPedido` en `modules/pedidos.ts`): stock con `PEDIDO-<code>`,
+  devolución al cancelar, reembolso de Mercado Pago, `order.*` a NexoTienda y
+  nota de venta al entregar. La auditoría lleva `via: "erp"` y `keyId`.
+- **Por `code`**, siempre dentro del comercio de la clave (otro comercio: 404
+  `pedido_inexistente`).
+- **Idempotente desde el ERP:** repetir un paso ya dado es 200 con el pedido
+  y no toca nada. Paso que no corresponde: 409 `paso_invalido` (o `es_retiro`
+  para `en-camino` de un retiro) con `status`. La pantalla sigue con 409 al
+  repetir, ahora también con `code` y `status`.
+- El estado se lee con `FOR UPDATE` dentro de la transacción: dos «aceptar» a
+  la vez descuentan una vez (probado con diez simultáneos).
+- Listado: sin `actualizados_desde`, los que están en curso; con él, todos los
+  cambiados después, por `updated_at`, de a 200. `actualizado` y `hasta` con
+  microsegundos. **`hasta` queda dos minutos atrás** (y nunca antes de lo que
+  mandó el ERP): `updated_at` es el inicio de la transacción, y cancelar un
+  pedido pagado espera a ClubPay antes del COMMIT. El ERP actualiza por `code`.
+- Forma del pedido: `code`, `status`, `creado`, `actualizado`,
+  `retiro {tipo, franja, direccion}`, `pago {medio, estado, id}`,
+  `contacto {nombre, telefono}` (de la ficha si compró con la cuenta),
+  `cuenta_id` (`CLI-<n>`), `notas`, `listo_para`, `motivo_cancelacion`,
+  `cancelado_por`, `revision {motivo}` (sólo en `recibido`; el código de
+  CR-0003), `venta {id, ticket}`, `lineas [{producto_id (texto, el id de
+  /productos), ean, sku, nombre, unidad, cantidad, precio_centavos}]`,
+  `subtotal_centavos`, `cargo_centavos`, `total_centavos`.
+- `revision` no bloquea en el servidor, igual que en la pantalla (ahí es un
+  `confirm` del navegador). El ERP la muestra y pide confirmar.
 
 ## 10. Errores: `error` para personas, `code` para sistemas
 
@@ -221,6 +261,15 @@ estable: **el texto se puede reescribir, el `code` no**. Hoy en `/v1/orders`:
 | `excede_tope_productos` | más renglones que el tope del nivel; trae `maxItems` |
 | `excede_tope_monto` | total sobre el tope del nivel; trae `maxTotalCents` |
 | `reparto_requiere_historial` | pago al recibir sin retiros previos entregados; trae `requiredPickups` |
+
+En `/api/erp/v1/pedidos` (y en `/api/pedidos`, la pantalla):
+
+| `code` | Cuándo |
+|---|---|
+| `paso_invalido` | 409: el paso no corresponde al estado; trae `status` |
+| `es_retiro` | 409: `en-camino` de un pedido para retirar; trae `status` |
+| `pedido_inexistente` | 404: ese `code` no es de este comercio (sólo ERP) |
+| `falta_listo_para` | 400: `aceptar` sin `listo_para` (sólo ERP) |
 
 ## 11. Cómo se rompe un contrato sin romperlo
 

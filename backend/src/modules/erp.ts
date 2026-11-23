@@ -1,8 +1,9 @@
-import { Router } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
 import { pool, audit } from "../db.js";
 import { HttpError } from "../middleware/error.js";
 import { requiereClaveErp } from "../middleware/erp-key.js";
+import { aceptarPedido, avanzarPedido, cancelarPedido, cancelarSchema, type Quien } from "./pedidos.js";
 import { iniciarImportacion, estadoImportacion, type FilaCruda } from "./importacion.js";
 
 /**
@@ -273,7 +274,7 @@ erpRouter.put("/stock", async (req, res, next) => {
  * venta del mostrador no pasa por el ERP, pasa por acá.
  *
  * Incluye los pedidos de la tienda online entregados, porque terminan como
- * nota de venta igual que una venta del mostrador.
+ * nota de venta igual que una venta del mostrador. Esos traen `pedido_code`.
  */
 erpRouter.get("/ventas", async (req, res, next) => {
   try {
@@ -284,6 +285,7 @@ erpRouter.get("/ventas", async (req, res, next) => {
     const { rows } = await pool.query(
       `SELECT s.id, s.ticket_number, s.total, s.payment_method, s.created_at,
               s.refund_of IS NOT NULL AS es_reembolso,
+              COALESCE(o.code, ro.code) AS pedido_code,
               (SELECT json_agg(json_build_object(
                  'producto_id', i.product_id, 'ean', p.ean, 'sku', p.plu,
                  'nombre', p.name, 'cantidad', i.quantity,
@@ -291,6 +293,11 @@ erpRouter.get("/ventas", async (req, res, next) => {
                  FROM sale_items i JOIN products p ON p.id = i.product_id
                 WHERE i.sale_id = s.id) AS lineas
          FROM sales s
+         LEFT JOIN orders o ON o.id = s.order_id
+         -- El reembolso de una nota de pedido no tiene order_id propio: hereda
+         -- el del ticket que devuelve, para que el ERP sepa qué pedido revierte.
+         LEFT JOIN sales rs ON rs.id = s.refund_of
+         LEFT JOIN orders ro ON ro.id = rs.order_id
         WHERE s.commerce_id = $1 AND s.created_at > $2
         ORDER BY s.created_at
         LIMIT 1000`,
@@ -306,6 +313,9 @@ erpRouter.get("/ventas", async (req, res, next) => {
         // Un reembolso viene con cantidades negativas: es una venta al revés,
         // no un registro aparte que el ERP tenga que interpretar.
         es_reembolso: r.es_reembolso,
+        // null es mostrador. Con código, la venta es la nota de un pedido de la
+        // tienda: un ERP que ya registró el pedido no la tiene que contar dos veces.
+        pedido_code: r.pedido_code ?? null,
         lineas: r.lineas ?? [],
       })),
       // Hasta acá llegó esta página. La próxima llamada va con este `desde`.
@@ -316,3 +326,177 @@ erpRouter.get("/ventas", async (req, res, next) => {
     next(err);
   }
 });
+
+// ── Pedidos de la tienda online ─────────────────────────────────────────────
+//
+// Para el comercio que atiende los pedidos de NexoTienda desde la caja de su
+// ERP. NexoPOS sigue siendo el dueño del pedido: la tienda no se entera de
+// por dónde se movió, y los pasos corren por las mismas funciones que la
+// pantalla de pedidos (modules/pedidos.ts). Ver RESPUESTA-PEDIDOS-ERP-A-NEXO-ODOO.md.
+
+const PAGINA_PEDIDOS = 200;
+
+/**
+ * Cuánto se queda atrás el `hasta`. El `updated_at` es la hora en que empezó
+ * la transacción, no la del COMMIT: cancelar un pedido pagado espera la
+ * devolución de Mercado Pago antes de confirmar, y un ERP que
+ * consultó en el medio corría el cursor por encima de un cambio que todavía
+ * no veía. Con este margen lo vuelve a traer en la próxima vuelta; repetido no
+ * molesta, porque se actualiza por `code`.
+ */
+const MARGEN_CURSOR = "2 minutes";
+
+const SELECT_PEDIDO = `
+  SELECT o.code, o.status, o.created_at, o.updated_at,
+         to_char(o.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor,
+         o.slot_kind, o.slot_label, o.address, o.notes,
+         o.payment_method, o.payment_status, o.payment_id,
+         COALESCE(o.contact_name, c.name) AS contacto_nombre,
+         COALESCE(o.contact_phone, c.phone) AS contacto_telefono,
+         o.customer_id, o.ready_estimate, o.cancel_reason, o.cancelled_by, o.review_reason,
+         o.subtotal, o.fee, o.total, o.sale_id, s.ticket_number,
+         (SELECT json_agg(json_build_object(
+            'producto_id', l.product_id::text, 'ean', p.ean, 'sku', p.plu,
+            'nombre', l.name, 'unidad', l.unit, 'cantidad', l.quantity,
+            'precio_centavos', ROUND(l.unit_price * 100)) ORDER BY l.id)
+            FROM order_lines l JOIN products p ON p.id = l.product_id
+           WHERE l.order_id = o.id) AS lineas
+    FROM orders o
+    LEFT JOIN customers c ON c.id = o.customer_id
+    LEFT JOIN sales s ON s.id = o.sale_id`;
+
+const cent = (v: unknown): number => Math.round(Number(v) * 100);
+
+function pedidoErp(r: Record<string, any>) {
+  return {
+    code: r.code,
+    status: r.status,
+    creado: new Date(r.created_at).toISOString(),
+    // Con microsegundos: es el cursor. Recortado a milisegundos, `>` volvía a
+    // traer el último pedido en cada consulta.
+    actualizado: r.cursor,
+    retiro: { tipo: r.slot_kind, franja: r.slot_label || null, direccion: r.address ?? null },
+    pago: { medio: r.payment_method, estado: r.payment_status, id: r.payment_id ?? null },
+    contacto: { nombre: r.contacto_nombre ?? null, telefono: r.contacto_telefono ?? null },
+    // La libreta, con el mismo nombre que usa NexoTienda (`CLI-<id>`).
+    cuenta_id: r.customer_id ? `CLI-${r.customer_id}` : null,
+    notas: r.notes ?? null,
+    listo_para: r.ready_estimate ?? null,
+    motivo_cancelacion: r.cancel_reason ?? null,
+    cancelado_por: r.cancelled_by ?? null,
+    // Sólo mientras está recibido: después de aceptarlo ya lo miraron (igual
+    // que `review` en /v1/orders).
+    revision: r.review_reason && r.status === "recibido" ? { motivo: r.review_reason } : null,
+    // La nota de venta que salió al entregarlo: es la que aparece en /ventas
+    // con este mismo `pedido_code`.
+    venta: r.sale_id ? { id: String(r.sale_id), ticket: Number(r.ticket_number) } : null,
+    lineas: (r.lineas ?? []).map((l: Record<string, any>) => ({
+      ...l, cantidad: Number(l.cantidad), precio_centavos: Number(l.precio_centavos),
+    })),
+    subtotal_centavos: cent(r.subtotal),
+    cargo_centavos: cent(r.fee),
+    total_centavos: cent(r.total),
+  };
+}
+
+/**
+ * GET /api/erp/v1/pedidos?actualizados_desde=ISO
+ *
+ * Los que cambiaron después de esa fecha, en cualquier estado. Sin la fecha,
+ * los que están en curso: es la primera lectura, y un ERP que recién se
+ * conecta no tiene por qué cargar el historial entero.
+ */
+erpRouter.get("/pedidos", async (req, res, next) => {
+  try {
+    const commerceId = req.erp!.commerceId;
+    const desdeTxt = req.query.actualizados_desde === undefined ? null : String(req.query.actualizados_desde);
+    if (desdeTxt !== null && Number.isNaN(Date.parse(desdeTxt))) {
+      throw new HttpError(400, "`actualizados_desde` tiene que ser una fecha ISO: ?actualizados_desde=2026-11-23T00:00:00Z");
+    }
+    const { rows } = await pool.query(
+      `${SELECT_PEDIDO}
+        WHERE o.commerce_id = $1
+          AND CASE WHEN $2::timestamptz IS NULL
+                   THEN o.status IN ('recibido','aceptado','listo','en_camino')
+                   ELSE o.updated_at > $2::timestamptz END
+        ORDER BY o.updated_at, o.id
+        LIMIT $3`,
+      [commerceId, desdeTxt, PAGINA_PEDIDOS]
+    );
+    const hayMas = rows.length === PAGINA_PEDIDOS;
+
+    // El `hasta` no pasa de «ahora menos el margen» (ver MARGEN_CURSOR), ni
+    // vuelve atrás de lo que mandó el ERP. Con página llena va el último, o
+    // la paginación no avanzaría.
+    const { rows: [t] } = await pool.query(
+      `SELECT to_char(GREATEST(
+                COALESCE($1::timestamptz, '-infinity'),
+                CASE WHEN $3::boolean THEN $2::timestamptz
+                     ELSE LEAST(COALESCE($2::timestamptz, 'infinity'), now() - $4::interval) END
+              ) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS hasta`,
+      [desdeTxt, rows.length ? rows[rows.length - 1].cursor : null, hayMas, MARGEN_CURSOR]
+    );
+    res.json({ pedidos: rows.map(pedidoErp), hasta: t.hasta, hay_mas: hayMas });
+  } catch (err) {
+    next(err);
+  }
+});
+
+async function pedidoPorCode(commerceId: number, code: string) {
+  const { rows } = await pool.query(
+    `${SELECT_PEDIDO} WHERE o.commerce_id = $1 AND o.code = $2`,
+    [commerceId, String(code).trim().toUpperCase()]
+  );
+  if (!rows[0]) throw new HttpError(404, "No existe ese pedido en este comercio", "pedido_inexistente");
+  return rows[0];
+}
+
+/** GET /api/erp/v1/pedidos/:code — uno solo, con la misma forma */
+erpRouter.get("/pedidos/:code", async (req, res, next) => {
+  try {
+    res.json(pedidoErp(await pedidoPorCode(req.erp!.commerceId, req.params.code)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/*
+ * Mover el pedido. Por `code`, que es lo que ve el comprador y lo que guarda
+ * el ERP; el id interno se resuelve acá, siempre dentro del comercio de la
+ * clave.
+ *
+ * Repetir un paso ya dado contesta 200 con el pedido: el ERP reintenta
+ * cuando se le corta la red y tiene que poder saber que el primero llegó.
+ * Un paso que no corresponde es 409 con el `status` actual al lado.
+ */
+const desdeErp = (keyId: number): Quien => ({ via: "erp", operadoPor: null, idempotente: true, keyId });
+
+function moverDesdeErp(mover: (commerceId: number, id: number, body: unknown, quien: Quien) => Promise<unknown>) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const commerceId = req.erp!.commerceId;
+      const { rows: [o] } = await pool.query(
+        "SELECT id FROM orders WHERE commerce_id = $1 AND code = $2",
+        [commerceId, String(req.params.code).trim().toUpperCase()]
+      );
+      if (!o) throw new HttpError(404, "No existe ese pedido en este comercio", "pedido_inexistente");
+      await mover(commerceId, Number(o.id), req.body ?? {}, desdeErp(req.erp!.keyId));
+      res.json(pedidoErp(await pedidoPorCode(commerceId, req.params.code)));
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+erpRouter.post("/pedidos/:code/aceptar", moverDesdeErp((c, id, body, q) => {
+  const listoPara = String((body as { listo_para?: unknown }).listo_para ?? "").trim();
+  if (!listoPara) {
+    throw new HttpError(400, "Mandá `listo_para`: para cuándo lo tienen, en palabras («30 minutos», «mañana a las 10»). Es lo que el comprador ve.", "falta_listo_para");
+  }
+  return aceptarPedido(c, id, listoPara, q);
+}));
+erpRouter.post("/pedidos/:code/listo", moverDesdeErp((c, id, _b, q) => avanzarPedido(c, id, "listo", q)));
+erpRouter.post("/pedidos/:code/en-camino", moverDesdeErp((c, id, _b, q) => avanzarPedido(c, id, "en_camino", q)));
+erpRouter.post("/pedidos/:code/entregado", moverDesdeErp((c, id, _b, q) => avanzarPedido(c, id, "entregado", q)));
+erpRouter.post("/pedidos/:code/cancelar", moverDesdeErp((c, id, body, q) =>
+  cancelarPedido(c, id, cancelarSchema.parse(body).motivo, q)));

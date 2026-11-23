@@ -4,7 +4,7 @@ import { Doc } from "./doc";
 export const metadata: Metadata = {
   title: "API de NexoPOS · Documentación",
   description:
-    "Conectá tu ERP, Odoo o el sistema que uses: leer el catálogo, escribir precios y stock, y leer las ventas del mostrador.",
+    "Conectá tu ERP, Odoo o el sistema que uses: leer el catálogo, escribir precios y stock, leer las ventas del mostrador y atender los pedidos de la tienda online.",
 };
 
 /**
