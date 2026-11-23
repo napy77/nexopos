@@ -8,6 +8,6 @@ import { contextBridge, ipcRenderer } from "electron";
  */
 contextBridge.exposeInMainWorld("nexoDesktop", {
   impresoras: () => ipcRenderer.invoke("nexo:impresoras"),
-  imprimir: (html: string, opciones: { impresora?: string; termica?: boolean }) =>
+  imprimir: (html: string, opciones: { impresora?: string; termica?: boolean; ancho?: string }) =>
     ipcRenderer.invoke("nexo:imprimir", html, opciones),
 });

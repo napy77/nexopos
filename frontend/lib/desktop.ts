@@ -8,7 +8,7 @@
 export interface NexoDesktop {
   impresoras(): Promise<{ nombre: string; etiqueta: string }[]>;
   /** Imprime sin diálogo. `impresora` vacía = la predeterminada de Windows. */
-  imprimir(html: string, opciones: { impresora?: string; termica?: boolean }): Promise<void>;
+  imprimir(html: string, opciones: { impresora?: string; termica?: boolean; ancho?: string }): Promise<void>;
 }
 
 export function getDesktop(): NexoDesktop | null {

@@ -103,20 +103,66 @@ ipcMain.handle("nexo:impresoras", async (evento) => {
   return lista.map((p) => ({ nombre: p.name, etiqueta: p.displayName || p.name }));
 });
 
+/** Ancho del rollo en mm. Lo que no es térmico va a la hoja de la impresora. */
+const ROLLO_MM: Record<string, number> = { "80mm": 80, "58mm": 58 };
+
+/**
+ * Bloquea cualquier script del documento: el ticket es HTML armado por el
+ * backend o por lib/print.ts y no tiene por qué correr nada. La ventana sí
+ * necesita JavaScript prendido para que la app mida el alto (eso entra por
+ * executeJavaScript, que no pasa por la CSP del documento).
+ */
+function sinScripts(html: string): string {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="script-src 'none'">`;
+  // Antes del doctype pondría la página en modo quirks y cambiaría el diseño.
+  return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (h) => h + meta) : meta + html;
+}
+
 ipcMain.handle(
   "nexo:imprimir",
-  async (evento, html: unknown, opciones: { impresora?: string; termica?: boolean } = {}) => {
+  async (
+    evento,
+    html: unknown,
+    opciones: { impresora?: string; termica?: boolean; ancho?: string } = {},
+  ) => {
     if (!vieneDeLaApp(evento)) throw new Error("Origen no permitido");
     if (typeof html !== "string" || html.length > 5_000_000) throw new Error("Documento inválido");
 
-    // El ticket es HTML armado por el backend o por lib/print.ts: no necesita
-    // correr nada, y sin JavaScript tampoco puede.
+    // Un frontend viejo manda sólo `termica`: era siempre el rollo de 80.
+    const rolloMm = opciones.ancho ? ROLLO_MM[opciones.ancho] : opciones.termica ? 80 : undefined;
     const hoja = new BrowserWindow({
       show: false,
-      webPreferences: { javascript: false, sandbox: true, contextIsolation: true },
+      // Del ancho del rollo (96 px por pulgada), para que el alto medido sea
+      // el mismo que va a tener impreso.
+      width: rolloMm ? Math.ceil((rolloMm / 25.4) * 96) : 800,
+      height: 600,
+      webPreferences: { javascript: true, sandbox: true, contextIsolation: true },
     });
     try {
-      await hoja.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await hoja.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(sinScripts(html))}`);
+
+      // En el rollo se le dice a Chromium el tamaño exacto del papel. Sin eso,
+      // la impresión silenciosa de Electron no toma el @page del ticket como
+      // la vista previa de Chrome: con una OCOM OCPP-812 de 80 mm la
+      // ticketera pitaba tres veces y sacaba unos centímetros en blanco,
+      // mientras el mismo ticket desde Chrome salía bien.
+      let pageSize: Electron.WebContentsPrintOptions["pageSize"];
+      if (rolloMm) {
+        const altoPx = Number(
+          // Lo que ocupa el body, no el scrollHeight: ése nunca baja del alto
+          // de la ventana y un ticket corto saldría con papel de sobra.
+          await hoja.webContents.executeJavaScript(
+            "document.body ? Math.ceil(document.body.getBoundingClientRect().bottom) : 0",
+          ),
+        );
+        const micras = (px: number) => Math.ceil((px / 96) * 25_400);
+        pageSize = {
+          width: rolloMm * 1000,
+          // Unos milímetros de cola para que el corte no muerda la última línea.
+          height: micras(Number.isFinite(altoPx) && altoPx > 0 ? altoPx : 600) + 8_000,
+        };
+      }
+
       await new Promise<void>((resolve, reject) => {
         hoja.webContents.print(
           {
@@ -126,7 +172,8 @@ ipcMain.handle(
             deviceName: opciones.impresora || undefined,
             // En el rollo térmico los márgenes del driver se comen el ancho
             // útil; el ticket ya trae los suyos en su CSS.
-            margins: { marginType: opciones.termica ? "none" : "default" },
+            margins: { marginType: rolloMm ? "none" : "default" },
+            ...(pageSize ? { pageSize } : {}),
           },
           (ok, motivo) => (ok ? resolve() : reject(new Error(motivo || "No se pudo imprimir"))),
         );

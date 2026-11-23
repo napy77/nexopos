@@ -214,7 +214,7 @@ async function printHtml(html: string): Promise<void> {
   if (desktop) {
     const { printer, width } = loadPrintSettings();
     try {
-      return await desktop.imprimir(html, { impresora: printer, termica: width !== "auto" });
+      return await desktop.imprimir(html, { impresora: printer, termica: width !== "auto", ancho: width });
     } catch {
       // El motivo real viene en inglés y envuelto por Electron. Lo que le
       // sirve al cajero es saber dónde se arregla.
