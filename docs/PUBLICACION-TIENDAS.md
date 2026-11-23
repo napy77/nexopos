@@ -18,6 +18,7 @@ Todos en `/Users/german/ClaudeCode/nexo-pos/mobile/assets/tienda/`:
 | `play/grafico-1024x500.png` | Gráfico de funciones de Play |
 | `play/capturas/1..5-*.png` | Capturas de teléfono para Play (1080 × 1920) |
 | `apple/capturas/1..5-*.png` | Capturas para iPhone de 6,9" (1320 × 2868) |
+| `apple/capturas-ipad/1..5-*.png` | Capturas para iPad de 13" (2752 × 2064, horizontal) |
 | `fuentes/*.svg` | El ícono en vector, para rehacer cualquier tamaño |
 
 El ícono de la app (`mobile/assets/images/`) ya es el nuevo. **Entra con la
@@ -225,7 +226,10 @@ producción».
 Descripción: la misma que en Play. Palabras clave (100 máx.):
 `punto de venta,pos,caja,stock,almacén,kiosco,ticket,ventas,comercio,mayoristas,cuenta corriente`.
 
-**Capturas:** `apple/capturas/` (6,9"). Apple las escala para los iPhone más
-chicos. `supportsTablet` está en `true`, así que **también pide capturas de
-iPad de 13"** (2064 × 2752). Faltan: salen del simulador de iPad con la misma
-receta.
+**Capturas:** `apple/capturas/` (6,9") y `apple/capturas-ipad/` (13"). Apple
+las escala para los iPhone y iPad más chicos. Las de iPad son horizontales
+porque así se usa un POS en el mostrador, y en esa orientación la app muestra
+productos y ticket lado a lado. Apple acepta 2752 × 2064 para 13".
+
+App Store Connect: ASC App ID `6838172105`. El build 1.0.0 (2) se subió el
+23/11 con `eas submit`.
