@@ -10,6 +10,11 @@ esta carpeta.
 - Ventana propia, ícono en el escritorio, una sola instancia por PC.
 - **Impresión directa**: los tickets salen sin diálogo a la impresora elegida
   en Configuración → Impresión de tickets (el selector sólo aparece en la app).
+  En el rollo térmico (80 o 58 mm) el ticket se pasa a PDF del tamaño justo y
+  lo imprime SumatraPDF, que viene en `pdf-to-printer` (licencia GPLv3; va
+  como programa aparte, en `app.asar.unpacked`). No se usa
+  `webContents.print`: en Windows sale en blanco en las ticketeras
+  (electron/electron#41741). La hoja común sigue con `webContents.print`.
 - Pantalla propia cuando no hay internet al abrir; reintenta sola.
 - Los enlaces que no son NexoPOS (WhatsApp, NexoB2B) abren en el navegador.
 
@@ -34,15 +39,13 @@ npm run dist                                # release/NexoPOS Setup x.y.z.exe
 
 ## Pendiente
 
-- **Probar el instalador en una PC con Windows y una ticketera real.** Hasta
-  ahora se probó la app en Mac: puente, lista de impresoras, pantalla sin
-  conexión. La impresión silenciosa en papel térmico no se vio salir.
+- **Ver salir un ticket con la 1.0.3.** Instalada en Windows con una OCOM
+  OCPP-812 de 80 mm (22/11): la 1.0.0 y la 1.0.2 (con `webContents.print`)
+  sacaban un papelito en blanco. La 1.0.3 imprime por PDF; el PDF se probó
+  en Mac, la impresión por SumatraPDF todavía no se vio en Windows.
 - **Firma de código**: sin certificado, SmartScreen avisa al instalar.
-- **Publicar** (`bash /Users/german/ClaudeCode/nexo-pos/desktop/publicar.sh usuario@servidor`, ver
-  `docs/DEPLOYMENT.md`): todavía no se hizo. Hasta entonces el sitio no muestra
-  la sección de descarga y la app no tiene de dónde actualizarse (si no
-  encuentra `latest.yml`, abre igual). Antes hay que agregar el bloque
-  `/descargas/` a la config de nginx del servidor, que se aplica a mano.
+- **Publicar**: `bash /Users/german/ClaudeCode/nexo-pos/desktop/publicar.sh german@nexopos.app`
+  (ver `docs/DEPLOYMENT.md`). Antes, subir la versión en `desktop/package.json`.
 - **Vender sin conexión**: si se corta con la caja abierta, el frontend avisa,
   apaga el menú y el cobro, y los recupera solo (`frontend/lib/conexion.ts`;
   sirve igual en el navegador). **Dentro de la app** se puede cobrar en

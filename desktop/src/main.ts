@@ -1,6 +1,10 @@
 import { app, BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import { autoUpdater } from "electron-updater";
+import { randomUUID } from "node:crypto";
+import { rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { print as imprimirPdf } from "pdf-to-printer";
 
 /**
  * NexoPOS de escritorio: una ventana que muestra nexopos.app.
@@ -122,6 +126,47 @@ function sinScripts(html: string): string {
   return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (h) => h + meta) : meta + html;
 }
 
+/**
+ * El rollo térmico no se imprime con webContents.print: en Windows, la
+ * impresión silenciosa de Electron a una ticketera sale en blanco (una OCOM
+ * OCPP-812 pitaba tres veces y sacaba un papelito, con o sin tamaño de
+ * página; es electron/electron#41741, abierto desde la 29). Con diálogo o
+ * desde Chrome sale bien, porque pasa por la vista previa, que arma un PDF.
+ *
+ * Acá se hace lo mismo a mano: el ticket se pasa a PDF del ancho del rollo y
+ * del alto del contenido, y lo manda a la impresora SumatraPDF (viene en
+ * pdf-to-printer), que imprime por el driver como cualquier programa.
+ */
+async function imprimirEnRollo(hoja: BrowserWindow, rolloMm: number, impresora?: string): Promise<void> {
+  // Lo que ocupa el body, no el scrollHeight: ése nunca baja del alto de la
+  // ventana y un ticket corto saldría con papel de sobra.
+  const altoPx = Number(
+    await hoja.webContents.executeJavaScript(
+      "document.body ? Math.ceil(document.body.getBoundingClientRect().bottom) : 0",
+    ),
+  );
+  const pulgadas = (px: number) => px / 96;
+  const pdf = await hoja.webContents.printToPDF({
+    printBackground: true,
+    margins: { top: 0, bottom: 0, left: 0, right: 0 },
+    pageSize: {
+      width: rolloMm / 25.4,
+      // Unos milímetros de cola para que el corte no muerda la última línea.
+      height: pulgadas(Number.isFinite(altoPx) && altoPx > 0 ? altoPx : 600) + 8 / 25.4,
+    },
+  });
+
+  const archivo = path.join(os.tmpdir(), `nexopos-ticket-${randomUUID()}.pdf`);
+  await writeFile(archivo, pdf);
+  try {
+    // noscale: el PDF ya mide lo que el rollo; achicarlo a la hoja del driver
+    // lo dejaría ilegible.
+    await imprimirPdf(archivo, { printer: impresora || undefined, scale: "noscale", silent: true });
+  } finally {
+    await rm(archivo, { force: true });
+  }
+}
+
 ipcMain.handle(
   "nexo:imprimir",
   async (
@@ -145,26 +190,9 @@ ipcMain.handle(
     try {
       await hoja.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(sinScripts(html))}`);
 
-      // En el rollo se le dice a Chromium el tamaño exacto del papel. Sin eso,
-      // la impresión silenciosa de Electron no toma el @page del ticket como
-      // la vista previa de Chrome: con una OCOM OCPP-812 de 80 mm la
-      // ticketera pitaba tres veces y sacaba unos centímetros en blanco,
-      // mientras el mismo ticket desde Chrome salía bien.
-      let pageSize: Electron.WebContentsPrintOptions["pageSize"];
       if (rolloMm) {
-        const altoPx = Number(
-          // Lo que ocupa el body, no el scrollHeight: ése nunca baja del alto
-          // de la ventana y un ticket corto saldría con papel de sobra.
-          await hoja.webContents.executeJavaScript(
-            "document.body ? Math.ceil(document.body.getBoundingClientRect().bottom) : 0",
-          ),
-        );
-        const micras = (px: number) => Math.ceil((px / 96) * 25_400);
-        pageSize = {
-          width: rolloMm * 1000,
-          // Unos milímetros de cola para que el corte no muerda la última línea.
-          height: micras(Number.isFinite(altoPx) && altoPx > 0 ? altoPx : 600) + 8_000,
-        };
+        await imprimirEnRollo(hoja, rolloMm, opciones.impresora);
+        return;
       }
 
       await new Promise<void>((resolve, reject) => {
@@ -174,10 +202,7 @@ ipcMain.handle(
             printBackground: true,
             // Vacío = la predeterminada de Windows.
             deviceName: opciones.impresora || undefined,
-            // En el rollo térmico los márgenes del driver se comen el ancho
-            // útil; el ticket ya trae los suyos en su CSS.
-            margins: { marginType: rolloMm ? "none" : "default" },
-            ...(pageSize ? { pageSize } : {}),
+            margins: { marginType: "default" },
           },
           (ok, motivo) => (ok ? resolve() : reject(new Error(motivo || "No se pudo imprimir"))),
         );
